@@ -1,0 +1,133 @@
+# Production stack for a small VPS (Hostinger KVM 1/2 class).
+#   cp backend/.env.example backend/.env   # then fill in real values
+#   DOMAIN=ops.example.com docker compose -f docker-compose.prod.yml up -d --build
+# Without a domain yet:
+#   docker compose -f docker-compose.prod.yml up -d --build   (serves on port 80)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: konaice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-konaice}
+      POSTGRES_DB: konaice
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U konaice"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://konaice:${POSTGRES_PASSWORD:-konaice}@db:5432/konaice
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      PIPELINE_RUN_INLINE: "false"
+      ENVIRONMENT: production
+      KONAOS_CACHE_DIR: /app/cache
+    volumes:
+      # session + brand caches shared with the worker, survive deploys
+      - konaos_cache:/app/cache
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app.celery worker --loglevel=info --concurrency=2
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://konaice:${POSTGRES_PASSWORD:-konaice}@db:5432/konaice
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      ENVIRONMENT: production
+      KONAOS_CACHE_DIR: /app/cache
+    volumes:
+      - konaos_cache:/app/cache
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+
+  beat:
+    build: ./backend
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app.celery beat --loglevel=info
+    env_file: ./backend/.env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  konaos_cache:

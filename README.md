@@ -112,4 +112,3 @@ DOMAIN=ops.example.com docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Full step-by-step guide: [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
-"# AI_kona_Travel_CRM_System" 

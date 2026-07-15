@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+*.db
+
+# Env / secrets
+.env
+backend/.env
+!*.env.example
+.konaos_session_cache.json
+.brand_ids_cache.json
+
+# Node
+node_modules/
+frontend/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log

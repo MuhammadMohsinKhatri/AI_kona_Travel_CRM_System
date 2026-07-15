@@ -1,0 +1,67 @@
+"""Provider factory — returns mock or live clients based on settings.
+
+Cached so a single process reuses one instance per integration (important for
+the mocks, which hold in-memory state).
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from app.config import settings
+from app.integrations.base import (
+    Classifier,
+    CRMClient,
+    Notifier,
+    SheetsClient,
+    SquareClient,
+)
+
+
+@lru_cache
+def get_crm() -> CRMClient:
+    if settings.crm_provider == "konaos":
+        # Direct in-process KonaOS client (merged Konaos_crms_apis code).
+        from app.integrations.konaos_direct import KonaOSDirectCRMClient
+        return KonaOSDirectCRMClient()
+    if settings.crm_provider == "live":
+        # HTTP client against a separately-deployed proxy (legacy Railway setup).
+        from app.integrations.live import KonaCRMClient
+        return KonaCRMClient()
+    from app.integrations.mocks import MockCRMClient
+    return MockCRMClient()
+
+
+@lru_cache
+def get_square() -> SquareClient:
+    if settings.square_provider == "live":
+        from app.integrations.live import SquareLiveClient
+        return SquareLiveClient()
+    from app.integrations.mocks import MockSquareClient
+    return MockSquareClient()
+
+
+@lru_cache
+def get_classifier() -> Classifier:
+    if settings.openai_provider == "live":
+        from app.integrations.live import OpenAIClassifier
+        return OpenAIClassifier()
+    from app.integrations.mocks import MockClassifier
+    return MockClassifier()
+
+
+@lru_cache
+def get_sheets() -> SheetsClient:
+    if settings.sheets_provider == "live":
+        from app.integrations.live import GoogleSheetsClient
+        return GoogleSheetsClient()
+    from app.integrations.mocks import MockSheetsClient
+    return MockSheetsClient()
+
+
+@lru_cache
+def get_notifier() -> Notifier:
+    if settings.telegram_provider == "live":
+        from app.integrations.live import TelegramNotifier
+        return TelegramNotifier()
+    from app.integrations.mocks import MockNotifier
+    return MockNotifier()
