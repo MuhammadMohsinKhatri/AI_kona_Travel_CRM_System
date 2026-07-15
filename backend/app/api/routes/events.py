@@ -15,6 +15,59 @@ from app.schemas.event import EventDetail, EventSummary
 router = APIRouter(prefix="/api/events", tags=["events"])
 
 
+@router.post("/{event_id}/waive-cc-fee", response_model=EventDetail)
+def waive_cc_fee(
+    event_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> Event:
+    """Recalculate this event's invoice WITHOUT the 4% processing fee.
+
+    Use when the client pays by check after the draft was created: they deduct
+    the fee themselves, so the invoice must be re-issued without it. Updates
+    the stored calculations + local draft, and (when not in dry-run) replaces
+    the draft in the CRM and updates the event.
+    """
+    from app.config import settings
+    from app.core import billing, invoice_builder
+    from app.core.pipeline import _replace_draft, _store_local_invoice
+    from app.integrations import factory
+
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if not event.classification:
+        raise HTTPException(
+            status_code=400, detail="Event has no classification — run the pipeline first"
+        )
+
+    classification = dict(event.classification)
+    # A waived fee means the client settled by check.
+    classification["PAYMENT_METHOD"] = "CHECK"
+    calc = billing.calculate_invoice(classification, waive_cc_fee=True)
+    merged = {**classification, "calculations": calc}
+
+    payload = invoice_builder.build_invoice_payload(merged, event.cleaned, event.raw)
+
+    event.classification = classification
+    event.calculations = calc
+    event.final_invoice_amount = float(calc.get("FINAL_INVOICE_AMOUNT", 0) or 0)
+
+    if payload:
+        if settings.pipeline_dry_run:
+            _store_local_invoice(db, event, payload, status="dry_run")
+        else:
+            crm = factory.get_crm()
+            _replace_draft(db, crm, event, payload, event.cleaned)
+            crm.update_event(event.crm_event_id, {
+                "EVENT_ID": event.crm_event_id,
+                "invoiceAmount": calc.get("FINAL_INVOICE_AMOUNT"),
+                "invoiceStatus": "draft",
+            })
+
+    db.commit()
+    db.refresh(event)
+    return event
+
+
 @router.get("", response_model=Page[EventSummary])
 def list_events(
     db: Session = Depends(get_db),

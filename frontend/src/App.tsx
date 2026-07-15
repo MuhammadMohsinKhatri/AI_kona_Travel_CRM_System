@@ -9,6 +9,7 @@ import EventDetail from "./pages/EventDetail";
 import Events from "./pages/Events";
 import Invoices from "./pages/Invoices";
 import Login from "./pages/Login";
+import NewEvent from "./pages/NewEvent";
 import Runs from "./pages/Runs";
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -31,6 +32,7 @@ export default function App() {
       >
         <Route path="/" element={<Dashboard />} />
         <Route path="/events" element={<Events />} />
+        <Route path="/events/new" element={<NewEvent />} />
         <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/invoices" element={<Invoices />} />
         <Route path="/alerts" element={<Alerts />} />

@@ -127,14 +127,16 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     note(f"[{crm_id}] filtered out — date {cleaned.get('DATE')} != {run.target_date}")
                     continue
 
-                # Gate: only confirmed/completed events proceed.
-                if not event_cleaner.is_confirmed_or_completed(cleaned):
+                # Gate: booked/confirmed/completed, or pending with asset+staff.
+                ok, reason = event_cleaner.is_processable(cleaned)
+                if not ok:
                     run.events_skipped += 1
                     skipped += 1
-                    note(f"[{crm_id}] skipped — status {cleaned.get('FINAL_EVENT_STATUS')}")
+                    note(f"[{crm_id}] skipped — {reason}")
                     _upsert_event(db, run, raw, cleaned, status="skipped")
                     db.commit()
                     continue
+                note(f"[{crm_id}] accepted — {reason}")
 
                 items.append({"crm_id": crm_id, "raw": raw, "cleaned": cleaned})
             except Exception as exc:  # noqa: BLE001

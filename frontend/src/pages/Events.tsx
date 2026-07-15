@@ -22,8 +22,13 @@ export default function Events() {
 
   return (
     <>
-      <h1 className="page-title">Events</h1>
-      <p className="page-sub">Every event pulled from the CRM and processed by the pipeline.</p>
+      <div className="topbar">
+        <div>
+          <h1 className="page-title">Events</h1>
+          <p className="page-sub">Every event pulled from the CRM and processed by the pipeline.</p>
+        </div>
+        <button className="btn primary" onClick={() => navigate("/events/new")}>＋ New event</button>
+      </div>
 
       <div className="toolbar">
         <input

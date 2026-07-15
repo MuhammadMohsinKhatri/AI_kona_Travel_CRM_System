@@ -54,7 +54,22 @@ export default function EventDetail() {
         </div>
 
         <div className="card">
-          <div className="section-title" style={{ marginTop: 0 }}>Invoice calculation</div>
+          <div className="flex between">
+            <div className="section-title" style={{ marginTop: 0 }}>Invoice calculation</div>
+            {Number(calc.CC_FEE) > 0 && (
+              <button
+                className="btn"
+                title="Client paid by check — recalculate the invoice without the 4% processing fee"
+                onClick={async () => {
+                  if (!id) return;
+                  setEv(await api.waiveCcFee(Number(id)));
+                }}
+              >
+                Paid by check — remove CC fee
+              </button>
+            )}
+            {calc.CC_FEE_WAIVED ? <span className="badge green">CC fee waived</span> : null}
+          </div>
           <div className="kv">
             <div className="k">Subtotal</div><div className="v">{money(Number(calc.SUBTOTAL) || 0)}</div>
             <div className="k">Sales tax</div><div className="v">{money(Number(calc.SALES_TAX) || 0)}</div>

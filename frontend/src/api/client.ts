@@ -72,12 +72,19 @@ export const api = {
   events: (params: Record<string, string> = {}) =>
     request<Page<EventSummary>>("/api/events?" + new URLSearchParams(params)),
   event: (id: number) => request<EventDetail>(`/api/events/${id}`),
+  waiveCcFee: (id: number) =>
+    request<EventDetail>(`/api/events/${id}/waive-cc-fee`, { method: "POST" }),
   invoices: (params: Record<string, string> = {}) =>
     request<Page<Invoice>>("/api/invoices?" + new URLSearchParams(params)),
   alerts: (params: Record<string, string> = {}) =>
     request<Page<Alert>>("/api/alerts?" + new URLSearchParams(params)),
   resolveAlert: (id: number) =>
     request<Alert>(`/api/alerts/${id}/resolve`, { method: "POST" }),
+  konaosCreateEvent: (body: Record<string, unknown>) =>
+    request<{ success?: boolean; message?: string; [k: string]: unknown }>(
+      "/api/konaos/events",
+      { method: "POST", body: JSON.stringify(body) }
+    ),
   konaosSessionStatus: () =>
     request<KonaosSessionStatus>("/api/konaos/session/status"),
   konaosSessionUpdate: (sessionKey: string) =>

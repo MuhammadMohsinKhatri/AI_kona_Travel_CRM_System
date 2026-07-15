@@ -46,8 +46,12 @@ def _r2(v: float) -> float:
     return round(v + 0.0, 2)
 
 
-def calculate_invoice(event: dict[str, Any]) -> dict[str, Any]:
-    """Return the calculations block for one classified event."""
+def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict[str, Any]:
+    """Return the calculations block for one classified event.
+
+    ``waive_cc_fee`` forces the 4% processing fee to 0 — used when a check
+    payment is confirmed after drafting (client deducts the fee themselves).
+    """
 
     # ── INPUTS ────────────────────────────────────────────────────────────────
     units_total = _num(event.get("UNITS_SERVED_TOTAL"))
@@ -158,9 +162,16 @@ def calculate_invoice(event: dict[str, Any]) -> dict[str, Any]:
         subtotal = base_amount + location_fee
 
     # ── TAX + PROCESSING FEE ────────────────────────────────────────────────────
+    # The 4% fee applies by default (payment method is rarely known upfront;
+    # check-payers deduct it themselves). It is skipped only when the notes
+    # already CONFIRM a check payment, or when explicitly waived after a
+    # check arrives (waive_cc_fee).
     tax_rate = TAX_RATE if taxable else 0.0
+    confirmed_check_payment = payment_method == "CHECK" and is_paid
+    cc_fee_applies = not (waive_cc_fee or confirmed_check_payment)
+    cc_fee_rate = CC_FEE_RATE if cc_fee_applies else 0.0
     sales_tax = _r2(subtotal * tax_rate)
-    cc_fee = _r2(subtotal * CC_FEE_RATE)
+    cc_fee = _r2(subtotal * cc_fee_rate)
     calculated_invoice_amount = _r2(subtotal + sales_tax + cc_fee)
 
     # ── FINAL INVOICE AMOUNT ────────────────────────────────────────────────────
@@ -223,8 +234,9 @@ def calculate_invoice(event: dict[str, Any]) -> dict[str, Any]:
         # ── TAX & FEES ──
         "TAX_RATE": tax_rate,
         "SALES_TAX": sales_tax,
-        "CC_FEE_RATE": CC_FEE_RATE,
+        "CC_FEE_RATE": cc_fee_rate,
         "CC_FEE": cc_fee,
+        "CC_FEE_WAIVED": not cc_fee_applies,
         "TOTAL_TAX": _r2(sales_tax + cc_fee),
         # ── BALANCE ──
         "BALANCE_DUE": balance_due,

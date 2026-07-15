@@ -123,7 +123,33 @@ def clean_event(raw: dict[str, Any], brand_name: str = "") -> dict[str, Any]:
     }
 
 
-def is_confirmed_or_completed(cleaned: dict[str, Any]) -> bool:
-    """The n8n 'check if event is confirmed or completed' gate."""
+def is_processable(cleaned: dict[str, Any]) -> tuple[bool, str]:
+    """Event status gate. Returns (process?, reason).
+
+    Processed:
+      * booked / confirmed / completed events, always
+      * PENDING events that have BOTH equipment and staff assigned — the
+        client deliberately leaves worked events as Pending to suppress
+        KOS booking/confirmation emails, so asset+staff assignment is the
+        real "this event happened" signal.
+    """
     status = str(cleaned.get("FINAL_EVENT_STATUS") or "").strip().lower()
-    return status in ("confirmed", "completed")
+    if status in ("booked", "confirmed", "completed"):
+        return True, status
+    if status == "pending":
+        has_staff = int(cleaned.get("STAFF_COUNT") or 0) > 0
+        has_equipment = bool(str(cleaned.get("EQUIPMENT") or "").strip())
+        if has_staff and has_equipment:
+            return True, "pending with asset+staff assigned"
+        missing = []
+        if not has_equipment:
+            missing.append("no equipment")
+        if not has_staff:
+            missing.append("no staff")
+        return False, f"pending ({', '.join(missing)})"
+    return False, status or "unknown"
+
+
+def is_confirmed_or_completed(cleaned: dict[str, Any]) -> bool:
+    """Backward-compatible wrapper around :func:`is_processable`."""
+    return is_processable(cleaned)[0]
