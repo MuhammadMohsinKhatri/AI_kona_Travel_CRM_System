@@ -1,9 +1,9 @@
 # Caddy reverse proxy with automatic HTTPS.
 #
-# Set DOMAIN in deploy/.env.caddy (or the shell) before `docker compose up`:
+# DOMAIN is provided by docker-compose (defaults to ":80" when unset):
 #   DOMAIN=ops.example.com   -> serves https://ops.example.com with auto TLS
-#   DOMAIN=:80               -> plain HTTP on the VPS IP (no domain yet)
-{$DOMAIN::80} {
+#   DOMAIN=:80 (default)     -> plain HTTP on the VPS IP (no domain yet)
+{$DOMAIN} {
     encode gzip
 
     # Everything goes to the frontend nginx, which serves the SPA and
