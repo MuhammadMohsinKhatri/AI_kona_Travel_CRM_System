@@ -214,3 +214,16 @@ code.inline {
 .form-grid { display: flex; flex-direction: column; gap: 12px; }
 .form-grid label { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; }
 .form-grid .select, .form-grid textarea { width: 100%; }
+.lbl-sm { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; }
+.chk { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.chk input { width: 16px; height: 16px; accent-color: var(--brand); }
+.cond { margin-top: 10px; padding: 12px; border-left: 3px solid var(--brand); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.cond.warn { border-left-color: var(--warn); }
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg-btn { flex: 1; min-width: 72px; padding: 8px 6px; border: 1.5px solid var(--border); background: var(--surface); border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all .12s; }
+.seg-btn:hover { border-color: var(--brand); }
+.seg-btn.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.status ul { margin: 6px 0 0; padding-left: 18px; font-weight: 500; font-size: 12px; }
+.status { border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; font-size: 13px; border: 1px solid; }
+.status.ok { background: rgba(22,163,74,.10); color: var(--ok); border-color: rgba(22,163,74,.3); }
+.status.bad { background: rgba(220,38,38,.08); color: var(--crit); border-color: rgba(220,38,38,.25); }

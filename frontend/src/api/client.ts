@@ -83,13 +83,12 @@ export const api = {
   financialMonths: () => request<string[]>("/api/financials/months"),
   financials: (params: Record<string, string> = {}) =>
     request<FinancialsResponse>("/api/financials?" + new URLSearchParams(params)),
-  konaosIndustries: () =>
-    request<{ id: string; type: string }[]>("/api/konaos/clients/industries"),
-  konaosCreateEvent: (body: Record<string, unknown>) =>
-    request<{ success?: boolean; message?: string; [k: string]: unknown }>(
-      "/api/konaos/events",
-      { method: "POST", body: JSON.stringify(body) }
-    ),
+  konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
+  konaosQuickCreate: (body: Record<string, unknown>) =>
+    request<QuickCreateResult>("/api/konaos/events/quick-create", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   konaosSessionStatus: () =>
     request<KonaosSessionStatus>("/api/konaos/session/status"),
   konaosSessionUpdate: (sessionKey: string) =>
@@ -98,6 +97,20 @@ export const api = {
       { method: "POST", body: JSON.stringify({ session_key: sessionKey }) }
     ),
 };
+
+export interface FormOptions {
+  brands: { id: string; label: string; frontendBaseUrl: string }[];
+  statuses: { value: string; label: string }[];
+  frequencies: { value: string; label: string }[];
+  industries: { id: string; type: string }[];
+  adminBaseUrl: string;
+}
+export interface QuickCreateResult {
+  success: boolean;
+  message: string;
+  eventId: string | null;
+  editUrl: string | null;
+}
 
 export interface FinancialRow {
   id: number;

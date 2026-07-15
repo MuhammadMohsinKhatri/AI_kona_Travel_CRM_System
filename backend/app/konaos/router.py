@@ -432,6 +432,148 @@ async def konaos_session_update(
     }
 
 
+# ── Event intake helpers (form options + create-and-locate) ──────────────────
+
+ADMIN_BASE_URL = "https://admin.konaos.com"
+
+# Fixed frontend enums (not exposed by any KonaOS API — sourced from the UI).
+EVENT_STATUSES = [
+    {"value": "pending", "label": "Pending (no client emails)"},
+    {"value": "booked", "label": "Booked"},
+    {"value": "confirmed", "label": "Confirmed"},
+    {"value": "cancelled", "label": "Cancelled"},
+    {"value": "transferred", "label": "Transferred"},
+    {"value": "flagged", "label": "Flagged"},
+    {"value": "skipped", "label": "Skipped"},
+    {"value": "waitlist", "label": "Waitlist"},
+]
+FREQUENCIES = [{"value": "DNR", "label": "Do Not Repeat"}]
+# Fallback industry list (the secure industries endpoint is auth-restricted).
+FALLBACK_INDUSTRIES = [
+    "Athletics", "Church", "Community", "Corporate", "Daycare",
+    "Education", "Festival", "Other", "Private",
+]
+BRAND_LABELS = {
+    "66704154faed4c5991533eb5253815d9": "Kona Ice",
+    "4553cb46d02d40e4ab2732673e141ac3": "Travelin' Tom's",
+    "ffc8d7f43fd64dbb99e97c9aa42e96aa": "Beverly Ann's",
+}
+
+
+@router.get("/form-options")
+async def konaos_form_options(api_key: str = Depends(verify_api_key)):
+    """Everything the New Event form needs to populate its dropdowns:
+    brands (live from KonaOS metadata), plus the fixed status/frequency/industry
+    enums. One call so the form loads in a single round-trip."""
+    init_konaos()
+    kc = konaos_client
+    brands = []
+    try:
+        resp = await kc._make_request("GET", "/api/v1/metadata")
+        for b in resp.json().get("brandList", []):
+            bid = b.get("brandId")
+            brands.append({
+                "id": bid,
+                "label": BRAND_LABELS.get(bid, bid),
+                "frontendBaseUrl": b.get("frontendBaseUrl", ""),
+            })
+    except Exception:
+        brands = [{"id": k, "label": v, "frontendBaseUrl": ""} for k, v in BRAND_LABELS.items()]
+
+    industries = []
+    try:
+        data = await kc.get_client_industries_types()
+        industries = [
+            {"id": i.get("id"), "type": i.get("type")}
+            for i in (data or []) if i.get("id")
+        ]
+    except Exception:
+        industries = [{"id": "", "type": t} for t in FALLBACK_INDUSTRIES]
+
+    return {
+        "brands": brands,
+        "statuses": EVENT_STATUSES,
+        "frequencies": FREQUENCIES,
+        "industries": industries,
+        "adminBaseUrl": ADMIN_BASE_URL,
+    }
+
+
+@router.post("/events/quick-create")
+async def konaos_quick_create(
+    event: CreateEventRequest, api_key: str = Depends(verify_api_key)
+):
+    """Create the event in KonaOS, then locate its id (KonaOS' create response
+    doesn't return one) so the UI can link straight to the KonaOS edit page."""
+    init_konaos()
+    kc = konaos_client
+    try:
+        resp = await kc.create_event(
+            name=event.name,
+            start_date_time=event.start_date_time,
+            end_date_time=event.end_date_time,
+            business_name=event.business_name,
+            address_line1=event.address_line1,
+            city=event.city,
+            state=event.state,
+            zip_code=event.zip_code,
+            contact_name=event.contact_name,
+            contact_email=event.contact_email,
+            brand_id=event.brand_id,
+            client_id=event.client_id,
+            contact_title=event.contact_title,
+            contact_phone=event.contact_phone,
+            contact_phone_country_code=event.contact_phone_country_code,
+            county=event.county,
+            country=event.country,
+            admin_notes=event.admin_notes,
+            notes=event.notes,
+            event_status=event.event_status,
+            manual_status=event.manual_status,
+            payment_term=event.payment_term,
+            **(event.model_extra or {}),
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code,
+                            detail=f"KonaOS API error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating event: {e}")
+
+    # Locate the freshly-created event by name within its date window.
+    event_id = None
+    try:
+        day = event.start_date_time - (event.start_date_time % 86_400_000)
+        data = await kc.get_events_monthly(
+            limit=50, offset=0, searchText=event.name,
+            fromDate=day, toDate=day + 86_400_000,
+            applyActivatedStatus=False, activeEvent="", activated=False,
+            deleted=False, assetIds=[], statusList=[], userIds=[],
+            brandIds=[event.brand_id] if event.brand_id else (kc.brand_ids or []),
+            unAssignedAssetEvents=False, prePayEvent=None, kurbsideEvent=None,
+            sortColumn=None, sortType=None,
+        )
+        for row in (data or {}).get("data", []):
+            if str(row.get("name", "")).strip().lower() == event.name.strip().lower():
+                event_id = row.get("id")
+                break
+        if not event_id and (data or {}).get("data"):
+            event_id = data["data"][0].get("id")
+    except Exception:
+        pass  # creation succeeded; link lookup is best-effort
+
+    edit_url = (
+        f"{ADMIN_BASE_URL}/#/franchise/events/edit-event?id={event_id}&eventType=list"
+        if event_id else None
+    )
+    return {
+        "success": True,
+        "message": "Event created in Kona OS.",
+        "eventId": event_id,
+        "editUrl": edit_url,
+        "raw": resp,
+    }
+
+
 @router.get("/zipcode-site", response_model=ZipcodeWebsiteResponse)
 async def get_zipcode_site(
     zipcode: str = Query(..., description="US zipcode to look up on Kona Ice 'Find A Kona' page or Travelin' Tom's page"),

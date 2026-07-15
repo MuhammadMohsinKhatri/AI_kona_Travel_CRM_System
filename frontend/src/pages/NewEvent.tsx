@@ -1,219 +1,201 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, FormOptions, QuickCreateResult } from "../api/client";
 
-/** Structured event intake — creates the event directly in Kona OS.
+/** Structured event intake → creates the event directly in Kona OS.
  *
- * One entry point, no double work: the admin fills defined fields here and the
- * form writes the event to KOS via POST /api/konaos/events, assembling admin
- * notes in the exact phrasing the AI classifier parses deterministically.
- * The live preview shows precisely what will be written. */
+ * One entry point, no double work. Segmented controls + conditional fields keep
+ * typing minimal; the right rail shows the exact classifier notes and a live
+ * invoice estimate. On submit the event is created in KOS and we link straight
+ * to its KOS edit page. */
 
-const BRANDS = [
-  { id: "66704154faed4c5991533eb5253815d9", label: "Kona Ice" },
-  { id: "4553cb46d02d40e4ab2732673e141ac3", label: "Travelin' Tom's" },
-];
-
-const BILLING_OPTIONS = [
-  { key: "INVOICE_PER_SERVING", label: "Invoice — per serving", type: "invoice" },
-  { key: "INVOICE_BASE_FEE_PLUS_SERVINGS", label: "Invoice — base fee + servings", type: "invoice" },
-  { key: "INVOICE_FIXED_PACKAGE", label: "Invoice — fixed package (floor + overage)", type: "invoice" },
-  { key: "INVOICE_HOURLY", label: "Invoice — hourly", type: "invoice" },
-  { key: "SELLING_OPEN", label: "Selling — open (guests pay)", type: "selling" },
-  { key: "SELLING_WITH_GIVEBACK", label: "Selling — with giveback %", type: "selling" },
-  { key: "MIN_GUARANTEE_FLAT", label: "Minimum guarantee — flat", type: "minimum guarantee" },
-  { key: "MIN_GUARANTEE_HOURLY", label: "Minimum guarantee — per hour", type: "minimum guarantee" },
-  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Hybrid — host base + guest extras", type: "hybrid" },
-];
-
-interface FormState {
-  brandId: string;
-  name: string;
-  businessName: string;
-  contactTitle: string;
-  county: string;
-  industryId: string;
-  status: "pending" | "booked" | "confirmed";
-  prepay: boolean;
-  kurbside: boolean;
-  eventNotes: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  addressLine1: string;
-  city: string;
-  state: string;
-  zipCode: string;
-  contactName: string;
-  contactEmail: string;
-  contactPhone: string;
-  billing: string;
-  ratePerServing: string;
-  baseAmount: string;
-  unitsIncluded: string;
-  hourlyRate: string;
-  minimumAmount: string;
-  givebackPct: string;
-  guestRate: string;
-  locationFee: string;
-  depositAmount: string;
-  taxable: "yes" | "exempt";
-  payment: "unknown" | "check" | "cash" | "credit_card";
-  extraNotes: string;
+type EventType = "Invoice" | "Selling" | "Min Guarantee" | "Hybrid";
+type PayMethod = "Check" | "Credit Card" | "Cash";
+const TYPE_TO_LOWER: Record<EventType, string> = {
+  Invoice: "invoice", Selling: "selling",
+  "Min Guarantee": "minimum guarantee", Hybrid: "hybrid",
+};
+interface F {
+  brandId: string; name: string; businessName: string; industryId: string;
+  status: string; date: string; startTime: string; endTime: string;
+  prepay: boolean; kurbside: boolean;
+  address: string; city: string; state: string; zip: string; county: string;
+  contactName: string; contactTitle: string; contactEmail: string; contactPhone: string;
+  taxExempt: "" | "NO" | "YES"; giveback: string; deposit: string; discount: string;
+  eventType: "" | EventType; mgPerHour: string; attendees: string; parking: string;
+  serveKeep: string; paymentModel: string; additional: string; cardOnly: boolean;
+  paid: boolean; method: "" | PayMethod; cashAmount: string;
+  actualCount: string; actualTimes: string; squareDevice: string;
 }
 
-const initial: FormState = {
-  brandId: BRANDS[0].id, name: "", businessName: "", contactTitle: "", county: "",
-  industryId: "", status: "pending", prepay: false, kurbside: false, eventNotes: "",
-  date: "", startTime: "10:00", endTime: "12:00",
-  addressLine1: "", city: "", state: "Maryland", zipCode: "",
-  contactName: "", contactEmail: "", contactPhone: "",
-  billing: "INVOICE_PER_SERVING",
-  ratePerServing: "", baseAmount: "", unitsIncluded: "", hourlyRate: "",
-  minimumAmount: "", givebackPct: "", guestRate: "",
-  locationFee: "", depositAmount: "",
-  taxable: "yes", payment: "unknown", extraNotes: "",
+const initial: F = {
+  brandId: "", name: "", businessName: "", industryId: "", status: "pending",
+  date: "", startTime: "10:00", endTime: "12:00", prepay: false, kurbside: false,
+  address: "", city: "", state: "Maryland", zip: "", county: "",
+  contactName: "", contactTitle: "", contactEmail: "", contactPhone: "",
+  taxExempt: "", giveback: "", deposit: "", discount: "",
+  eventType: "", mgPerHour: "", attendees: "", parking: "",
+  serveKeep: "", paymentModel: "", additional: "", cardOnly: false,
+  paid: false, method: "", cashAmount: "",
+  actualCount: "", actualTimes: "", squareDevice: "",
 };
 
-/** Assemble admin notes in the exact phrasings the classifier prompt keys on. */
-function buildAdminNotes(f: FormState): string {
-  const opt = BILLING_OPTIONS.find((b) => b.key === f.billing)!;
+const needServe = (t: string) => t === "Invoice" || t === "Hybrid";
+
+/** Plain-text notes phrased for the AI classifier. */
+function buildNotes(f: F): string {
   const lines: string[] = [];
-
-  switch (f.billing) {
-    case "INVOICE_PER_SERVING":
-      if (f.ratePerServing) lines.push(`Charge $${f.ratePerServing} per serving. Send invoice.`);
-      break;
-    case "INVOICE_BASE_FEE_PLUS_SERVINGS":
-      lines.push(`Setup fee $${f.baseAmount || "0"} plus $${f.ratePerServing || "0"} per serving. Send invoice.`);
-      break;
-    case "INVOICE_FIXED_PACKAGE":
-      lines.push(
-        `If they purchase ${f.unitsIncluded || "0"} servings or more, charge $${f.ratePerServing || "0"} per serving. ` +
-        `If they did not meet ${f.unitsIncluded || "0"} servings, still charge them $${f.baseAmount || "0"} minimum. Send invoice.`
-      );
-      break;
-    case "INVOICE_HOURLY":
-      lines.push(`Charge $${f.hourlyRate || "0"} per hour. Send invoice.`);
-      break;
-    case "SELLING_OPEN":
-      lines.push("Open selling event. Guests pay individually.");
-      break;
-    case "SELLING_WITH_GIVEBACK":
-      lines.push(`Selling event. Giveback percentage: ${f.givebackPct || "0"}%.`);
-      break;
-    case "MIN_GUARANTEE_FLAT":
-      lines.push(`Minimum guarantee $${f.minimumAmount || "0"} flat. Host covers shortfall.`);
-      break;
-    case "MIN_GUARANTEE_HOURLY":
-      lines.push(`Minimum guarantee $${f.minimumAmount || "0"} per hour. Host covers shortfall.`);
-      break;
-    case "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA":
-      lines.push(
-        `Host pays $${f.baseAmount || "0"} base covering ${f.unitsIncluded || "0"} servings. ` +
-        `Additional servings $${f.ratePerServing || "0"} billed to host.` +
-        (f.guestRate ? ` Guests pay $${f.guestRate} per serving for extras.` : "")
-      );
-      break;
+  lines.push(`EVENT TYPE: ${f.eventType ? TYPE_TO_LOWER[f.eventType as EventType] : "—"}.`);
+  if (f.eventType === "Min Guarantee" && f.mgPerHour)
+    lines.push(`Minimum guarantee $${f.mgPerHour} per hour. Host covers shortfall.`);
+  if (f.paymentModel) lines.push(f.paymentModel.trim());
+  if (needServe(f.eventType) && f.serveKeep) lines.push(f.serveKeep.trim());
+  if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
+  if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
+  if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
+  lines.push(f.taxExempt === "YES" ? "Client is tax exempt." : "Plus tax.");
+  if (f.attendees) lines.push(`About ${f.attendees} attendees.`);
+  if (f.additional) lines.push(f.additional.trim());
+  if (f.cardOnly) lines.push("Card only, no on-site cash.");
+  // Driver actuals
+  if (needServe(f.eventType) && f.actualCount) lines.push(`Served ${f.actualCount} total.`);
+  if (f.paid) {
+    lines.push("Payment received.");
+    if (f.method) lines.push(`Paid by ${f.method.toLowerCase()}.`);
+    if (f.method === "Cash" && f.cashAmount) lines.push(`Collected $${f.cashAmount} cash.`);
   }
-
-  if (f.locationFee) lines.push(`$${f.locationFee} location fee.`);
-  if (f.depositAmount) lines.push(`Deposit $${f.depositAmount} required.`);
-  lines.push(f.taxable === "exempt" ? "Client is tax exempt." : "Plus tax.");
-  if (f.payment === "check") lines.push("Client will pay by check.");
-  if (f.payment === "cash") lines.push("Client paying in cash.");
-  if (f.payment === "credit_card") lines.push("Client paying by credit card.");
-  if (f.extraNotes.trim()) lines.push(f.extraNotes.trim());
-
-  return `EVENT TYPE: ${opt.type}. ` + lines.join(" ");
+  if (f.actualTimes) lines.push(f.actualTimes.trim());
+  if (f.squareDevice) lines.push(`Used ${f.squareDevice}.`);
+  if (f.parking) lines.push(`Parking: ${f.parking.trim()}`);
+  return lines.join(" ");
 }
 
-function toMs(date: string, time: string): number {
-  return new Date(`${date}T${time}:00`).getTime();
+function estimate(f: F) {
+  const pay = `${f.paymentModel} ${f.serveKeep}`;
+  const base = pay.match(/\$\s?([\d,]+(?:\.\d+)?)/)?.[1];
+  const incl = (pay.match(/(\d+)\s*(?:12oz|9oz|servings?|konas?)/i) || pay.match(/covers?\s*(?:up to\s*)?(\d+)/i))?.[1];
+  const extra = (pay.match(/(?:additional|extra|each)[^$]*\$\s?(\d+(?:\.\d+)?)/i) || pay.match(/\$\s?(\d+(?:\.\d+)?)\s*(?:each|\/)/i))?.[1];
+  if (!base || !f.eventType) return null;
+  const baseN = parseFloat(base.replace(/,/g, ""));
+  const inclN = incl ? parseInt(incl) : 0;
+  const extraN = extra ? parseFloat(extra) : 0;
+  const count = Number(f.actualCount) || 0;
+  const over = Math.max(0, count - inclN);
+  const overAmt = over * extraN;
+  const disc = Number(f.discount) || 0;
+  const subtotal = Math.max(0, baseN + overAmt - disc);
+  const tax = f.taxExempt === "YES" ? 0 : +(subtotal * 0.06).toFixed(2);
+  // 4% fee by default; skipped only when a check payment is confirmed
+  const noFee = f.paid && f.method === "Check";
+  const cc = noFee ? 0 : +(subtotal * 0.04).toFixed(2);
+  return { baseN, over, extraN, overAmt, disc, subtotal, tax, cc, total: +(subtotal + tax + cc).toFixed(2), noFee };
 }
 
 export default function NewEvent() {
-  const [f, setF] = useState<FormState>(initial);
-  const [industries, setIndustries] = useState<{ id: string; type: string }[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api.konaosIndustries().then(setIndustries).catch(() => setIndustries([]));
-  }, []);
-  const [result, setResult] = useState("");
+  const [opts, setOpts] = useState<FormOptions | null>(null);
+  const [f, setF] = useState<F>(initial);
+  const [phase, setPhase] = useState<"form" | "creating" | "done">("form");
+  const [result, setResult] = useState<QuickCreateResult | null>(null);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
-  const notes = useMemo(() => buildAdminNotes(f), [f]);
-  const set = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setF({ ...f, [k]: e.target.value });
+  useEffect(() => {
+    api.konaosFormOptions().then((o) => {
+      setOpts(o);
+      setF((prev) => ({ ...prev, brandId: o.brands[0]?.id || "" }));
+    });
+  }, []);
 
-  const needs = (field: string) =>
-    ({
-      ratePerServing: ["INVOICE_PER_SERVING", "INVOICE_BASE_FEE_PLUS_SERVINGS", "INVOICE_FIXED_PACKAGE", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA"],
-      baseAmount: ["INVOICE_BASE_FEE_PLUS_SERVINGS", "INVOICE_FIXED_PACKAGE", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA"],
-      unitsIncluded: ["INVOICE_FIXED_PACKAGE", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA"],
-      hourlyRate: ["INVOICE_HOURLY"],
-      minimumAmount: ["MIN_GUARANTEE_FLAT", "MIN_GUARANTEE_HOURLY"],
-      givebackPct: ["SELLING_WITH_GIVEBACK"],
-      guestRate: ["HYBRID_HOST_BASE_PLUS_GUEST_EXTRA"],
-    })[field]?.includes(f.billing) ?? false;
+  const notes = useMemo(() => buildNotes(f), [f]);
+  const est = useMemo(() => estimate(f), [f]);
+  const up = (patch: Partial<F>) => setF((prev) => ({ ...prev, ...patch }));
 
-  const valid =
-    f.name && f.date && f.addressLine1 && f.city && f.zipCode && f.contactName && f.contactEmail;
+  const missing = useMemo(() => {
+    const m: string[] = [];
+    if (!f.name) m.push("Event name");
+    if (!f.date) m.push("Event date");
+    if (!f.brandId) m.push("Brand");
+    if (!f.address) m.push("Address");
+    if (!f.city) m.push("City");
+    if (!f.zip) m.push("Zip");
+    if (!f.contactName) m.push("Contact name");
+    if (!f.contactEmail) m.push("Contact email");
+    if (!f.taxExempt) m.push("Tax status");
+    if (!f.eventType) m.push("Event type");
+    if (f.eventType === "Min Guarantee" && !f.mgPerHour) m.push("Guarantee/hour");
+    if (!f.paymentModel) m.push("Payment / pricing model");
+    if (needServe(f.eventType) && !f.serveKeep) m.push("Serve/Keep count");
+    if (f.paid && !f.method) m.push("Payment method");
+    if (f.paid && f.method === "Cash" && !f.cashAmount) m.push("Cash amount");
+    return m;
+  }, [f]);
 
   async function submit() {
-    if (!valid) return;
-    setBusy(true);
+    if (missing.length) return;
+    setPhase("creating");
     setError("");
+    const toMs = (t: string) => new Date(`${f.date}T${t}:00`).getTime();
     try {
-      const res = await api.konaosCreateEvent({
+      const res = await api.konaosQuickCreate({
         name: f.name,
         businessName: f.businessName || f.name,
         brandId: f.brandId,
-        startDateTime: toMs(f.date, f.startTime),
-        endDateTime: toMs(f.date, f.endTime),
-        addressLine1: f.addressLine1,
+        startDateTime: toMs(f.startTime),
+        endDateTime: toMs(f.endTime),
+        addressLine1: f.address,
         city: f.city,
         state: f.state,
-        zipCode: f.zipCode,
+        zipCode: f.zip,
         county: f.county,
         contactName: f.contactName,
         contactTitle: f.contactTitle,
         contactEmail: f.contactEmail,
         contactPhone: f.contactPhone,
         adminNotes: notes,
-        notes: f.eventNotes ? `<p>${f.eventNotes}</p>` : "",
+        notes: f.parking ? `<p>Parking: ${f.parking}</p>` : "",
         manualStatus: f.status,
-        // Extra KOS fields — forwarded verbatim into the quick-add payload
         clientIndustriesTypeId: f.industryId || "",
         prePay: f.prepay,
         kurbsideEvent: f.kurbside,
-        taxPercent: f.taxable === "exempt" ? "0" : "6",
-        givebackPercentage: f.billing === "SELLING_WITH_GIVEBACK" ? (f.givebackPct || "0") : "0",
+        taxPercent: f.taxExempt === "YES" ? "0" : "6",
+        givebackPercentage: f.giveback || "0",
       });
-      setResult(res.message || "Event created in Kona OS.");
+      setResult(res);
+      setPhase("done");
     } catch (e: any) {
       setError(e.message || "Create failed");
-    } finally {
-      setBusy(false);
+      setPhase("form");
     }
   }
 
-  if (result) {
+  if (!opts) return <p className="loading">Loading form…</p>;
+
+  if (phase === "done" && result) {
     return (
       <div className="card" style={{ maxWidth: 640 }}>
         <h2 style={{ marginTop: 0 }}>✅ Event created in Kona OS</h2>
-        <p className="muted">{result}</p>
-        <p className="muted">
+        <p className="muted">{result.message}</p>
+        {result.editUrl ? (
+          <p>
+            <a className="btn primary" href={result.editUrl} target="_blank" rel="noreferrer">
+              Open the event in Kona OS ↗
+            </a>
+          </p>
+        ) : (
+          <p className="muted">
+            Created — the KonaOS link couldn't be resolved automatically; find it under
+            Franchise → Events in KonaOS.
+          </p>
+        )}
+        <p className="muted" style={{ fontSize: 13 }}>
           It will be picked up by the nightly pipeline, or run it now from the{" "}
-          <Link to="/">Dashboard</Link> with the event's date selected.
+          <Link to="/">Dashboard</Link> with {f.date} selected.
         </p>
         <div className="flex">
-          <button className="btn primary" onClick={() => { setResult(""); setF(initial); }}>
+          <button className="btn primary" onClick={() => { setResult(null); setF({ ...initial, brandId: opts.brands[0]?.id || "" }); setPhase("form"); }}>
             Create another
           </button>
-          <button className="btn" onClick={() => navigate("/")}>Dashboard</button>
+          <button className="btn" onClick={() => navigate("/events")}>Events</button>
         </div>
       </div>
     );
@@ -221,195 +203,226 @@ export default function NewEvent() {
 
   return (
     <>
+      {phase === "creating" && (
+        <div className="overlay">
+          <div className="card modal">
+            <div className="spinner" />
+            <h2>Creating event in Kona OS…</h2>
+            <div className="step-list">
+              <div className="step-row running"><span className="icon"><span className="spinner sm" /></span><span className="lbl">Sending to KonaOS quick-add</span></div>
+              <div className="step-row pending"><span className="icon">○</span><span className="lbl">Locating the new event</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <p className="muted"><Link to="/events">← Events</Link></p>
       <h1 className="page-title">New Event</h1>
       <p className="page-sub">
-        Creates the event directly in Kona OS — one entry, no double work. The billing details
-        become structured admin notes the AI parses exactly (see preview).
+        Creates the event directly in Kona OS — one entry, no double work. Segmented controls
+        keep typing minimal; the right panel shows the exact notes the AI reads.
       </p>
 
-      <div className="grid cols-2" style={{ alignItems: "start" }}>
-        <div className="card">
-          <div className="section-title" style={{ marginTop: 0 }}>Event</div>
-          <div className="form-grid">
-            <label>Brand *
-              <select className="select" value={f.brandId} onChange={set("brandId")}>
-                {BRANDS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-              </select>
-            </label>
-            <label>Event name *
-              <input className="input" value={f.name} onChange={set("name")} placeholder="Lincoln Elementary Field Day" />
-            </label>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Business name
-                <input className="input" value={f.businessName} onChange={set("businessName")} placeholder="(defaults to event name)" />
-              </label>
-              <label style={{ flex: 1 }}>Industry
-                <select className="select" value={f.industryId} onChange={set("industryId")}>
-                  <option value="">Select…</option>
-                  {industries.map((i) => <option key={i.id} value={i.id}>{i.type}</option>)}
-                </select>
-              </label>
-            </div>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Event status
-                <select className="select" value={f.status} onChange={set("status")}>
-                  <option value="pending">Pending (no client emails)</option>
-                  <option value="booked">Booked</option>
-                  <option value="confirmed">Confirmed</option>
-                </select>
-              </label>
-              <label className="flex" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 }}>
-                <input type="checkbox" checked={f.prepay} onChange={(e) => setF({ ...f, prepay: e.target.checked })} /> Prepay
-              </label>
-              <label className="flex" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 }}>
-                <input type="checkbox" checked={f.kurbside} onChange={(e) => setF({ ...f, kurbside: e.target.checked })} /> Kurbside
-              </label>
-            </div>
-            <label>Date *
-              <input className="input" type="date" value={f.date} onChange={set("date")} />
-            </label>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Start *
-                <input className="input" type="time" value={f.startTime} onChange={set("startTime")} />
-              </label>
-              <label style={{ flex: 1 }}>End *
-                <input className="input" type="time" value={f.endTime} onChange={set("endTime")} />
-              </label>
-            </div>
-            <label>Street address *
-              <input className="input" value={f.addressLine1} onChange={set("addressLine1")} />
-            </label>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 2 }}>City *
-                <input className="input" value={f.city} onChange={set("city")} />
-              </label>
-              <label style={{ flex: 2 }}>State
-                <input className="input" value={f.state} onChange={set("state")} />
-              </label>
-              <label style={{ flex: 1 }}>Zip *
-                <input className="input" value={f.zipCode} onChange={set("zipCode")} />
-              </label>
-              <label style={{ flex: 1 }}>County
-                <input className="input" value={f.county} onChange={set("county")} />
-              </label>
-            </div>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 2 }}>Contact name *
-                <input className="input" value={f.contactName} onChange={set("contactName")} />
-              </label>
-              <label style={{ flex: 1 }}>Title
-                <input className="input" value={f.contactTitle} onChange={set("contactTitle")} />
-              </label>
-            </div>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Contact email *
-                <input className="input" type="email" value={f.contactEmail} onChange={set("contactEmail")} />
-              </label>
-              <label style={{ flex: 1 }}>Contact phone
-                <input className="input" value={f.contactPhone} onChange={set("contactPhone")} />
-              </label>
-            </div>
-          </div>
-
-          <div className="section-title">Billing</div>
-          <div className="form-grid">
-            <label>Billing model *
-              <select className="select" value={f.billing} onChange={set("billing")}>
-                {BILLING_OPTIONS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
-              </select>
-            </label>
-            {needs("ratePerServing") && (
-              <label>{f.billing === "INVOICE_FIXED_PACKAGE" ? "Rate per serving above included ($) *" : f.billing === "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA" ? "Host overage rate per serving ($) *" : "Rate per serving ($) *"}
-                <input className="input" type="number" step="0.01" value={f.ratePerServing} onChange={set("ratePerServing")} />
-              </label>
-            )}
-            {needs("baseAmount") && (
-              <label>{f.billing === "INVOICE_FIXED_PACKAGE" ? "Minimum / floor amount ($) *" : "Base amount ($) *"}
-                <input className="input" type="number" step="0.01" value={f.baseAmount} onChange={set("baseAmount")} />
-              </label>
-            )}
-            {needs("unitsIncluded") && (
-              <label>Servings included *
-                <input className="input" type="number" value={f.unitsIncluded} onChange={set("unitsIncluded")} />
-              </label>
-            )}
-            {needs("hourlyRate") && (
-              <label>Hourly rate ($) *
-                <input className="input" type="number" step="0.01" value={f.hourlyRate} onChange={set("hourlyRate")} />
-              </label>
-            )}
-            {needs("minimumAmount") && (
-              <label>{f.billing === "MIN_GUARANTEE_HOURLY" ? "Minimum per hour ($) *" : "Flat minimum ($) *"}
-                <input className="input" type="number" step="0.01" value={f.minimumAmount} onChange={set("minimumAmount")} />
-              </label>
-            )}
-            {needs("givebackPct") && (
-              <label>Giveback percentage (%) *
-                <input className="input" type="number" step="0.1" value={f.givebackPct} onChange={set("givebackPct")} />
-              </label>
-            )}
-            {needs("guestRate") && (
-              <label>Guest rate per serving ($)
-                <input className="input" type="number" step="0.01" value={f.guestRate} onChange={set("guestRate")} />
-              </label>
-            )}
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Location / travel fee ($)
-                <input className="input" type="number" step="0.01" value={f.locationFee} onChange={set("locationFee")} />
-              </label>
-              <label style={{ flex: 1 }}>Deposit ($)
-                <input className="input" type="number" step="0.01" value={f.depositAmount} onChange={set("depositAmount")} />
-              </label>
-            </div>
-            <div className="flex" style={{ gap: 10 }}>
-              <label style={{ flex: 1 }}>Tax *
-                <select className="select" value={f.taxable} onChange={set("taxable")}>
-                  <option value="yes">Taxable (6%)</option>
-                  <option value="exempt">Tax exempt</option>
-                </select>
-              </label>
-              <label style={{ flex: 1 }}>Payment method
-                <select className="select" value={f.payment} onChange={set("payment")}>
-                  <option value="unknown">Unknown yet (default)</option>
-                  <option value="check">Check</option>
-                  <option value="cash">Cash</option>
-                  <option value="credit_card">Credit card</option>
-                </select>
-              </label>
-            </div>
-            <label>Additional admin notes
-              <textarea className="input" rows={2} value={f.extraNotes} onChange={set("extraNotes")} />
-            </label>
-            <label>Event notes (visible on the event)
-              <textarea className="input" rows={2} value={f.eventNotes} onChange={set("eventNotes")} />
-            </label>
-          </div>
-        </div>
-
+      <div className="grid" style={{ gridTemplateColumns: "1fr 380px", alignItems: "start", gap: 20 }}>
         <div>
-          <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>
-              Admin notes that will be written to KOS
+          {/* EVENT */}
+          <Card title="Event">
+            <Row>
+              <Field label="Event name" req><input className="input" value={f.name} onChange={(e) => up({ name: e.target.value })} placeholder="Elkridge Club – Staff Meeting" /></Field>
+              <Field label="Business name"><input className="input" value={f.businessName} onChange={(e) => up({ businessName: e.target.value })} placeholder="(defaults to event name)" /></Field>
+            </Row>
+            <Row>
+              <Field label="Brand" req>
+                <select className="select" value={f.brandId} onChange={(e) => up({ brandId: e.target.value })}>
+                  {opts.brands.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Industry">
+                <select className="select" value={f.industryId} onChange={(e) => up({ industryId: e.target.value })}>
+                  <option value="">Select…</option>
+                  {opts.industries.map((i, n) => <option key={i.id || n} value={i.id}>{i.type}</option>)}
+                </select>
+              </Field>
+            </Row>
+            <Row>
+              <Field label="Event status">
+                <select className="select" value={f.status} onChange={(e) => up({ status: e.target.value })}>
+                  {opts.statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Date" req><input className="input" type="date" value={f.date} onChange={(e) => up({ date: e.target.value })} /></Field>
+            </Row>
+            <Row>
+              <Field label="Start time" req><input className="input" type="time" value={f.startTime} onChange={(e) => up({ startTime: e.target.value })} /></Field>
+              <Field label="End time" req><input className="input" type="time" value={f.endTime} onChange={(e) => up({ endTime: e.target.value })} /></Field>
+            </Row>
+            <div className="flex" style={{ gap: 16 }}>
+              <label className="chk"><input type="checkbox" checked={f.prepay} onChange={(e) => up({ prepay: e.target.checked })} /> Prepay event</label>
+              <label className="chk"><input type="checkbox" checked={f.kurbside} onChange={(e) => up({ kurbside: e.target.checked })} /> Kurbside event</label>
             </div>
-            <p className="muted" style={{ fontSize: 12 }}>
-              This exact text goes into the event's admin notes — phrased so the AI classifier
-              reads it deterministically. No free-text guessing.
-            </p>
-            <pre className="json" style={{ whiteSpace: "pre-wrap" }}>{notes}</pre>
-          </div>
-          {error && <p className="error-msg" style={{ marginTop: 12 }}>{error}</p>}
-          <button
-            className="btn primary"
-            style={{ marginTop: 14, width: "100%" }}
-            disabled={!valid || busy}
-            onClick={submit}
-          >
-            {busy ? "Creating in Kona OS…" : "Create event in Kona OS"}
-          </button>
-          {!valid && <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Fill the required (*) fields to enable.</p>}
+          </Card>
+
+          {/* LOCATION + CONTACT */}
+          <Card title="Location & contact">
+            <Field label="Address" req><input className="input" value={f.address} onChange={(e) => up({ address: e.target.value })} /></Field>
+            <Row>
+              <Field label="City" req><input className="input" value={f.city} onChange={(e) => up({ city: e.target.value })} /></Field>
+              <Field label="State" req><input className="input" value={f.state} onChange={(e) => up({ state: e.target.value })} /></Field>
+            </Row>
+            <Row>
+              <Field label="Zip" req><input className="input" value={f.zip} onChange={(e) => up({ zip: e.target.value })} /></Field>
+              <Field label="County"><input className="input" value={f.county} onChange={(e) => up({ county: e.target.value })} /></Field>
+            </Row>
+            <Row>
+              <Field label="Contact name" req><input className="input" value={f.contactName} onChange={(e) => up({ contactName: e.target.value })} /></Field>
+              <Field label="Contact title"><input className="input" value={f.contactTitle} onChange={(e) => up({ contactTitle: e.target.value })} /></Field>
+            </Row>
+            <Row>
+              <Field label="Contact email" req><input className="input" type="email" value={f.contactEmail} onChange={(e) => up({ contactEmail: e.target.value })} /></Field>
+              <Field label="Contact phone"><input className="input" value={f.contactPhone} onChange={(e) => up({ contactPhone: e.target.value })} /></Field>
+            </Row>
+          </Card>
+
+          {/* ADMIN — financial */}
+          <Card title="Admin — financial setup">
+            <Field label="Tax exempt" req>
+              <Seg options={[["NO", "No — taxable"], ["YES", "Yes — exempt"]]} value={f.taxExempt} onChange={(v) => up({ taxExempt: v as F["taxExempt"] })} />
+              {f.taxExempt === "YES" && <div className="cond warn">Tax-exempt — keep the exemption certificate on file for this event.</div>}
+            </Field>
+            <Row3>
+              <Field label="Giveback %"><input className="input" type="number" value={f.giveback} onChange={(e) => up({ giveback: e.target.value })} placeholder="0" /></Field>
+              <Field label="Deposit ($)"><input className="input" type="number" value={f.deposit} onChange={(e) => up({ deposit: e.target.value })} placeholder="0" /></Field>
+              <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
+            </Row3>
+          </Card>
+
+          {/* EVENT — contract */}
+          <Card title="Event — the contract">
+            <Field label="Event type" req>
+              <Seg options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]} value={f.eventType} onChange={(v) => up({ eventType: v as EventType })} />
+              {f.eventType === "Min Guarantee" && (
+                <div className="cond">
+                  <label className="lbl-sm">Amount guaranteed per hour ($) *</label>
+                  <input className="input" type="number" value={f.mgPerHour} onChange={(e) => up({ mgPerHour: e.target.value })} placeholder="e.g. 300" />
+                </div>
+              )}
+            </Field>
+            <Row>
+              <Field label="Attendees"><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
+              <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
+            </Row>
+            {needServe(f.eventType) && (
+              <Field label="Serve / Keep count" req hint='Pricing tiers, e.g. "$295 covers 60 servings, each additional $4".'>
+                <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 covers 60 12oz Konas, each additional $4" />
+              </Field>
+            )}
+            <Field label="Payment — pricing model" req hint='The billing basis, e.g. "$295 plus tax for the hour".'>
+              <input className="input" value={f.paymentModel} onChange={(e) => up({ paymentModel: e.target.value })} placeholder="$295 plus tax for the hour" />
+            </Field>
+            <Field label="Additional instructions">
+              <input className="input" value={f.additional} onChange={(e) => up({ additional: e.target.value })} placeholder='e.g. "Hard stop at 100 servings"' />
+            </Field>
+            <label className="chk"><input type="checkbox" checked={f.cardOnly} onChange={(e) => up({ cardOnly: e.target.checked })} /> Card only / no on-site cash</label>
+          </Card>
+
+          {/* DRIVER — actuals */}
+          <Card title="Driver — actuals (at event close, optional)">
+            {needServe(f.eventType) && (
+              <Field label="Actual serving count" hint="Total number served.">
+                <input className="input" type="number" value={f.actualCount} onChange={(e) => up({ actualCount: e.target.value })} placeholder="79" />
+              </Field>
+            )}
+            <label className="chk"><input type="checkbox" checked={f.paid} onChange={(e) => up({ paid: e.target.checked })} /> Payment received</label>
+            {f.paid && (
+              <div className="cond">
+                <label className="lbl-sm">Payment method * <span className="muted">(check &amp; cash have no fee; card adds 4%)</span></label>
+                <Seg options={[["Check", "Check"], ["Credit Card", "Credit Card"], ["Cash", "Cash"]]} value={f.method} onChange={(v) => up({ method: v as PayMethod })} />
+                {f.method === "Cash" && (
+                  <Field label="Cash collected ($)" req><input className="input" type="number" value={f.cashAmount} onChange={(e) => up({ cashAmount: e.target.value })} /></Field>
+                )}
+              </div>
+            )}
+            <Row>
+              <Field label="Actual event times" hint="Only if it ran longer/earlier."><input className="input" value={f.actualTimes} onChange={(e) => up({ actualTimes: e.target.value })} placeholder="Ran 1 hr, arrived 30 min early" /></Field>
+              <Field label="Square device"><input className="input" value={f.squareDevice} onChange={(e) => up({ squareDevice: e.target.value })} placeholder="KEV7" /></Field>
+            </Row>
+          </Card>
         </div>
+
+        {/* RIGHT RAIL */}
+        <aside style={{ position: "sticky", top: 16 }}>
+          <div className={"status " + (missing.length ? "bad" : "ok")}>
+            {missing.length ? (
+              <div>
+                <strong>{missing.length} required field{missing.length > 1 ? "s" : ""} left</strong>
+                <ul>{missing.map((m) => <li key={m}>{m}</li>)}</ul>
+              </div>
+            ) : (
+              <strong>Ready to create in Kona OS</strong>
+            )}
+          </div>
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="section-title" style={{ marginTop: 0 }}>Notes the AI will read</div>
+            <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "30vh" }}>{notes}</pre>
+          </div>
+
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>Estimated invoice</div>
+            {!est ? (
+              <p className="muted" style={{ margin: 0 }}>Fill pricing + type for an estimate.</p>
+            ) : (
+              <div className="kv" style={{ gridTemplateColumns: "1fr auto", gap: "4px 12px" }}>
+                <div className="k">Base</div><div className="v right">${est.baseN.toFixed(2)}</div>
+                {est.over > 0 && <><div className="k">Overage {est.over} × ${est.extraN}</div><div className="v right">${est.overAmt.toFixed(2)}</div></>}
+                {est.disc > 0 && <><div className="k">Discount</div><div className="v right">−${est.disc.toFixed(2)}</div></>}
+                <div className="k">Sales tax {f.taxExempt === "YES" ? "(exempt)" : "6%"}</div><div className="v right">${est.tax.toFixed(2)}</div>
+                <div className="k">Card fee {est.noFee ? "(check — none)" : "4%"}</div><div className="v right">${est.cc.toFixed(2)}</div>
+                <div className="k" style={{ fontWeight: 700 }}>Balance due</div><div className="v right" style={{ fontWeight: 700 }}>${est.total.toFixed(2)}</div>
+              </div>
+            )}
+          </div>
+
+          {error && <p className="error-msg" style={{ marginTop: 12 }}>{error}</p>}
+          <button className="btn primary" style={{ width: "100%", marginTop: 14 }} disabled={missing.length > 0 || phase === "creating"} onClick={submit}>
+            {phase === "creating" ? "Creating…" : "Create event in Kona OS"}
+          </button>
+        </aside>
       </div>
     </>
+  );
+}
+
+/* ── small presentational helpers ─────────────────────────────────────────── */
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+function Row({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>{children}</div>;
+}
+function Row3({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>{children}</div>;
+}
+function Field({ label, req, hint, children }: { label: string; req?: boolean; hint?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label className="lbl-sm">{label}{req && <span style={{ color: "var(--crit)" }}> *</span>}</label>
+      {hint && <div className="muted" style={{ fontSize: 11.5, margin: "2px 0 5px" }}>{hint}</div>}
+      {children}
+    </div>
+  );
+}
+function Seg({ options, value, onChange }: { options: [string, string][]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="seg">
+      {options.map(([v, label]) => (
+        <button key={v} type="button" className={"seg-btn" + (value === v ? " on" : "")} onClick={() => onChange(v)}>{label}</button>
+      ))}
+    </div>
   );
 }
