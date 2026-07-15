@@ -91,11 +91,19 @@ class KonaCRMClient(CRMClient):
 
 class SquareLiveClient(SquareClient):
     """Square Orders/Search per brand. Query shape matches the original n8n
-    node: filter by ``closed_at`` between the event's actual start/end (NY→UTC),
-    states COMPLETED+OPEN, per-brand location + token. Computes the sheet's
-    Square breakdown (gross, discounts, net card, tax, tips, 4% CC fee)."""
+    nodes: filter by ``closed_at`` between the event's actual start/end
+    (NY→UTC), per-brand location + token + API version + state filter. Computes
+    the sheet's Square breakdown (gross, discounts, net card, tax, tips, 4% CC fee).
 
-    SQUARE_VERSION = "2026-01-22"
+    Kona and Tom's are separate Square accounts with different API versions and
+    state filters, so those are configured per brand here.
+    """
+
+    # Per-brand Square API config (from the live n8n nodes).
+    BRAND_CONFIG = {
+        "kona": {"version": "2026-01-22", "states": ["COMPLETED", "OPEN"]},
+        "tom": {"version": "2025-10-16", "states": ["COMPLETED"]},
+    }
 
     def __init__(self) -> None:
         self.base = settings.square_api_base.rstrip("/")
@@ -112,6 +120,7 @@ class SquareLiveClient(SquareClient):
         key = self._key_for(brand)
         token = self.tokens[key]
         location = self.locations[key]
+        cfg = self.BRAND_CONFIG[key]
         empty = {"brand": brand, "device_id": device_id, "order_count": 0,
                  "total_collected": 0.0, "payment_ids": [], "breakdown": {}}
         if not token or not location:
@@ -125,13 +134,13 @@ class SquareLiveClient(SquareClient):
             "limit": 1000,
             "location_ids": [location],
             "query": {
-                "filter": {**date_filter, "state_filter": {"states": ["COMPLETED", "OPEN"]}},
+                "filter": {**date_filter, "state_filter": {"states": cfg["states"]}},
                 "sort": {"sort_field": "UPDATED_AT", "sort_order": "DESC"},
             },
         }
         headers = {"Authorization": f"Bearer {token}",
                    "Content-Type": "application/json",
-                   "Square-Version": self.SQUARE_VERSION}
+                   "Square-Version": cfg["version"]}
         with httpx.Client(timeout=_TIMEOUT) as c:
             r = c.post(f"{self.base}/v2/orders/search", headers=headers, json=body)
             r.raise_for_status()

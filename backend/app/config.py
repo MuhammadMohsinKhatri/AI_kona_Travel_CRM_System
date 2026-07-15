@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     square_kona_token: str = ""
     square_tom_token: str = ""
     square_kona_location: str = "LGYP8DB54HMPV"
-    square_tom_location: str = ""
+    square_tom_location: str = "LGWPJYFHY9AJD"
 
     # OpenAI
     openai_api_key: str = ""
