@@ -90,35 +90,73 @@ class KonaCRMClient(CRMClient):
 
 
 class SquareLiveClient(SquareClient):
+    """Square Orders/Search per brand. Query shape matches the original n8n
+    node: filter by ``closed_at`` between the event's actual start/end (NY→UTC),
+    states COMPLETED+OPEN, per-brand location + token. Computes the sheet's
+    Square breakdown (gross, discounts, net card, tax, tips, 4% CC fee)."""
+
+    SQUARE_VERSION = "2026-01-22"
+
     def __init__(self) -> None:
         self.base = settings.square_api_base.rstrip("/")
         self.tokens = {"kona": settings.square_kona_token, "tom": settings.square_tom_token}
+        self.locations = {
+            "kona": settings.square_kona_location,
+            "tom": settings.square_tom_location,
+        }
 
-    def _token_for(self, brand: str) -> str:
-        b = (brand or "").lower()
-        return self.tokens["tom"] if "tom" in b else self.tokens["kona"]
+    def _key_for(self, brand: str) -> str:
+        return "tom" if "tom" in (brand or "").lower() else "kona"
 
-    def search_orders(self, brand, device_id, date_iso):
-        token = self._token_for(brand)
-        if not token or not device_id:
-            return {"brand": brand, "device_id": device_id, "order_count": 0,
-                    "total_collected": 0.0, "payment_ids": []}
-        body: dict[str, Any] = {
-            "location_ids": [],
-            "query": {"filter": {"state_filter": {"states": ["COMPLETED"]}}},
+    def search_orders(self, brand, device_id, date_iso, start_iso=None, end_iso=None):
+        key = self._key_for(brand)
+        token = self.tokens[key]
+        location = self.locations[key]
+        empty = {"brand": brand, "device_id": device_id, "order_count": 0,
+                 "total_collected": 0.0, "payment_ids": [], "breakdown": {}}
+        if not token or not location:
+            return empty
+
+        date_filter: dict[str, Any] = {}
+        if start_iso and end_iso:
+            date_filter = {"date_time_filter": {"closed_at": {"start_at": start_iso, "end_at": end_iso}}}
+        body = {
+            "return_entries": False,
+            "limit": 1000,
+            "location_ids": [location],
+            "query": {
+                "filter": {**date_filter, "state_filter": {"states": ["COMPLETED", "OPEN"]}},
+                "sort": {"sort_field": "UPDATED_AT", "sort_order": "DESC"},
+            },
         }
         headers = {"Authorization": f"Bearer {token}",
                    "Content-Type": "application/json",
-                   "Square-Version": "2024-01-18"}
+                   "Square-Version": self.SQUARE_VERSION}
         with httpx.Client(timeout=_TIMEOUT) as c:
             r = c.post(f"{self.base}/v2/orders/search", headers=headers, json=body)
             r.raise_for_status()
-            data = r.json()
-        orders = data.get("orders", [])
-        total = sum(o.get("total_money", {}).get("amount", 0) for o in orders) / 100.0
-        return {"brand": brand, "device_id": device_id, "order_count": len(orders),
-                "total_collected": round(total, 2),
-                "payment_ids": [o.get("id") for o in orders]}
+            orders = r.json().get("orders", [])
+
+        def money(o, field):
+            return (o.get(field, {}) or {}).get("amount", 0) / 100.0
+
+        gross = sum(money(o, "total_money") - money(o, "total_tax_money") -
+                    money(o, "total_tip_money") + money(o, "total_discount_money") for o in orders)
+        discounts = sum(money(o, "total_discount_money") for o in orders)
+        card_tax = sum(money(o, "total_tax_money") for o in orders)
+        tips = sum(money(o, "total_tip_money") for o in orders)
+        net_card = round(gross - discounts, 2)
+        return {
+            "brand": brand, "device_id": device_id, "location": location,
+            "order_count": len(orders),
+            "total_collected": net_card,
+            "payment_ids": [o.get("id") for o in orders],
+            "breakdown": {
+                "gross_sales": round(gross, 2), "discounts": round(discounts, 2),
+                "net_card": net_card, "card_tax": round(card_tax, 2),
+                "tips_card": round(tips, 2), "cc_fee": round(net_card * 0.04, 2),
+            },
+        }
 
 
 class OpenAIClassifier(Classifier):

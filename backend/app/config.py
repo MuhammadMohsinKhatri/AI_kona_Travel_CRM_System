@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     square_api_base: str = "https://connect.squareup.com"
     square_kona_token: str = ""
     square_tom_token: str = ""
+    square_kona_location: str = "LGYP8DB54HMPV"
+    square_tom_location: str = ""
 
     # OpenAI
     openai_api_key: str = ""

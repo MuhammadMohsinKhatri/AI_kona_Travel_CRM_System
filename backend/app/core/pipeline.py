@@ -180,10 +180,13 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
             progress.counter("square", i, len(items))
             try:
                 equip = map_equipment(item["classification"])
+                start_iso, end_iso = _event_window_utc(item["classification"], item["cleaned"])
                 sq = square.search_orders(
                     brand=item["cleaned"].get("BRAND", ""),
                     device_id=equip.get("device_id"),
                     date_iso=item["cleaned"].get("DATE"),
+                    start_iso=start_iso,
+                    end_iso=end_iso,
                 )
                 sq["equipment"] = equip
                 item["square"] = sq
@@ -407,6 +410,32 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+def _r2(v: float) -> float:
+    return round(v + 0.0, 2)
+
+
+def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    """Event's actual start/end (NY local) → UTC ISO, for the Square closed_at
+    filter. Falls back to the cleaned start/end when actuals are absent."""
+    from datetime import datetime
+
+    def to_utc_iso(v: str) -> Optional[str]:
+        if not v:
+            return None
+        s = str(v).strip().replace(" ", "T")
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+            try:
+                dt = datetime.strptime(s[:26] if "." in s else s, fmt)
+                return dt.replace(tzinfo=NY).astimezone(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            except ValueError:
+                continue
+        return None
+
+    start = to_utc_iso(cls.get("ACTUAL_EVENT_START_TIME") or cleaned.get("EVENT_STARTED"))
+    end = to_utc_iso(cls.get("ACTUAL_EVENT_END_TIME") or cleaned.get("EVENT_ENDED"))
+    return start, end
+
+
 def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any]) -> None:
     """Write/refresh this event's row in the financial ledger (Postgres)."""
     from app.models import FinancialEntry
@@ -426,32 +455,88 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
         entry = FinancialEntry(event_id=event.id)
         db.add(entry)
 
+    subtotal = _num(calc.get("SUBTOTAL"))
+    sales_tax = _num(calc.get("SALES_TAX"))
+    invoice_total = _num(calc.get("FINAL_INVOICE_AMOUNT"))
+    payment_method = str(calc.get("PAYMENT_METHOD", ""))
+    taxable = str(cls.get("TAXABLE", "YES")).upper() == "YES"
+    cash_collected = _num(cls.get("CASH_COLLECTED_AMOUNT"))
+    tax_rate = _num(calc.get("TAX_RATE"))
+    sq_breakdown = sq.get("breakdown") or {}
+
+    # Split staff names into worker 1/2 (hours per worker aren't in the CRM feed;
+    # use the event's total hours as the best available value).
+    staff = [s.strip() for s in (cleaned.get("STAFF_ASSIGNED") or "").split(",") if s.strip()]
+    total_hours = _num(cls.get("TOTAL_EVENT_HOURS"))
+
     entry.run_id = run.id
-    entry.crm_event_id = event.crm_event_id
-    entry.event_code = cleaned.get("EVENT_CODE")
-    entry.event_name = cleaned.get("EVENT_NAME", "")
-    entry.brand = cleaned.get("BRAND", "")
-    entry.event_date = cleaned.get("DATE")
     entry.month = (cleaned.get("DATE") or "")[:7] or None
+    # identity
+    entry.event_date = cleaned.get("DATE")
+    entry.crm_event_id = event.crm_event_id
+    entry.event_name = cleaned.get("EVENT_NAME", "")
+    entry.event_code = cleaned.get("EVENT_CODE")
+    entry.brand = cleaned.get("BRAND", "")
     entry.final_status = cleaned.get("FINAL_EVENT_STATUS", "")
     entry.event_type = str(cls.get("EVENT_TYPE", ""))
     entry.billing_model = str(cls.get("BILLING_MODEL", ""))
-
-    entry.units_served = _num(cls.get("UNITS_SERVED_TOTAL"))
-    entry.subtotal = _num(calc.get("SUBTOTAL"))
-    entry.sales_tax = _num(calc.get("SALES_TAX"))
-    entry.tax_rate = _num(calc.get("TAX_RATE"))
-    entry.cc_fee = _num(calc.get("CC_FEE"))
-    entry.invoice_total = _num(calc.get("FINAL_INVOICE_AMOUNT"))
-    entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
-    entry.balance_due = _num(calc.get("BALANCE_DUE"))
-    entry.payment_method = str(calc.get("PAYMENT_METHOD", ""))
-    entry.cash_collected = _num(cls.get("CASH_COLLECTED_AMOUNT"))
-    entry.has_variance = bool(calc.get("HAS_VARIANCE"))
-    entry.variance_amount = _num(calc.get("VARIANCE_AMOUNT"))
-
-    entry.square_sales = _num(sq.get("total_collected"))
+    # square
+    entry.square_gross_sales = _num(sq_breakdown.get("gross_sales"))
+    entry.square_discounts = _num(sq_breakdown.get("discounts"))
+    entry.square_net_card = _num(sq_breakdown.get("net_card"))
+    entry.square_card_tax = _num(sq_breakdown.get("card_tax"))
+    entry.square_tips_card = _num(sq_breakdown.get("tips_card"))
+    entry.square_cc_fee = _num(sq_breakdown.get("cc_fee"))
     entry.square_orders = int(sq.get("order_count") or 0)
     entry.square_device = sq.get("device_id")
+    entry.square_sales = _num(sq_breakdown.get("net_card")) or _num(sq.get("total_collected"))
+    # cash
+    entry.cash_collected = cash_collected
+    entry.cash_tax = _r2(cash_collected - cash_collected / (1 + tax_rate)) if (taxable and cash_collected) else 0.0
+    entry.cash_pre_tax = _r2(cash_collected - entry.cash_tax) if cash_collected else 0.0
+    # billing
+    entry.check_invoice = invoice_total if payment_method == "CHECK" else 0.0
+    entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
+    entry.taxable = taxable
+    entry.event_sales_collected = _r2(cash_collected + entry.square_net_card)
+    entry.sales_tax = sales_tax
+    entry.sales_dollars = _num(calc.get("SALES_AMOUNT")) or subtotal
+    entry.giveback_amount = _num(calc.get("GIVEBACK_AMOUNT"))
+    entry.net_event_sales = _r2(subtotal - _num(calc.get("GIVEBACK_AMOUNT")))
+    entry.location_fee = _num(cls.get("LOCATION_FEE"))
+    # workflow
+    entry.paid = str(cls.get("PAID_STATUS") or "").upper() in ("TRUE", "PAID", "YES", "1")
+    # staff
+    entry.worker_1 = staff[0] if len(staff) > 0 else ""
+    entry.worker_1_hours = total_hours if staff else 0.0
+    entry.worker_2 = staff[1] if len(staff) > 1 else ""
+    entry.worker_2_hours = total_hours if len(staff) > 1 else 0.0
+    entry.hours_paid = entry.hours_paid or False  # manual flag, preserved across runs
+    # notes/flags
+    entry.note = str(cls.get("NOTE", ""))
+    entry.invoice_drafted = invoice_total > 0 and str(cls.get("EVENT_TYPE", "")).lower() in ("invoice", "hybrid")
+    entry.invoice_sent = entry.invoice_sent or False  # manual flag, preserved
+    # classifier / calc
+    entry.total_event_hours = total_hours
+    entry.attendee_count = int(_num(cls.get("ATTENDEE_COUNT")))
+    entry.base_amount = _num(cls.get("BASE_AMOUNT"))
+    entry.hourly_rate = _num(cls.get("HOURLY_RATE"))
+    entry.rate_per_serving = _num(cls.get("RATE_PER_SERVING"))
+    entry.host_covers_shortfall = str(cls.get("BILLING_MODEL", "")).upper().startswith(("MIN_GUARANTEE", "HYBRID_SELLING_PLUS_MIN"))
+    entry.units_served = _num(cls.get("UNITS_SERVED_TOTAL"))
+    entry.units_included = _num(cls.get("UNITS_INCLUDED_IN_BASE"))
+    entry.payment_method = payment_method
+    entry.tax_mode = "EXEMPT" if not taxable else "TAXABLE"
+    entry.subtotal = subtotal
+    entry.actual_sales = _num(sq_breakdown.get("net_card")) or cash_collected
+    entry.mg_shortfall = _num(calc.get("MG_SHORTFALL"))
+    entry.total_tax_rate = tax_rate
+    entry.total_tax = _num(calc.get("TOTAL_TAX"))
+    # rollups
+    entry.cc_fee = _num(calc.get("CC_FEE"))
+    entry.invoice_total = invoice_total
+    entry.balance_due = _num(calc.get("BALANCE_DUE"))
+    entry.has_variance = bool(calc.get("HAS_VARIANCE"))
+    entry.variance_amount = _num(calc.get("VARIANCE_AMOUNT"))
 
     db.flush()

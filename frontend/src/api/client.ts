@@ -126,12 +126,15 @@ export interface FinancialRow {
   subtotal: number;
   sales_tax: number;
   cc_fee: number;
+  check_invoice: number;
+  square_net_card: number;
+  square_cc_fee: number;
+  square_orders: number;
   invoice_total: number;
   deposit: number;
   balance_due: number;
   payment_method: string;
-  square_sales: number;
-  square_orders: number;
+  paid: boolean;
   has_variance: boolean;
   variance_amount: number;
   updated_at: string | null;
@@ -147,6 +150,7 @@ export interface FinancialsResponse {
     invoice_total: number;
     balance_due: number;
     square_sales: number;
+    check_invoice: number;
     units_served: number;
   };
 }

@@ -46,9 +46,16 @@ class CRMClient(ABC):
 class SquareClient(ABC):
     @abstractmethod
     def search_orders(
-        self, brand: str, device_id: str | None, date_iso: str | None
+        self,
+        brand: str,
+        device_id: str | None,
+        date_iso: str | None,
+        start_iso: str | None = None,
+        end_iso: str | None = None,
     ) -> dict[str, Any]:
-        """Search Square orders for a brand/device/date. Returns aggregate totals."""
+        """Search Square orders for a brand/device/window. Returns aggregate
+        totals plus a ``breakdown`` dict (gross/discounts/net/tax/tips/cc_fee).
+        ``start_iso``/``end_iso`` are UTC ISO bounds on the order ``closed_at``."""
 
 
 class Classifier(ABC):

@@ -178,19 +178,29 @@ class MockCRMClient(CRMClient):
 
 
 class MockSquareClient(SquareClient):
-    def search_orders(self, brand, device_id, date_iso):
+    def search_orders(self, brand, device_id, date_iso, start_iso=None, end_iso=None):
         _lag()
         if not device_id:
             return {"brand": brand, "device_id": None, "order_count": 0,
-                    "total_collected": 0.0, "payment_ids": [], "note": "no device mapped"}
+                    "total_collected": 0.0, "payment_ids": [],
+                    "breakdown": {}, "note": "no device mapped"}
         # Deterministic pseudo-sales derived from the device id.
         seed = sum(ord(c) for c in (device_id or "")) % 40
-        total = round(150 + seed * 7.25, 2)
+        net = round(150 + seed * 7.25, 2)
+        discounts = round(net * 0.05, 2)
+        gross = round(net + discounts, 2)
+        card_tax = round(net * 0.06, 2)
+        tips = round(net * 0.08, 2)
+        cc_fee = round(net * 0.04, 2)
         return {
             "brand": brand, "device_id": device_id,
             "order_count": 8 + (seed % 5),
-            "total_collected": total,
+            "total_collected": net,
             "payment_ids": [f"pay_{device_id[-4:]}_{i}" for i in range(3)],
+            "breakdown": {
+                "gross_sales": gross, "discounts": discounts, "net_card": net,
+                "card_tax": card_tax, "tips_card": tips, "cc_fee": cc_fee,
+            },
         }
 
 
