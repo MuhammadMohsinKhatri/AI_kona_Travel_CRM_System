@@ -80,6 +80,11 @@ export const api = {
     request<Page<Alert>>("/api/alerts?" + new URLSearchParams(params)),
   resolveAlert: (id: number) =>
     request<Alert>(`/api/alerts/${id}/resolve`, { method: "POST" }),
+  financialMonths: () => request<string[]>("/api/financials/months"),
+  financials: (params: Record<string, string> = {}) =>
+    request<FinancialsResponse>("/api/financials?" + new URLSearchParams(params)),
+  konaosIndustries: () =>
+    request<{ id: string; type: string }[]>("/api/konaos/clients/industries"),
   konaosCreateEvent: (body: Record<string, unknown>) =>
     request<{ success?: boolean; message?: string; [k: string]: unknown }>(
       "/api/konaos/events",
@@ -93,6 +98,45 @@ export const api = {
       { method: "POST", body: JSON.stringify({ session_key: sessionKey }) }
     ),
 };
+
+export interface FinancialRow {
+  id: number;
+  event_id: number;
+  event_date: string | null;
+  event_name: string;
+  event_code: string | null;
+  brand: string;
+  final_status: string;
+  event_type: string;
+  billing_model: string;
+  units_served: number;
+  subtotal: number;
+  sales_tax: number;
+  cc_fee: number;
+  invoice_total: number;
+  deposit: number;
+  balance_due: number;
+  payment_method: string;
+  square_sales: number;
+  square_orders: number;
+  has_variance: boolean;
+  variance_amount: number;
+  updated_at: string | null;
+}
+export interface FinancialsResponse {
+  items: FinancialRow[];
+  total: number;
+  brands: string[];
+  totals: {
+    subtotal: number;
+    sales_tax: number;
+    cc_fee: number;
+    invoice_total: number;
+    balance_due: number;
+    square_sales: number;
+    units_served: number;
+  };
+}
 
 export interface KonaosSessionStatus {
   configured: boolean;

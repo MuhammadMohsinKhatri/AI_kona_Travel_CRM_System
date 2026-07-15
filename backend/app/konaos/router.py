@@ -1122,7 +1122,10 @@ async def create_event(
             notes=event.notes,
             event_status=event.event_status,
             manual_status=event.manual_status,
-            payment_term=event.payment_term
+            payment_term=event.payment_term,
+            # Extra fields (industry, prepay, kurbside, taxPercent, ...)
+            # pass straight through into the KonaOS payload.
+            **(event.model_extra or {}),
         )
         return EventOperationResponse(**response_data)
     except httpx.HTTPStatusError as e:

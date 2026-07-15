@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 
@@ -29,6 +29,14 @@ const BILLING_OPTIONS = [
 interface FormState {
   brandId: string;
   name: string;
+  businessName: string;
+  contactTitle: string;
+  county: string;
+  industryId: string;
+  status: "pending" | "booked" | "confirmed";
+  prepay: boolean;
+  kurbside: boolean;
+  eventNotes: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -55,7 +63,9 @@ interface FormState {
 }
 
 const initial: FormState = {
-  brandId: BRANDS[0].id, name: "", date: "", startTime: "10:00", endTime: "12:00",
+  brandId: BRANDS[0].id, name: "", businessName: "", contactTitle: "", county: "",
+  industryId: "", status: "pending", prepay: false, kurbside: false, eventNotes: "",
+  date: "", startTime: "10:00", endTime: "12:00",
   addressLine1: "", city: "", state: "Maryland", zipCode: "",
   contactName: "", contactEmail: "", contactPhone: "",
   billing: "INVOICE_PER_SERVING",
@@ -124,7 +134,12 @@ function toMs(date: string, time: string): number {
 
 export default function NewEvent() {
   const [f, setF] = useState<FormState>(initial);
+  const [industries, setIndustries] = useState<{ id: string; type: string }[]>([]);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.konaosIndustries().then(setIndustries).catch(() => setIndustries([]));
+  }, []);
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -154,7 +169,7 @@ export default function NewEvent() {
     try {
       const res = await api.konaosCreateEvent({
         name: f.name,
-        businessName: f.name,
+        businessName: f.businessName || f.name,
         brandId: f.brandId,
         startDateTime: toMs(f.date, f.startTime),
         endDateTime: toMs(f.date, f.endTime),
@@ -162,11 +177,20 @@ export default function NewEvent() {
         city: f.city,
         state: f.state,
         zipCode: f.zipCode,
+        county: f.county,
         contactName: f.contactName,
+        contactTitle: f.contactTitle,
         contactEmail: f.contactEmail,
         contactPhone: f.contactPhone,
         adminNotes: notes,
-        manualStatus: "pending",
+        notes: f.eventNotes ? `<p>${f.eventNotes}</p>` : "",
+        manualStatus: f.status,
+        // Extra KOS fields — forwarded verbatim into the quick-add payload
+        clientIndustriesTypeId: f.industryId || "",
+        prePay: f.prepay,
+        kurbsideEvent: f.kurbside,
+        taxPercent: f.taxable === "exempt" ? "0" : "6",
+        givebackPercentage: f.billing === "SELLING_WITH_GIVEBACK" ? (f.givebackPct || "0") : "0",
       });
       setResult(res.message || "Event created in Kona OS.");
     } catch (e: any) {
@@ -213,9 +237,35 @@ export default function NewEvent() {
                 {BRANDS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
               </select>
             </label>
-            <label>Event / business name *
+            <label>Event name *
               <input className="input" value={f.name} onChange={set("name")} placeholder="Lincoln Elementary Field Day" />
             </label>
+            <div className="flex" style={{ gap: 10 }}>
+              <label style={{ flex: 1 }}>Business name
+                <input className="input" value={f.businessName} onChange={set("businessName")} placeholder="(defaults to event name)" />
+              </label>
+              <label style={{ flex: 1 }}>Industry
+                <select className="select" value={f.industryId} onChange={set("industryId")}>
+                  <option value="">Select…</option>
+                  {industries.map((i) => <option key={i.id} value={i.id}>{i.type}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="flex" style={{ gap: 10 }}>
+              <label style={{ flex: 1 }}>Event status
+                <select className="select" value={f.status} onChange={set("status")}>
+                  <option value="pending">Pending (no client emails)</option>
+                  <option value="booked">Booked</option>
+                  <option value="confirmed">Confirmed</option>
+                </select>
+              </label>
+              <label className="flex" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 }}>
+                <input type="checkbox" checked={f.prepay} onChange={(e) => setF({ ...f, prepay: e.target.checked })} /> Prepay
+              </label>
+              <label className="flex" style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 18 }}>
+                <input type="checkbox" checked={f.kurbside} onChange={(e) => setF({ ...f, kurbside: e.target.checked })} /> Kurbside
+              </label>
+            </div>
             <label>Date *
               <input className="input" type="date" value={f.date} onChange={set("date")} />
             </label>
@@ -240,10 +290,18 @@ export default function NewEvent() {
               <label style={{ flex: 1 }}>Zip *
                 <input className="input" value={f.zipCode} onChange={set("zipCode")} />
               </label>
+              <label style={{ flex: 1 }}>County
+                <input className="input" value={f.county} onChange={set("county")} />
+              </label>
             </div>
-            <label>Contact name *
-              <input className="input" value={f.contactName} onChange={set("contactName")} />
-            </label>
+            <div className="flex" style={{ gap: 10 }}>
+              <label style={{ flex: 2 }}>Contact name *
+                <input className="input" value={f.contactName} onChange={set("contactName")} />
+              </label>
+              <label style={{ flex: 1 }}>Title
+                <input className="input" value={f.contactTitle} onChange={set("contactTitle")} />
+              </label>
+            </div>
             <div className="flex" style={{ gap: 10 }}>
               <label style={{ flex: 1 }}>Contact email *
                 <input className="input" type="email" value={f.contactEmail} onChange={set("contactEmail")} />
@@ -320,8 +378,11 @@ export default function NewEvent() {
                 </select>
               </label>
             </div>
-            <label>Additional notes
-              <textarea className="input" rows={3} value={f.extraNotes} onChange={set("extraNotes")} />
+            <label>Additional admin notes
+              <textarea className="input" rows={2} value={f.extraNotes} onChange={set("extraNotes")} />
+            </label>
+            <label>Event notes (visible on the event)
+              <textarea className="input" rows={2} value={f.eventNotes} onChange={set("eventNotes")} />
             </label>
           </div>
         </div>

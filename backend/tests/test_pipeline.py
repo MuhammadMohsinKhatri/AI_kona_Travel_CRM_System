@@ -14,7 +14,7 @@ os.environ["PIPELINE_DRY_RUN"] = "false"
 
 from app.core.pipeline import run_pipeline  # noqa: E402
 from app.db.base import Base, SessionLocal, engine  # noqa: E402
-from app.models import Alert, Event, Invoice, PipelineRun  # noqa: E402
+from app.models import Alert, Event, FinancialEntry, Invoice, PipelineRun  # noqa: E402
 
 
 def setup_module(_):
@@ -51,5 +51,16 @@ def test_full_pipeline_runs_end_to_end():
         corp = db.query(Event).filter(Event.crm_event_id == "EVT-1005").one()
         assert corp.status == "needs_review"
         assert db.query(Alert).filter(Alert.event_id == corp.id).count() >= 1
+
+        # Financial ledger (Postgres, replaces the Google Sheet): one row per
+        # processed event, carrying the calculated totals + Square data.
+        entries = db.query(FinancialEntry).all()
+        assert len(entries) == run.events_processed
+        lincoln_entry = (
+            db.query(FinancialEntry).filter(FinancialEntry.event_id == lincoln.id).one()
+        )
+        assert lincoln_entry.invoice_total == lincoln.final_invoice_amount
+        assert lincoln_entry.month == lincoln.event_date[:7]
+        assert lincoln_entry.square_sales >= 0
     finally:
         db.close()

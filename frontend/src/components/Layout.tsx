@@ -5,6 +5,7 @@ const links = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/events", label: "Events" },
   { to: "/invoices", label: "Invoices" },
+  { to: "/financials", label: "Financials" },
   { to: "/alerts", label: "Alerts" },
   { to: "/runs", label: "Pipeline Runs" },
   { to: "/api-explorer", label: "API Explorer" },

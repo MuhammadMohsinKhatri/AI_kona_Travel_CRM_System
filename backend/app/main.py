@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import alerts, auth, dashboard, events, health, invoices, pipeline
+from app.api.routes import (alerts, auth, dashboard, events, financials, health,
+                            invoices, pipeline)
 from app.bootstrap import init_db
 from app.config import settings
 from app.konaos import router as konaos
@@ -41,6 +42,7 @@ app.include_router(events.router)
 app.include_router(invoices.router)
 app.include_router(alerts.router)
 app.include_router(pipeline.router)
+app.include_router(financials.router)
 # KonaOS CRM proxy endpoints (merged from the Konaos_crms_apis project)
 app.include_router(konaos.router, prefix="/api/konaos", tags=["konaos"])
 

@@ -82,7 +82,6 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
     crm = factory.get_crm()
     square = factory.get_square()
     classifier = factory.get_classifier()
-    sheets = factory.get_sheets()
     notifier = factory.get_notifier()
 
     log: list[str] = []
@@ -262,19 +261,19 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 drop_errored(items, item, exc, "alerts")
         progress.set("alerts", "done", f"{run.alerts_raised} raised")
 
-        # ── PHASE 8: REPORT ─────────────────────────────────────────────────
+        # ── PHASE 8: REPORT — financial ledger in Postgres ──────────────────
+        # (Replaces the monthly Google Sheet; SheetsClient remains available
+        # for an optional export but is no longer part of the pipeline.)
         progress.set("report", "running")
         for i, item in enumerate(list(items), 1):
             progress.counter("report", i, len(items))
             try:
-                sheets.append_row(
-                    item["cleaned"].get("BRAND", ""),
-                    _sheet_row(item["cleaned"], item["calc"]),
-                )
+                _upsert_financial_entry(db, run, item)
                 run.events_processed += 1
+                db.commit()
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "report")
-        progress.set("report", "done", f"{run.events_processed} events")
+        progress.set("report", "done", f"{run.events_processed} ledger rows")
 
         run.status = "completed"
         run.finished_at = datetime.now(timezone.utc)
@@ -401,18 +400,58 @@ def _mark_event_error(db: Session, run: PipelineRun, crm_id: str, error: str) ->
     db.commit()
 
 
-def _sheet_row(cleaned: dict[str, Any], calc: dict[str, Any]) -> dict[str, Any]:
-    month_tab = (cleaned.get("DATE") or "")[:7]  # YYYY-MM
-    return {
-        "_month_tab": month_tab,
-        "Date": cleaned.get("DATE"),
-        "Event": cleaned.get("EVENT_NAME"),
-        "Code": cleaned.get("EVENT_CODE"),
-        "Brand": cleaned.get("BRAND"),
-        "Status": cleaned.get("FINAL_EVENT_STATUS"),
-        "Invoice": calc.get("FINAL_INVOICE_AMOUNT"),
-        "Subtotal": calc.get("SUBTOTAL"),
-        "Tax": calc.get("SALES_TAX"),
-        "CC Fee": calc.get("CC_FEE"),
-        "Balance Due": calc.get("BALANCE_DUE"),
-    }
+def _num(v: Any) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any]) -> None:
+    """Write/refresh this event's row in the financial ledger (Postgres)."""
+    from app.models import FinancialEntry
+
+    cleaned = item["cleaned"]
+    calc = item["calc"]
+    cls = item["classification"]
+    sq = item.get("square") or {}
+    event: Event = item["event"]
+
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.event_id == event.id)
+        .one_or_none()
+    )
+    if entry is None:
+        entry = FinancialEntry(event_id=event.id)
+        db.add(entry)
+
+    entry.run_id = run.id
+    entry.crm_event_id = event.crm_event_id
+    entry.event_code = cleaned.get("EVENT_CODE")
+    entry.event_name = cleaned.get("EVENT_NAME", "")
+    entry.brand = cleaned.get("BRAND", "")
+    entry.event_date = cleaned.get("DATE")
+    entry.month = (cleaned.get("DATE") or "")[:7] or None
+    entry.final_status = cleaned.get("FINAL_EVENT_STATUS", "")
+    entry.event_type = str(cls.get("EVENT_TYPE", ""))
+    entry.billing_model = str(cls.get("BILLING_MODEL", ""))
+
+    entry.units_served = _num(cls.get("UNITS_SERVED_TOTAL"))
+    entry.subtotal = _num(calc.get("SUBTOTAL"))
+    entry.sales_tax = _num(calc.get("SALES_TAX"))
+    entry.tax_rate = _num(calc.get("TAX_RATE"))
+    entry.cc_fee = _num(calc.get("CC_FEE"))
+    entry.invoice_total = _num(calc.get("FINAL_INVOICE_AMOUNT"))
+    entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
+    entry.balance_due = _num(calc.get("BALANCE_DUE"))
+    entry.payment_method = str(calc.get("PAYMENT_METHOD", ""))
+    entry.cash_collected = _num(cls.get("CASH_COLLECTED_AMOUNT"))
+    entry.has_variance = bool(calc.get("HAS_VARIANCE"))
+    entry.variance_amount = _num(calc.get("VARIANCE_AMOUNT"))
+
+    entry.square_sales = _num(sq.get("total_collected"))
+    entry.square_orders = int(sq.get("order_count") or 0)
+    entry.square_device = sq.get("device_id")
+
+    db.flush()

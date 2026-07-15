@@ -198,7 +198,14 @@ class StaffScheduleUsersListResponse(BaseModel):
 
 
 class CreateEventRequest(BaseModel):
-    """Request model for creating a new event."""
+    """Request model for creating a new event.
+
+    Extra fields (e.g. clientIndustriesTypeId, prePay, kurbsideEvent,
+    taxPercent, givebackPercentage) are allowed and forwarded verbatim
+    into the KonaOS quick-add payload.
+    """
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
     name: str = Field(..., description="Event name (required)")
     start_date_time: int = Field(..., alias="startDateTime", description="Event start date/time (Unix timestamp in milliseconds)")
     end_date_time: int = Field(..., alias="endDateTime", description="Event end date/time (Unix timestamp in milliseconds)")
