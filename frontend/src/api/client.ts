@@ -145,6 +145,7 @@ export interface FinancialsResponse {
   items: FinancialRow[];
   total: number;
   brands: string[];
+  event_types: string[];
   totals: {
     subtotal: number;
     sales_tax: number;

@@ -42,12 +42,42 @@ SHEET_COLUMNS: list[tuple[str, str]] = [
 ]
 
 
-def _filtered(db: Session, month: Optional[str], brand: Optional[str]):
+def _filtered(
+    db: Session,
+    month: Optional[str],
+    brand: Optional[str],
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    event_type: Optional[str] = None,
+    paid: Optional[bool] = None,
+    search: Optional[str] = None,
+):
+    """Shared filter chain for the list view and the CSV export.
+
+    A custom from/to date range (event_date is ISO YYYY-MM-DD, so plain string
+    comparison is correct) can be combined with or used instead of the month
+    shortcut.
+    """
     q = db.query(FinancialEntry)
     if month:
         q = q.filter(FinancialEntry.month == month)
+    if from_date:
+        q = q.filter(FinancialEntry.event_date >= from_date)
+    if to_date:
+        q = q.filter(FinancialEntry.event_date <= to_date)
     if brand:
         q = q.filter(FinancialEntry.brand == brand)
+    if event_type:
+        q = q.filter(FinancialEntry.event_type == event_type)
+    if paid is not None:
+        q = q.filter(FinancialEntry.paid == paid)
+    if search:
+        like = f"%{search.strip()}%"
+        q = q.filter(
+            FinancialEntry.event_name.ilike(like)
+            | FinancialEntry.event_code.ilike(like)
+            | FinancialEntry.crm_event_id.ilike(like)
+        )
     return q.order_by(FinancialEntry.event_date.desc().nullslast(), FinancialEntry.id.desc())
 
 
@@ -66,10 +96,15 @@ def list_entries(
     _: User = Depends(get_current_user),
     month: Optional[str] = Query(None),
     brand: Optional[str] = None,
+    from_date: Optional[str] = Query(None, description="Inclusive event_date lower bound (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="Inclusive event_date upper bound (YYYY-MM-DD)"),
+    event_type: Optional[str] = Query(None),
+    paid: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None, description="Matches event name / code / CRM id"),
 ) -> dict:
     """Key columns for the dashboard view (all 46 are in the CSV export)."""
-    items = _filtered(db, month, brand).all()
-    q = _filtered(db, month, brand)
+    items = _filtered(db, month, brand, from_date, to_date, event_type, paid, search).all()
+    q = _filtered(db, month, brand, from_date, to_date, event_type, paid, search)
     totals = q.with_entities(
         func.coalesce(func.sum(FinancialEntry.subtotal), 0.0),
         func.coalesce(func.sum(FinancialEntry.sales_tax), 0.0),
@@ -81,6 +116,9 @@ def list_entries(
         func.coalesce(func.sum(FinancialEntry.units_served), 0.0),
     ).one()
     brands = [r[0] for r in db.query(FinancialEntry.brand).distinct().all() if r[0]]
+    event_types = [
+        r[0] for r in db.query(FinancialEntry.event_type).distinct().all() if r[0]
+    ]
 
     def row(e: FinancialEntry) -> dict:
         return {
@@ -101,6 +139,7 @@ def list_entries(
         "items": [row(e) for e in items],
         "total": len(items),
         "brands": brands,
+        "event_types": event_types,
         "totals": {
             "subtotal": round(float(totals[0]), 2), "sales_tax": round(float(totals[1]), 2),
             "cc_fee": round(float(totals[2]), 2), "invoice_total": round(float(totals[3]), 2),
@@ -116,9 +155,14 @@ def export_csv(
     _: User = Depends(get_current_user),
     month: Optional[str] = Query(None),
     brand: Optional[str] = None,
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    event_type: Optional[str] = Query(None),
+    paid: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
 ) -> StreamingResponse:
     """Download the full 46-column ledger as CSV — the complete sheet replacement."""
-    items = _filtered(db, month, brand).all()
+    items = _filtered(db, month, brand, from_date, to_date, event_type, paid, search).all()
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([h for h, _attr in SHEET_COLUMNS])
