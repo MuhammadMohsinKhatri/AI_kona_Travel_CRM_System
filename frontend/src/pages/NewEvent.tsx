@@ -39,6 +39,7 @@ interface F {
   ratePerServing: string; baseAmount: string; unitsIncluded: string;
   hourlyRate: string; minFlat: string; mgPerHour: string; guestRate: string;
   locationFee: string;
+  serveKeep: string; paymentModel: string;
   attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
   actualCount: string; actualTimes: string; squareDevice: string;
@@ -54,6 +55,7 @@ const initial: F = {
   ratePerServing: "", baseAmount: "", unitsIncluded: "",
   hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "",
   locationFee: "",
+  serveKeep: "", paymentModel: "",
   attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
   actualCount: "", actualTimes: "", squareDevice: "",
@@ -119,6 +121,10 @@ function buildNotes(f: F): string {
         (f.guestRate ? ` Guests pay $${f.guestRate} per serving for extras.` : "")
       ); break;
   }
+  // Optional free-text contract detail (supplements the structured fields).
+  if (f.serveKeep.trim()) lines.push(f.serveKeep.trim());
+  if (f.paymentModel.trim()) lines.push(f.paymentModel.trim());
+  if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
   if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
   if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
   if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
@@ -385,33 +391,23 @@ export default function NewEvent() {
               <Seg options={[["NO", "No — taxable"], ["YES", "Yes — exempt"]]} value={f.taxExempt} onChange={(v) => up({ taxExempt: v as F["taxExempt"] })} />
               {f.taxExempt === "YES" && <div className="cond warn">Tax-exempt — keep the exemption certificate on file for this event.</div>}
             </Field>
-            <Row3>
-              <Field label="Deposit ($)"><input className="input" type="number" value={f.deposit} onChange={(e) => up({ deposit: e.target.value })} placeholder="0" /></Field>
-              <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
-              <Field label="Location fee ($)"><input className="input" type="number" value={f.locationFee} onChange={(e) => up({ locationFee: e.target.value })} placeholder="0" /></Field>
-            </Row3>
-          </Card>
-
-          {/* EVENT — contract */}
-          <Card title="Event — the contract" tag="at booking">
-            <Field label="Event type" req>
-              <Seg
-                options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
-                value={f.eventType}
-                onChange={(v) => {
-                  const models = modelsFor(v);
-                  up({ eventType: v as EventType, billing: models.length === 1 ? models[0].key : "" });
+            <Field label="Billing model" req hint="Predefined models — picking one sets the event type and reveals its pricing fields.">
+              <select
+                className="select"
+                value={f.billing}
+                onChange={(e) => {
+                  const model = BILLING_MODELS.find((m) => m.key === e.target.value);
+                  up({ billing: e.target.value, eventType: model ? model.type : f.eventType });
                 }}
-              />
+              >
+                <option value="">Select billing model…</option>
+                {(["Invoice", "Selling", "Min Guarantee", "Hybrid"] as EventType[]).map((t) => (
+                  <optgroup key={t} label={t}>
+                    {modelsFor(t).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                  </optgroup>
+                ))}
+              </select>
             </Field>
-            {f.eventType && (
-              <Field label="Billing model" req hint="Predefined models — pick one and fill its numbers below.">
-                <select className="select" value={f.billing} onChange={(e) => up({ billing: e.target.value })}>
-                  <option value="">Select billing model…</option>
-                  {modelsFor(f.eventType).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                </select>
-              </Field>
-            )}
             {f.billing && (FIELD_MAP[f.billing] ?? []).length > 0 && (
               <div className="cond">
                 <Row3>
@@ -430,10 +426,37 @@ export default function NewEvent() {
                 </Row3>
               </div>
             )}
+            <Row3>
+              <Field label="Giveback %"><input className="input" type="number" value={f.giveback} onChange={(e) => up({ giveback: e.target.value })} placeholder="0" /></Field>
+              <Field label="Deposit ($)"><input className="input" type="number" value={f.deposit} onChange={(e) => up({ deposit: e.target.value })} placeholder="0" /></Field>
+              <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
+            </Row3>
+            <Field label="Location fee ($)"><input className="input" type="number" value={f.locationFee} onChange={(e) => up({ locationFee: e.target.value })} placeholder="0" /></Field>
+          </Card>
+
+          {/* EVENT — contract */}
+          <Card title="Event — the contract" tag="at booking">
+            <Field label="Event type" req hint="Synced with the billing model above; pick a model there and this fills in.">
+              <Seg
+                options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
+                value={f.eventType}
+                onChange={(v) => {
+                  // Clear the billing model if it no longer matches the chosen type.
+                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
+                  up({ eventType: v as EventType, billing: keep ? f.billing : "" });
+                }}
+              />
+            </Field>
             <Row>
               <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
               <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
             </Row>
+            <Field label="Serve / Keep count" hint='Free-text pricing detail, e.g. "$295 covers 60 servings, each additional $4". Optional — the billing model above is the source of truth.'>
+              <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 covers 60 12oz Konas, each additional $4" />
+            </Field>
+            <Field label="PAYMENT — pricing model" hint='Free-text billing basis, e.g. "$295 plus tax for the hour". Optional.'>
+              <input className="input" value={f.paymentModel} onChange={(e) => up({ paymentModel: e.target.value })} placeholder="$295 plus tax for the hour" />
+            </Field>
             <Field label="Additional instructions">
               <input className="input" value={f.additional} onChange={(e) => up({ additional: e.target.value })} placeholder='e.g. "Hard stop at 100 servings"' />
             </Field>
