@@ -104,7 +104,10 @@ def list_entries(
 ) -> dict:
     """Key columns for the dashboard view (all 46 are in the CSV export)."""
     items = _filtered(db, month, brand, from_date, to_date, event_type, paid, search).all()
-    q = _filtered(db, month, brand, from_date, to_date, event_type, paid, search)
+    # order_by(None) strips the ORDER BY before aggregating — Postgres rejects
+    # "SELECT sum(...) ORDER BY event_date" (non-grouped column). SQLite happens
+    # to allow it, which is why this only ever failed in production.
+    q = _filtered(db, month, brand, from_date, to_date, event_type, paid, search).order_by(None)
     totals = q.with_entities(
         func.coalesce(func.sum(FinancialEntry.subtotal), 0.0),
         func.coalesce(func.sum(FinancialEntry.sales_tax), 0.0),
