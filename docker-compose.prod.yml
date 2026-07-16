@@ -131,8 +131,10 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # Read the host's `docker login ghcr.io` credentials for private images.
-      - /root/.docker/config.json:/config.json:ro
+      # NOTE: images are pulled anonymously — the GHCR packages must be PUBLIC.
+      # For private packages: `docker login ghcr.io` on the host, then add
+      #   - /root/.docker/config.json:/config.json:ro
+      # (only after the login — mounting a nonexistent file creates a directory)
     command: --label-enable --cleanup --interval 300
     deploy:
       resources:
