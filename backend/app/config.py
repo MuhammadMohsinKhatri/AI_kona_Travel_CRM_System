@@ -55,11 +55,15 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = ""
-    openai_model: str = "gpt-5.1"
+    # gpt-5-mini: structured extraction from short notes doesn't need the
+    # flagship model — mini is ~5x cheaper per token and accurate for this
+    # task; the deterministic rule_classifier handles form-generated events
+    # without any AI call at all.
+    openai_model: str = "gpt-5-mini"
     # $ per 1M tokens — used to compute per-run AI cost shown in the dashboard.
     # Update if OpenAI changes pricing or you switch models.
-    openai_input_cost_per_mtok: float = 1.25
-    openai_output_cost_per_mtok: float = 10.0
+    openai_input_cost_per_mtok: float = 0.25
+    openai_output_cost_per_mtok: float = 2.0
 
     # Google Sheets
     google_service_account_json: str = ""

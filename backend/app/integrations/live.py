@@ -104,6 +104,28 @@ class SquareLiveClient(SquareClient):
         }
 
 
+import re as _re
+
+# Per-field cap for text sent to the classifier. Notes fields occasionally
+# contain pasted rich-text with embedded base64 images — one real event
+# ballooned to 434k tokens and blew the model's context limit. Nothing the
+# classifier needs (pricing/type language) is anywhere near this long.
+_CLASSIFY_MAX_FIELD_CHARS = 6000
+_DATA_URI_RE = _re.compile(r"data:[\w/+.-]+;base64,[A-Za-z0-9+/=]{100,}")
+
+
+def _sanitize_for_classifier(cleaned: dict[str, Any]) -> dict[str, Any]:
+    """Bound the payload sent to OpenAI without touching the stored data."""
+    out: dict[str, Any] = {}
+    for k, v in cleaned.items():
+        if isinstance(v, str):
+            v = _DATA_URI_RE.sub("[embedded image removed]", v)
+            if len(v) > _CLASSIFY_MAX_FIELD_CHARS:
+                v = v[:_CLASSIFY_MAX_FIELD_CHARS] + " …[truncated]"
+        out[k] = v
+    return out
+
+
 class OpenAIClassifier(Classifier):
     def __init__(self) -> None:
         from openai import OpenAI
@@ -114,7 +136,7 @@ class OpenAIClassifier(Classifier):
 
     def classify(self, cleaned: dict[str, Any]) -> dict[str, Any]:
         user = "## ANALYZE THIS COMPLETED EVENT\n\n**PROVIDED EVENT DATA:**\n```json\n" \
-               + json.dumps(cleaned) + "\n```"
+               + json.dumps(_sanitize_for_classifier(cleaned)) + "\n```"
         resp = self.client.chat.completions.create(
             model=self.model,
             response_format={"type": "json_object"},

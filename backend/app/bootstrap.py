@@ -30,7 +30,31 @@ def _sync_columns() -> None:
         for table in Base.metadata.sorted_tables:
             if not inspector.has_table(table.name):
                 continue  # create_all just made it — already current
-            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            live_cols = inspector.get_columns(table.name)
+            existing = {c["name"] for c in live_cols}
+            model_cols = {c.name for c in table.columns}
+
+            # Orphaned columns (renamed/removed from the model) that are still
+            # NOT NULL block every INSERT — the model no longer supplies them
+            # (e.g. financial_entries.tax_rate → total_tax_rate). Relax them to
+            # nullable; we never drop data.
+            if engine.dialect.name != "sqlite":  # sqlite can't ALTER constraints
+                pk_cols = set(
+                    (inspector.get_pk_constraint(table.name) or {}).get(
+                        "constrained_columns"
+                    ) or []
+                )
+                for live in live_cols:
+                    if live["name"] in pk_cols:
+                        continue
+                    if live["name"] not in model_cols and not live.get("nullable", True):
+                        conn.execute(text(
+                            f'ALTER TABLE {table.name} '
+                            f'ALTER COLUMN {live["name"]} DROP NOT NULL'
+                        ))
+                        print(f"[INFO] schema sync: relaxed orphan NOT NULL "
+                              f"{table.name}.{live['name']}")
+
             for col in table.columns:
                 if col.name in existing:
                     continue

@@ -154,10 +154,20 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         from app.config import settings as _s
 
         progress.set("classify", "running")
+        from app.core.rule_classifier import try_rule_classify
+
+        rule_classified = 0
         for i, item in enumerate(list(items), 1):
             progress.counter("classify", i, len(items))
             try:
-                item["classification"] = classifier.classify(item["cleaned"])
+                # Code first: form-generated structured notes parse exactly
+                # (no cost, no model variance). Free-text notes go to the LLM.
+                classification = try_rule_classify(item["cleaned"])
+                if classification is not None:
+                    rule_classified += 1
+                else:
+                    classification = classifier.classify(item["cleaned"])
+                item["classification"] = classification
                 usage = item["classification"].get("_usage") or {}
                 run.ai_prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
                 run.ai_completion_tokens += int(usage.get("completion_tokens", 0) or 0)
@@ -170,6 +180,8 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         )
         total_tok = run.ai_prompt_tokens + run.ai_completion_tokens
         classify_detail = f"{len(items)} classified"
+        if rule_classified:
+            classify_detail += f" · {rule_classified} rule-based (no AI)"
         if total_tok:
             classify_detail += f" · {total_tok:,} tok · ${run.ai_cost_usd:.3f}"
         progress.set("classify", "done", classify_detail)
