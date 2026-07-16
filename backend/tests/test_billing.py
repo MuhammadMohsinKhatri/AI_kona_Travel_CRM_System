@@ -70,6 +70,32 @@ def test_selling_with_giveback_deducts_share():
     assert calc["SUBTOTAL"] == 320.0
 
 
+def test_addon_added_as_taxable_amount():
+    # Fixed package $442.50 covers 90; plus $25 ice cream add-on.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BASE_AMOUNT": 442.50, "UNITS_INCLUDED_IN_BASE": 90,
+        "UNITS_SERVED_TOTAL": 90, "ADDON_AMOUNT": 25, "ADDON_LABEL": "Ice cream",
+        "TAXABLE": "NO",
+    })
+    assert calc["ADDON_AMOUNT"] == 25.0
+    assert calc["SUBTOTAL"] == 467.50  # 442.50 + 25
+
+
+def test_price_all_in_suppresses_tax_and_fee():
+    # $310 quoted all-in — no 6% tax, no 4% fee layered on top.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BASE_AMOUNT": 250, "UNITS_INCLUDED_IN_BASE": 60,
+        "UNITS_SERVED_TOTAL": 75, "RATE_PER_SERVING": 4,
+        "TAXABLE": "YES", "PRICE_IS_ALL_IN": "TRUE",
+    })
+    assert calc["SUBTOTAL"] == 310.0  # 250 + 15 over × 4
+    assert calc["SALES_TAX"] == 0.0
+    assert calc["CC_FEE"] == 0.0
+    assert calc["FINAL_INVOICE_AMOUNT"] == 310.0
+
+
 def test_balance_due_subtracts_deposit():
     calc = calculate_invoice({
         "BILLING_MODEL": "INVOICE_PER_SERVING",

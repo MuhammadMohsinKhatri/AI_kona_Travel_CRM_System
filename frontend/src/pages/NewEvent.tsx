@@ -39,6 +39,7 @@ interface F {
   ratePerServing: string; baseAmount: string; unitsIncluded: string;
   hourlyRate: string; minFlat: string; mgPerHour: string; guestRate: string;
   locationFee: string;
+  addonAmount: string; addonLabel: string; allIn: boolean;
   serveKeep: string; paymentModel: string;
   attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
@@ -55,6 +56,7 @@ const initial: F = {
   ratePerServing: "", baseAmount: "", unitsIncluded: "",
   hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "",
   locationFee: "",
+  addonAmount: "", addonLabel: "", allIn: false,
   serveKeep: "", paymentModel: "",
   attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
@@ -125,7 +127,9 @@ function buildNotes(f: F): string {
   if (f.serveKeep.trim()) lines.push(f.serveKeep.trim());
   if (f.paymentModel.trim()) lines.push(f.paymentModel.trim());
   if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
+  if (Number(f.addonAmount)) lines.push(`Plus $${f.addonAmount} for ${f.addonLabel || "add-on"}.`);
   if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
+  if (f.allIn) lines.push("Quoted total is all-in (tax and fee included).");
   if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
   if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
   lines.push(f.taxExempt === "YES" ? "Client is tax exempt." : "Plus tax.");
@@ -181,12 +185,12 @@ function estimate(f: F) {
     default:
       return null; // selling models: guests pay, no host invoice
   }
-  subtotal += n(f.locationFee);
+  subtotal += n(f.locationFee) + n(f.addonAmount);
   subtotal = Math.max(0, subtotal - n(f.discount));
-  const tax = f.taxExempt === "YES" ? 0 : +(subtotal * 0.06).toFixed(2);
-  const noFee = f.paid && f.method === "Check";
+  const tax = f.allIn || f.taxExempt === "YES" ? 0 : +(subtotal * 0.06).toFixed(2);
+  const noFee = f.allIn || (f.paid && f.method === "Check");
   const cc = noFee ? 0 : +(subtotal * 0.04).toFixed(2);
-  return { subtotal: +subtotal.toFixed(2), detail, tax, cc, noFee,
+  return { subtotal: +subtotal.toFixed(2), detail, tax, cc, noFee, allIn: f.allIn,
            total: +(subtotal + tax + cc).toFixed(2), deposit: n(f.deposit) };
 }
 
@@ -432,6 +436,18 @@ export default function NewEvent() {
               <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
             </Row3>
             <Field label="Location fee ($)"><input className="input" type="number" value={f.locationFee} onChange={(e) => up({ locationFee: e.target.value })} placeholder="0" /></Field>
+            <Row>
+              <Field label="Add-on / extra charge — label" hint='A flat extra on top, e.g. "Ice cream". Leave blank if none.'>
+                <input className="input" value={f.addonLabel} onChange={(e) => up({ addonLabel: e.target.value })} placeholder="Ice cream" />
+              </Field>
+              <Field label="Add-on amount ($)">
+                <input className="input" type="number" step="0.01" value={f.addonAmount} onChange={(e) => up({ addonAmount: e.target.value })} placeholder="0" />
+              </Field>
+            </Row>
+            <label className="chk">
+              <input type="checkbox" checked={f.allIn} onChange={(e) => up({ allIn: e.target.checked })} />
+              Quoted total is all-in — tax &amp; 4% fee already included (don't add them)
+            </label>
           </Card>
 
           {/* EVENT — contract */}
@@ -519,9 +535,10 @@ export default function NewEvent() {
               </p>
             ) : (
               <div className="kv" style={{ gridTemplateColumns: "1fr auto", gap: "4px 12px" }}>
-                <div className="k">Subtotal ({est.detail})</div><div className="v right">${est.subtotal.toFixed(2)}</div>
-                <div className="k">Sales tax {f.taxExempt === "YES" ? "(exempt)" : "6%"}</div><div className="v right">${est.tax.toFixed(2)}</div>
-                <div className="k">Card fee {est.noFee ? "(check — none)" : "4%"}</div><div className="v right">${est.cc.toFixed(2)}</div>
+                <div className="k">Subtotal ({est.detail}{Number(f.addonAmount) ? ` + $${Number(f.addonAmount)} ${f.addonLabel || "add-on"}` : ""})</div>
+                <div className="v right">${est.subtotal.toFixed(2)}</div>
+                <div className="k">Sales tax {est.allIn ? "(all-in)" : f.taxExempt === "YES" ? "(exempt)" : "6%"}</div><div className="v right">${est.tax.toFixed(2)}</div>
+                <div className="k">Card fee {est.allIn ? "(all-in)" : est.noFee ? "(check — none)" : "4%"}</div><div className="v right">${est.cc.toFixed(2)}</div>
                 {est.deposit > 0 && <><div className="k">Deposit</div><div className="v right">−${est.deposit.toFixed(2)}</div></>}
                 <div className="k" style={{ fontWeight: 700 }}>Balance due</div>
                 <div className="v right" style={{ fontWeight: 700 }}>${Math.max(0, est.total - est.deposit).toFixed(2)}</div>

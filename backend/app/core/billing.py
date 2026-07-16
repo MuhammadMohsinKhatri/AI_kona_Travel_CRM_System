@@ -62,6 +62,15 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     location_fee = _num(event.get("LOCATION_FEE"))
     deposit_amount = _num(event.get("DEPOSIT_AMOUNT"))
 
+    # Flat add-on / extra charge (e.g. "$25 for ice cream") — a taxable line
+    # item added on top of whatever the billing model produces.
+    addon_amount = _num(event.get("ADDON_AMOUNT"))
+    addon_label = str(event.get("ADDON_LABEL") or "").strip()
+
+    # When the quoted prices are already tax + fee inclusive ("$310 all-in"),
+    # no tax or processing fee is layered on top.
+    price_is_all_in = str(event.get("PRICE_IS_ALL_IN") or "").upper() in ("TRUE", "YES", "1")
+
     # Extracted for audit only — never re-applied (BASE_AMOUNT is post-discount).
     discount_percent = _num(event.get("DISCOUNT_PERCENT"))
     discount_amount = _num(event.get("DISCOUNT_AMOUNT"))
@@ -161,14 +170,18 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     else:  # UNDEFINED / unrecognized
         subtotal = base_amount + location_fee
 
+    # Flat add-on / extra charge applies to every model.
+    subtotal += addon_amount
+
     # ── TAX + PROCESSING FEE ────────────────────────────────────────────────────
     # The 4% fee applies by default (payment method is rarely known upfront;
     # check-payers deduct it themselves). It is skipped only when the notes
     # already CONFIRM a check payment, or when explicitly waived after a
-    # check arrives (waive_cc_fee).
-    tax_rate = TAX_RATE if taxable else 0.0
+    # check arrives (waive_cc_fee). When PRICE_IS_ALL_IN, the quoted prices
+    # already include tax + fee, so neither is layered on top.
+    tax_rate = 0.0 if price_is_all_in else (TAX_RATE if taxable else 0.0)
     confirmed_check_payment = payment_method == "CHECK" and is_paid
-    cc_fee_applies = not (waive_cc_fee or confirmed_check_payment)
+    cc_fee_applies = not (price_is_all_in or waive_cc_fee or confirmed_check_payment)
     cc_fee_rate = CC_FEE_RATE if cc_fee_applies else 0.0
     sales_tax = _r2(subtotal * tax_rate)
     cc_fee = _r2(subtotal * cc_fee_rate)
@@ -231,6 +244,10 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         "GUEST_AMOUNT": _r2(guest_amount),
         "MINIMUM_REQUIRED": _r2(minimum_required),
         "MG_SHORTFALL": _r2(ai_mg_shortfall),
+        # ── ADD-ON / ALL-IN ──
+        "ADDON_AMOUNT": _r2(addon_amount),
+        "ADDON_LABEL": addon_label,
+        "PRICE_IS_ALL_IN": price_is_all_in,
         # ── TAX & FEES ──
         "TAX_RATE": tax_rate,
         "SALES_TAX": sales_tax,

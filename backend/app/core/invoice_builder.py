@@ -152,6 +152,12 @@ def build_invoice_payload(
 
     if location_fee > 0:
         add_item("Location / Destination Fee", location_fee, 1, location_fee, True)
+
+    # Flat add-on / extra charge (e.g. ice cream) as its own taxable line item.
+    addon_amount = _num(calc.get("ADDON_AMOUNT"))
+    if addon_amount > 0:
+        add_item(str(calc.get("ADDON_LABEL") or "Add-on"), addon_amount, 1, addon_amount, True)
+
     if cc_fee > 0:
         add_item("Credit Card Processing Fee", cc_fee, 1, cc_fee, False)
 

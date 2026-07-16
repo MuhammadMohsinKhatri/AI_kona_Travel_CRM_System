@@ -665,6 +665,24 @@ Return this exact JSON. Every field must be present.
     "CASH_COLLECTED_DETECTED": "FALSE",
     "CASH_COLLECTED_AMOUNT": 0,
     "CHECK_INVOICE_AMOUNT": 0,
+    "ADDON_AMOUNT": 0,
+    "ADDON_LABEL": "",
+    "PRICE_IS_ALL_IN": "FALSE",
     "NOTE": "Reasoning"
   }
 }
+
+### ADD-ON / EXTRA CHARGE
+
+A flat extra charge stated ON TOP of the package/serving price — separate from
+per-serving overage — goes to ADDON_AMOUNT with a short ADDON_LABEL.
+  "$250 package ... plus $25 for ice cream" -> ADDON_AMOUNT: 25, ADDON_LABEL: "Ice cream"
+Do NOT use ADDON for per-serving overage rates (those are RATE_PER_SERVING) or
+for something that merely describes what the included servings can be
+  ("60 Kona's/Novelty Ice Creams" is NOT an add-on — same package, no extra charge).
+
+### PRICE_IS_ALL_IN
+
+Set "TRUE" only when the notes state the quoted total ALREADY includes tax and/or
+the processing fee ("$310 all-in", "tax included", "out the door $X"). When TRUE,
+the backend adds NO tax or 4% fee on top. Default "FALSE" (tax + fee are added).

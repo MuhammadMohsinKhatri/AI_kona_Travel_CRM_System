@@ -50,6 +50,12 @@ class Classification(BaseModel):
     CASH_COLLECTED_DETECTED: str = "FALSE"
     CASH_COLLECTED_AMOUNT: float = 0.0
     CHECK_INVOICE_AMOUNT: float = 0.0
+    # Flat add-on / extra charge on top of the billing model (e.g. "$25 for
+    # ice cream"). ADDON_LABEL names it; both default empty/0.
+    ADDON_AMOUNT: float = 0.0
+    ADDON_LABEL: str = ""
+    # TRUE when a quoted total already includes tax + processing fee ("all-in").
+    PRICE_IS_ALL_IN: str = "FALSE"
     NOTE: str = ""
     # Alert keys emitted by the classifier for the alert engine to interpret.
     ALERT: list[str] = Field(default_factory=list)
