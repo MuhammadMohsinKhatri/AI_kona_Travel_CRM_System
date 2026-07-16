@@ -1,9 +1,8 @@
-"""KonaOS CRM proxy endpoints — merged from the Konaos_crms_apis project.
+"""KonaOS CRM endpoints — direct client for api.konaos.com.
 
-Mounted at /api/konaos by app.main. Endpoint behaviour is preserved from the
-original src/main.py; auth accepts the original X-API-Key (GPT_API_KEY) or a
-dashboard JWT. The KonaosClient singleton is created via init_konaos() from
-the main app's lifespan.
+Mounted at /api/konaos by app.main. Auth accepts an X-API-Key header
+(GPT_API_KEY) or a dashboard JWT. The KonaosClient singleton is created via
+init_konaos() from the main app's lifespan.
 """
 import os
 import re
@@ -507,6 +506,12 @@ async def konaos_quick_create(
     doesn't return one) so the UI can link straight to the KonaOS edit page."""
     init_konaos()
     kc = konaos_client
+    extras = dict(event.model_extra or {})
+    # driverNotes is NOT part of the KonaOS quick-add DTO — it's a field on the
+    # event record (set after the event happens), not at creation. Forwarding it
+    # makes KonaOS reject the whole body as "invalid JSON". Pull it out here and
+    # write it via a follow-up update once we have the event id.
+    driver_notes = (extras.pop("driverNotes", "") or "").strip()
     try:
         resp = await kc.create_event(
             name=event.name,
@@ -531,7 +536,7 @@ async def konaos_quick_create(
             event_status=event.event_status,
             manual_status=event.manual_status,
             payment_term=event.payment_term,
-            **(event.model_extra or {}),
+            **extras,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code,
@@ -561,15 +566,35 @@ async def konaos_quick_create(
     except Exception:
         pass  # creation succeeded; link lookup is best-effort
 
+    # Driver actuals can't be set at quick-add time; write them onto the event
+    # record now that we have its id (best-effort — never fails the create).
+    driver_notes_written = False
+    driver_notes_error = None
+    if driver_notes:
+        if event_id:
+            try:
+                await kc.update_event(event_id, driverNotes=driver_notes)
+                driver_notes_written = True
+            except Exception as e:  # noqa: BLE001 — surface, don't fail the create
+                driver_notes_error = str(e)
+        else:
+            driver_notes_error = "event id could not be resolved"
+
+    message = "Event created in Kona OS."
+    if driver_notes and not driver_notes_written:
+        message += " (Driver notes couldn't be saved automatically — add them in Kona OS.)"
+
     edit_url = (
         f"{ADMIN_BASE_URL}/#/franchise/events/edit-event?id={event_id}&eventType=list"
         if event_id else None
     )
     return {
         "success": True,
-        "message": "Event created in Kona OS.",
+        "message": message,
         "eventId": event_id,
         "editUrl": edit_url,
+        "driverNotesWritten": driver_notes_written,
+        "driverNotesError": driver_notes_error,
         "raw": resp,
     }
 

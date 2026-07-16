@@ -200,9 +200,12 @@ class StaffScheduleUsersListResponse(BaseModel):
 class CreateEventRequest(BaseModel):
     """Request model for creating a new event.
 
-    Extra fields (e.g. clientIndustriesTypeId, prePay, kurbsideEvent,
-    taxPercent, givebackPercentage) are allowed and forwarded verbatim
-    into the KonaOS quick-add payload.
+    Extra fields are allowed, but only those that are real KonaOS quick-add
+    payload keys survive — clientIndustriesTypeId, prePay, taxPercent,
+    givebackPercentage pass through; invented ones (kurbsideEvent, driverNotes)
+    are dropped in KonaosClient.create_event so KonaOS doesn't reject the whole
+    body with "invalidJsonError". driverNotes is instead written via a
+    follow-up event update once the new event id is known.
     """
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 

@@ -110,6 +110,8 @@ export interface QuickCreateResult {
   message: string;
   eventId: string | null;
   editUrl: string | null;
+  driverNotesWritten?: boolean;
+  driverNotesError?: string | null;
 }
 
 export interface FinancialRow {

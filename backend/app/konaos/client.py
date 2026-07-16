@@ -1144,9 +1144,18 @@ class KonaosClient:
             "zipCode": zip_code
         }
         
-        # Add any additional fields from kwargs
-        payload.update(kwargs)
-        
+        # Merge caller-supplied extras, but ONLY keys that are real quick-add
+        # fields (i.e. already present in the canonical payload above). KonaOS
+        # rejects the entire body with "invalidJsonError" if it sees an unknown
+        # property, so invented fields like kurbsideEvent / driverNotes must be
+        # dropped here rather than forwarded verbatim. This mirrors how the CRM
+        # proxy / n8n create path only ever sends known fields.
+        allowed_keys = set(payload.keys())
+        dropped = [k for k in kwargs if k not in allowed_keys]
+        if dropped:
+            print(f"[WARNING] create_event: dropping unknown quick-add fields: {dropped}")
+        payload.update({k: v for k, v in kwargs.items() if k in allowed_keys})
+
         response = await self._make_request(
             "POST",
             "/api/v1/secure/events/quick-add",
