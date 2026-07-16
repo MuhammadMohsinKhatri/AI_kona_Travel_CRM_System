@@ -10,10 +10,6 @@ import { api, FormOptions, QuickCreateResult } from "../api/client";
 
 type EventType = "Invoice" | "Selling" | "Min Guarantee" | "Hybrid";
 type PayMethod = "Check" | "Credit Card" | "Cash";
-const TYPE_TO_LOWER: Record<EventType, string> = {
-  Invoice: "invoice", Selling: "selling",
-  "Min Guarantee": "minimum guarantee", Hybrid: "hybrid",
-};
 
 /** Predefined billing models, filtered by event type. */
 const BILLING_MODELS: { key: string; label: string; type: EventType }[] = [
@@ -95,19 +91,19 @@ function hoursBetween(f: F): number {
   return Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
 }
 
-/** Deterministic classifier notes from the structured fields. */
-function buildNotes(f: F): string {
+/** ADMIN NOTES — the free-text pricing/financial quote (matches how KonaOS
+ *  Admin Notes are written). This is the billing basis the classifier reads. */
+function buildAdminNotes(f: F): string {
   const lines: string[] = [];
-  lines.push(`EVENT TYPE: ${f.eventType ? TYPE_TO_LOWER[f.eventType as EventType] : "—"}.`);
   switch (f.billing) {
     case "INVOICE_PER_SERVING":
-      lines.push(`Charge $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
+      lines.push(`$${f.ratePerServing || "0"} per serving. Send invoice.`); break;
     case "INVOICE_BASE_FEE_PLUS_SERVINGS":
       lines.push(`Setup fee $${f.baseAmount || "0"} plus $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
     case "INVOICE_FIXED_PACKAGE":
-      lines.push(`$${f.baseAmount || "0"} covers ${f.unitsIncluded || "0"} servings, each additional $${f.ratePerServing || "0"}. Send invoice.`); break;
+      lines.push(`$${f.baseAmount || "0"} covers up to ${f.unitsIncluded || "0"} servings, each additional $${f.ratePerServing || "0"} a piece. Send invoice.`); break;
     case "INVOICE_HOURLY":
-      lines.push(`Charge $${f.hourlyRate || "0"} per hour. Send invoice.`); break;
+      lines.push(`$${f.hourlyRate || "0"} per hour. Send invoice.`); break;
     case "SELLING_OPEN":
       lines.push("Open selling event. Guests pay individually."); break;
     case "SELLING_WITH_GIVEBACK":
@@ -123,29 +119,42 @@ function buildNotes(f: F): string {
         (f.guestRate ? ` Guests pay $${f.guestRate} per serving for extras.` : "")
       ); break;
   }
-  // Optional free-text contract detail (supplements the structured fields).
-  if (f.serveKeep.trim()) lines.push(f.serveKeep.trim());
   if (f.paymentModel.trim()) lines.push(f.paymentModel.trim());
   if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
   if (Number(f.addonAmount)) lines.push(`Plus $${f.addonAmount} for ${f.addonLabel || "add-on"}.`);
   if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
-  if (f.allIn) lines.push("Quoted total is all-in (tax and fee included).");
   if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
   if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
   lines.push(f.taxExempt === "YES" ? "Client is tax exempt." : "Plus tax.");
-  if (f.attendees) lines.push(`About ${f.attendees} attendees.`);
-  if (f.additional) lines.push(f.additional.trim());
+  if (f.allIn) lines.push("Quoted total is all-in (tax and fee included).");
   if (f.cardOnly) lines.push("Card only, no on-site cash.");
-  if (needServe(f.eventType) && f.actualCount) lines.push(`Served ${f.actualCount} total.`);
-  if (f.paid) {
-    lines.push("Payment received.");
-    if (f.method) lines.push(`Paid by ${f.method.toLowerCase()}.`);
-    if (f.method === "Cash" && f.cashAmount) lines.push(`Collected $${f.cashAmount} cash.`);
-  }
-  if (f.actualTimes) lines.push(f.actualTimes.trim());
-  if (f.squareDevice) lines.push(`Used ${f.squareDevice}.`);
-  if (f.parking) lines.push(`Parking: ${f.parking.trim()}`);
   return lines.join(" ");
+}
+
+/** EVENT NOTES — the labeled structure KonaOS uses (EVENT TYPE / ATTENDEES /
+ *  SERVE & KEEP COUNT / ADD'L INSTRUCTION). Returns "LABEL: value" lines. */
+function buildEventNotes(f: F): string[] {
+  const lines: string[] = [];
+  lines.push(`EVENT TYPE: ${f.eventType || "—"}`);
+  if (f.attendees) lines.push(`ATTENDEES: ${f.attendees} people`);
+  const serve = f.serveKeep.trim() || (f.unitsIncluded ? `${f.unitsIncluded} servings included` : "");
+  if (serve) lines.push(`SERVE & KEEP COUNT: ${serve}`);
+  if (f.parking) lines.push(`PARKING: ${f.parking.trim()}`);
+  if (f.additional) lines.push(`ADD'L INSTRUCTION: ${f.additional.trim()}`);
+  return lines;
+}
+
+/** DRIVER NOTES — the actuals, only when the admin is entering a closed event. */
+function buildDriverNotes(f: F): string[] {
+  const lines: string[] = [];
+  if (f.actualCount) lines.push(`ACTUAL SERVING COUNT: ${f.actualCount}`);
+  if (f.paid) {
+    lines.push(`PAID: ${f.method ? f.method : "yes"}`);
+    if (f.method === "Cash" && f.cashAmount) lines.push(`CASH COLLECTED: $${f.cashAmount}`);
+  }
+  if (f.actualTimes) lines.push(`ACTUAL TIMES: ${f.actualTimes.trim()}`);
+  if (f.squareDevice) lines.push(`SQUARE DEVICE: ${f.squareDevice.trim()}`);
+  return lines;
 }
 
 /** Exact estimate from the structured fields (mirrors the billing engine). */
@@ -209,7 +218,9 @@ export default function NewEvent() {
     });
   }, []);
 
-  const notes = useMemo(() => buildNotes(f), [f]);
+  const adminNotes = useMemo(() => buildAdminNotes(f), [f]);
+  const eventNotes = useMemo(() => buildEventNotes(f), [f]);
+  const driverNotes = useMemo(() => buildDriverNotes(f), [f]);
   const est = useMemo(() => estimate(f), [f]);
   const up = (patch: Partial<F>) => setF((prev) => ({ ...prev, ...patch }));
 
@@ -257,8 +268,9 @@ export default function NewEvent() {
         contactTitle: f.contactTitle,
         contactEmail: f.contactEmail,
         contactPhone: f.contactPhone,
-        adminNotes: notes,
-        notes: f.parking ? `<p>Parking: ${f.parking}</p>` : "",
+        adminNotes: adminNotes,
+        notes: `<p>${eventNotes.join("<br>")}</p>`,
+        driverNotes: driverNotes.length ? driverNotes.join("\n") : "",
         manualStatus: f.status,
         clientIndustriesTypeId: f.industryId || "",
         prePay: f.prepay,
@@ -521,8 +533,17 @@ export default function NewEvent() {
           </div>
 
           <div className="card" style={{ marginBottom: 14 }}>
-            <div className="section-title" style={{ marginTop: 0 }}>Generated notes → invoicing engine</div>
-            <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "30vh" }}>{notes}</pre>
+            <div className="section-title" style={{ marginTop: 0 }}>Notes written to Kona OS</div>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>ADMIN NOTES</div>
+            <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "18vh", marginBottom: 10 }}>{adminNotes}</pre>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>EVENT NOTES</div>
+            <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "18vh", marginBottom: driverNotes.length ? 10 : 0 }}>{eventNotes.join("\n")}</pre>
+            {driverNotes.length > 0 && (
+              <>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>DRIVER NOTES</div>
+                <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "14vh" }}>{driverNotes.join("\n")}</pre>
+              </>
+            )}
           </div>
 
           <div className="card">
