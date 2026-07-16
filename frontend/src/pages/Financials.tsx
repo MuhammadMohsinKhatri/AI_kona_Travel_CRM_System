@@ -20,13 +20,14 @@ export default function Financials() {
   const [search, setSearch] = useState<string>("");
   const [debounced, setDebounced] = useState<string>("");
   const [data, setData] = useState<FinancialsResponse | null>(null);
+  const [error, setError] = useState<string>("");
   const navigate = useNavigate();
 
   useEffect(() => {
     api.financialMonths().then((ms) => {
       setMonths(ms);
       if (ms.length && !month) setMonth(ms[0]);
-    });
+    }).catch(() => { /* surfaced by the list fetch below */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -50,7 +51,10 @@ export default function Financials() {
 
   useEffect(() => {
     setData(null);
-    api.financials(params).then(setData);
+    setError("");
+    api.financials(params)
+      .then(setData)
+      .catch((e: any) => setError(e?.message || "Failed to load the ledger."));
   }, [params]);
 
   /** Month shortcut and custom range are alternatives — using one clears the other. */
@@ -132,7 +136,15 @@ export default function Financials() {
         {data && <span className="muted">{data.total} entries</span>}
       </div>
 
-      {!data ? (
+      {error ? (
+        <div className="card" style={{ borderColor: "var(--crit)" }}>
+          <strong>Couldn't load the ledger:</strong> {error}
+          <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+            Check that the backend is up (<code>docker compose ps</code>) and its logs
+            (<code>docker compose logs backend</code>).
+          </div>
+        </div>
+      ) : !data ? (
         <Loading />
       ) : data.items.length === 0 ? (
         <Empty
