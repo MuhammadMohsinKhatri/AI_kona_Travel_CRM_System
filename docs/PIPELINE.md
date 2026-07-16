@@ -25,11 +25,12 @@ step-by-step progress. Runs execute non-blocking: a FastAPI background task
 schedule. Per-event failures are isolated — the event is marked `error` and
 dropped from remaining phases without failing the run.
 
-The live CRM client targets the **Konaos_crms_apis** proxy (local repo
-`C:\Cursor Projects\Konaos_crms_apis`): auth via `X-API-Key` header
-(`KONA_CRM_TOKEN`), `/events` paginated `{count, data}` (limit ≤ 100) with
-epoch-ms `fromDate`/`toDate` filters on `startDateTime` — a date-scoped run
-passes the target date's NY-local bounds.
+The CRM client (`CRM_PROVIDER=konaos`) is the in-process KonaOS client
+(`backend/app/konaos/`) talking directly to `api.konaos.com`: events come from
+the paginated grid-data endpoint (limit ≤ 100) filtered by epoch-ms
+`fromDate`/`toDate` on `startDateTime` — a date-scoped run passes the target
+date's NY-local bounds. The same client powers the `/api/konaos/*` endpoints
+and the New Event form.
 
 ## Node → module map
 

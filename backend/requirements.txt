@@ -13,7 +13,6 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.19
-tenacity==9.0.0
 beautifulsoup4==4.12.3
 python-dotenv==1.0.1
 openai==1.57.0

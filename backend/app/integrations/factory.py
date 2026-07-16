@@ -20,13 +20,9 @@ from app.integrations.base import (
 @lru_cache
 def get_crm() -> CRMClient:
     if settings.crm_provider == "konaos":
-        # Direct in-process KonaOS client (merged Konaos_crms_apis code).
+        # Direct in-process KonaOS client (app.konaos) — talks to api.konaos.com.
         from app.integrations.konaos_direct import KonaOSDirectCRMClient
         return KonaOSDirectCRMClient()
-    if settings.crm_provider == "live":
-        # HTTP client against a separately-deployed proxy (legacy Railway setup).
-        from app.integrations.live import KonaCRMClient
-        return KonaCRMClient()
     from app.integrations.mocks import MockCRMClient
     return MockCRMClient()
 

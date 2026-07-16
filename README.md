@@ -90,7 +90,7 @@ Set the corresponding provider to `live` and supply credentials in `backend/.env
 
 | Env var | Purpose |
 |---|---|
-| `CRM_PROVIDER` / `KONA_CRM_BASE_URL` / `KONA_CRM_TOKEN` | Kona CRM events + invoices API |
+| `CRM_PROVIDER=konaos` / `KONAOS_*` vars | KonaOS CRM events + invoices (direct, in-process) |
 | `SQUARE_PROVIDER` / `SQUARE_KONA_TOKEN` / `SQUARE_TOM_TOKEN` | Square orders/payments (per brand) |
 | `OPENAI_PROVIDER` / `OPENAI_API_KEY` / `OPENAI_MODEL` | Classifier LLM |
 | `SHEETS_PROVIDER` / `GOOGLE_SERVICE_ACCOUNT_JSON` / `*_SHEET_ID` | Monthly reporting sheet |

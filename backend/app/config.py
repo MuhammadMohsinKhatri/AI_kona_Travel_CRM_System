@@ -38,16 +38,13 @@ class Settings(BaseSettings):
     first_admin_email: str = "admin@konaice.com"
     first_admin_password: str = "changeme"
 
-    # Providers: "mock" | "live"
+    # Providers — CRM: "mock" | "konaos" (in-process KonaOS client);
+    # the rest: "mock" | "live"
     crm_provider: str = "mock"
     square_provider: str = "mock"
     openai_provider: str = "mock"
     sheets_provider: str = "mock"
     telegram_provider: str = "mock"
-
-    # Kona CRM
-    kona_crm_base_url: str = "https://konaoscrmsapis-production.up.railway.app"
-    kona_crm_token: str = ""
 
     # Square
     square_api_base: str = "https://connect.squareup.com"

@@ -30,7 +30,7 @@ class KonaOSDirectCRMClient(CRMClient):
     # ── CRMClient interface ──────────────────────────────────────────────
 
     def list_events(self, from_ms=None, to_ms=None) -> list[dict[str, Any]]:
-        # Same defaults as the proxy's /events endpoint: last 30 days.
+        # Default window: last 30 days.
         if not from_ms:
             from_ms = int((time.time() - 30 * 24 * 60 * 60) * 1000)
         if not to_ms:

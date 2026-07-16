@@ -43,7 +43,7 @@ app.include_router(invoices.router)
 app.include_router(alerts.router)
 app.include_router(pipeline.router)
 app.include_router(financials.router)
-# KonaOS CRM proxy endpoints (merged from the Konaos_crms_apis project)
+# KonaOS CRM endpoints (direct client for api.konaos.com)
 app.include_router(konaos.router, prefix="/api/konaos", tags=["konaos"])
 
 
