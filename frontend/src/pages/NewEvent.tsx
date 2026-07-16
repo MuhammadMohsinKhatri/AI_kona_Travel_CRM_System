@@ -4,10 +4,9 @@ import { api, FormOptions, QuickCreateResult } from "../api/client";
 
 /** Structured event intake → creates the event directly in Kona OS.
  *
- * One entry point, no double work. Segmented controls + conditional fields keep
- * typing minimal; the right rail shows the exact classifier notes and a live
- * invoice estimate. On submit the event is created in KOS and we link straight
- * to its KOS edit page. */
+ * One entry point, no double work. Event type + a predefined billing-model
+ * dropdown + structured number fields — no free-text pricing sentences — so
+ * the generated notes and the invoice estimate are exact. */
 
 type EventType = "Invoice" | "Selling" | "Min Guarantee" | "Hybrid";
 type PayMethod = "Check" | "Credit Card" | "Cash";
@@ -15,6 +14,20 @@ const TYPE_TO_LOWER: Record<EventType, string> = {
   Invoice: "invoice", Selling: "selling",
   "Min Guarantee": "minimum guarantee", Hybrid: "hybrid",
 };
+
+/** Predefined billing models, filtered by event type. */
+const BILLING_MODELS: { key: string; label: string; type: EventType }[] = [
+  { key: "INVOICE_PER_SERVING", label: "Per serving — $X per serving", type: "Invoice" },
+  { key: "INVOICE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X per serving", type: "Invoice" },
+  { key: "INVOICE_FIXED_PACKAGE", label: "Fixed package — floor covers N servings, overage extra", type: "Invoice" },
+  { key: "INVOICE_HOURLY", label: "Hourly — $X per hour", type: "Invoice" },
+  { key: "SELLING_OPEN", label: "Open selling — guests pay individually", type: "Selling" },
+  { key: "SELLING_WITH_GIVEBACK", label: "Selling with giveback %", type: "Selling" },
+  { key: "MIN_GUARANTEE_FLAT", label: "Flat minimum guarantee", type: "Min Guarantee" },
+  { key: "MIN_GUARANTEE_HOURLY", label: "Minimum guarantee per hour", type: "Min Guarantee" },
+  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Host base covers N servings, guests pay extras", type: "Hybrid" },
+];
+
 interface F {
   brandId: string; name: string; businessName: string; industryId: string;
   status: string; date: string; startTime: string; endTime: string;
@@ -22,8 +35,11 @@ interface F {
   address: string; city: string; state: string; zip: string; county: string;
   contactName: string; contactTitle: string; contactEmail: string; contactPhone: string;
   taxExempt: "" | "NO" | "YES"; giveback: string; deposit: string; discount: string;
-  eventType: "" | EventType; mgPerHour: string; attendees: string; parking: string;
-  serveKeep: string; paymentModel: string; additional: string; cardOnly: boolean;
+  eventType: "" | EventType; billing: string;
+  ratePerServing: string; baseAmount: string; unitsIncluded: string;
+  hourlyRate: string; minFlat: string; mgPerHour: string; guestRate: string;
+  locationFee: string;
+  attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
   actualCount: string; actualTimes: string; squareDevice: string;
 }
@@ -34,30 +50,82 @@ const initial: F = {
   address: "", city: "", state: "Maryland", zip: "", county: "",
   contactName: "", contactTitle: "", contactEmail: "", contactPhone: "",
   taxExempt: "", giveback: "", deposit: "", discount: "",
-  eventType: "", mgPerHour: "", attendees: "", parking: "",
-  serveKeep: "", paymentModel: "", additional: "", cardOnly: false,
+  eventType: "", billing: "",
+  ratePerServing: "", baseAmount: "", unitsIncluded: "",
+  hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "",
+  locationFee: "",
+  attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
   actualCount: "", actualTimes: "", squareDevice: "",
 };
 
 const needServe = (t: string) => t === "Invoice" || t === "Hybrid";
+const modelsFor = (t: string) => BILLING_MODELS.filter((m) => m.type === t);
 
-/** Plain-text notes phrased for the AI classifier. */
+/** Which structured pricing fields each billing model needs. */
+const FIELD_MAP: Record<string, string[]> = {
+  INVOICE_PER_SERVING: ["ratePerServing"],
+  INVOICE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
+  INVOICE_FIXED_PACKAGE: ["baseAmount", "unitsIncluded", "ratePerServing"],
+  INVOICE_HOURLY: ["hourlyRate"],
+  SELLING_OPEN: [],
+  SELLING_WITH_GIVEBACK: ["giveback"],
+  MIN_GUARANTEE_FLAT: ["minFlat"],
+  MIN_GUARANTEE_HOURLY: ["mgPerHour"],
+  HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: ["baseAmount", "unitsIncluded", "ratePerServing"],
+};
+const FIELD_LABELS: Record<string, string> = {
+  ratePerServing: "Rate per serving ($)",
+  baseAmount: "Base / package amount ($)",
+  unitsIncluded: "Servings included",
+  hourlyRate: "Hourly rate ($)",
+  minFlat: "Flat minimum ($)",
+  mgPerHour: "Minimum per hour ($)",
+  giveback: "Giveback %",
+};
+
+function hoursBetween(f: F): number {
+  if (!f.startTime || !f.endTime) return 0;
+  const [sh, sm] = f.startTime.split(":").map(Number);
+  const [eh, em] = f.endTime.split(":").map(Number);
+  return Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60);
+}
+
+/** Deterministic classifier notes from the structured fields. */
 function buildNotes(f: F): string {
   const lines: string[] = [];
   lines.push(`EVENT TYPE: ${f.eventType ? TYPE_TO_LOWER[f.eventType as EventType] : "—"}.`);
-  if (f.eventType === "Min Guarantee" && f.mgPerHour)
-    lines.push(`Minimum guarantee $${f.mgPerHour} per hour. Host covers shortfall.`);
-  if (f.paymentModel) lines.push(f.paymentModel.trim());
-  if (needServe(f.eventType) && f.serveKeep) lines.push(f.serveKeep.trim());
-  if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
+  switch (f.billing) {
+    case "INVOICE_PER_SERVING":
+      lines.push(`Charge $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
+    case "INVOICE_BASE_FEE_PLUS_SERVINGS":
+      lines.push(`Setup fee $${f.baseAmount || "0"} plus $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
+    case "INVOICE_FIXED_PACKAGE":
+      lines.push(`$${f.baseAmount || "0"} covers ${f.unitsIncluded || "0"} servings, each additional $${f.ratePerServing || "0"}. Send invoice.`); break;
+    case "INVOICE_HOURLY":
+      lines.push(`Charge $${f.hourlyRate || "0"} per hour. Send invoice.`); break;
+    case "SELLING_OPEN":
+      lines.push("Open selling event. Guests pay individually."); break;
+    case "SELLING_WITH_GIVEBACK":
+      lines.push(`Selling event. Giveback percentage: ${f.giveback || "0"}%.`); break;
+    case "MIN_GUARANTEE_FLAT":
+      lines.push(`Minimum guarantee $${f.minFlat || "0"} flat. Host covers shortfall.`); break;
+    case "MIN_GUARANTEE_HOURLY":
+      lines.push(`Minimum guarantee $${f.mgPerHour || "0"} per hour. Host covers shortfall.`); break;
+    case "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA":
+      lines.push(
+        `Host pays $${f.baseAmount || "0"} base covering ${f.unitsIncluded || "0"} servings. ` +
+        `Additional servings $${f.ratePerServing || "0"} billed to host.` +
+        (f.guestRate ? ` Guests pay $${f.guestRate} per serving for extras.` : "")
+      ); break;
+  }
+  if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
   if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
   if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
   lines.push(f.taxExempt === "YES" ? "Client is tax exempt." : "Plus tax.");
   if (f.attendees) lines.push(`About ${f.attendees} attendees.`);
   if (f.additional) lines.push(f.additional.trim());
   if (f.cardOnly) lines.push("Card only, no on-site cash.");
-  // Driver actuals
   if (needServe(f.eventType) && f.actualCount) lines.push(`Served ${f.actualCount} total.`);
   if (f.paid) {
     lines.push("Payment received.");
@@ -70,25 +138,50 @@ function buildNotes(f: F): string {
   return lines.join(" ");
 }
 
+/** Exact estimate from the structured fields (mirrors the billing engine). */
 function estimate(f: F) {
-  const pay = `${f.paymentModel} ${f.serveKeep}`;
-  const base = pay.match(/\$\s?([\d,]+(?:\.\d+)?)/)?.[1];
-  const incl = (pay.match(/(\d+)\s*(?:12oz|9oz|servings?|konas?)/i) || pay.match(/covers?\s*(?:up to\s*)?(\d+)/i))?.[1];
-  const extra = (pay.match(/(?:additional|extra|each)[^$]*\$\s?(\d+(?:\.\d+)?)/i) || pay.match(/\$\s?(\d+(?:\.\d+)?)\s*(?:each|\/)/i))?.[1];
-  if (!base || !f.eventType) return null;
-  const baseN = parseFloat(base.replace(/,/g, ""));
-  const inclN = incl ? parseInt(incl) : 0;
-  const extraN = extra ? parseFloat(extra) : 0;
-  const count = Number(f.actualCount) || 0;
-  const over = Math.max(0, count - inclN);
-  const overAmt = over * extraN;
-  const disc = Number(f.discount) || 0;
-  const subtotal = Math.max(0, baseN + overAmt - disc);
+  const n = (v: string) => Number(v) || 0;
+  const count = n(f.actualCount);
+  const hours = hoursBetween(f);
+  let subtotal = 0;
+  let detail = "";
+  switch (f.billing) {
+    case "INVOICE_PER_SERVING":
+      subtotal = count * n(f.ratePerServing);
+      detail = `${count} × $${n(f.ratePerServing)}`; break;
+    case "INVOICE_BASE_FEE_PLUS_SERVINGS":
+      subtotal = n(f.baseAmount) + count * n(f.ratePerServing);
+      detail = `$${n(f.baseAmount)} + ${count} × $${n(f.ratePerServing)}`; break;
+    case "INVOICE_FIXED_PACKAGE": {
+      const over = Math.max(0, count - n(f.unitsIncluded));
+      subtotal = n(f.baseAmount) + over * n(f.ratePerServing);
+      detail = over > 0 ? `$${n(f.baseAmount)} + ${over} over × $${n(f.ratePerServing)}` : `$${n(f.baseAmount)} floor`;
+      break;
+    }
+    case "INVOICE_HOURLY":
+      subtotal = hours * n(f.hourlyRate);
+      detail = `${hours}h × $${n(f.hourlyRate)}`; break;
+    case "MIN_GUARANTEE_FLAT":
+      subtotal = n(f.minFlat); detail = "guaranteed floor"; break;
+    case "MIN_GUARANTEE_HOURLY":
+      subtotal = hours * n(f.mgPerHour);
+      detail = `${hours}h × $${n(f.mgPerHour)} floor`; break;
+    case "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA": {
+      const over = Math.max(0, count - n(f.unitsIncluded));
+      subtotal = n(f.baseAmount) + over * n(f.ratePerServing);
+      detail = `host $${n(f.baseAmount)}${over ? ` + ${over} over × $${n(f.ratePerServing)}` : ""}`;
+      break;
+    }
+    default:
+      return null; // selling models: guests pay, no host invoice
+  }
+  subtotal += n(f.locationFee);
+  subtotal = Math.max(0, subtotal - n(f.discount));
   const tax = f.taxExempt === "YES" ? 0 : +(subtotal * 0.06).toFixed(2);
-  // 4% fee by default; skipped only when a check payment is confirmed
   const noFee = f.paid && f.method === "Check";
   const cc = noFee ? 0 : +(subtotal * 0.04).toFixed(2);
-  return { baseN, over, extraN, overAmt, disc, subtotal, tax, cc, total: +(subtotal + tax + cc).toFixed(2), noFee };
+  return { subtotal: +subtotal.toFixed(2), detail, tax, cc, noFee,
+           total: +(subtotal + tax + cc).toFixed(2), deposit: n(f.deposit) };
 }
 
 export default function NewEvent() {
@@ -102,7 +195,7 @@ export default function NewEvent() {
   useEffect(() => {
     api.konaosFormOptions().then((o) => {
       setOpts(o);
-      setF((prev) => ({ ...prev, brandId: o.brands[0]?.id || "" }));
+      setF((prev) => ({ ...prev, brandId: o.brands.find((b) => b.label === "Kona Ice")?.id || o.brands[0]?.id || "" }));
     });
   }, []);
 
@@ -120,11 +213,14 @@ export default function NewEvent() {
     if (!f.zip) m.push("Zip");
     if (!f.contactName) m.push("Contact name");
     if (!f.contactEmail) m.push("Contact email");
-    if (!f.taxExempt) m.push("Tax status");
+    if (!f.taxExempt) m.push("Tax exempt status");
     if (!f.eventType) m.push("Event type");
-    if (f.eventType === "Min Guarantee" && !f.mgPerHour) m.push("Guarantee/hour");
-    if (!f.paymentModel) m.push("Payment / pricing model");
-    if (needServe(f.eventType) && !f.serveKeep) m.push("Serve/Keep count");
+    if (f.eventType && !f.billing) m.push("Billing model");
+    for (const field of FIELD_MAP[f.billing] ?? []) {
+      if (!(f as any)[field]) m.push(FIELD_LABELS[field]);
+    }
+    if (!f.attendees) m.push("Attendees");
+    if (needServe(f.eventType) && !f.actualCount) m.push("Actual serving count");
     if (f.paid && !f.method) m.push("Payment method");
     if (f.paid && f.method === "Cash" && !f.cashAmount) m.push("Cash amount");
     return m;
@@ -192,7 +288,7 @@ export default function NewEvent() {
           <Link to="/">Dashboard</Link> with {f.date} selected.
         </p>
         <div className="flex">
-          <button className="btn primary" onClick={() => { setResult(null); setF({ ...initial, brandId: opts.brands[0]?.id || "" }); setPhase("form"); }}>
+          <button className="btn primary" onClick={() => { setResult(null); setF({ ...initial, brandId: f.brandId }); setPhase("form"); }}>
             Create another
           </button>
           <button className="btn" onClick={() => navigate("/events")}>Events</button>
@@ -219,8 +315,8 @@ export default function NewEvent() {
       <p className="muted"><Link to="/events">← Events</Link></p>
       <h1 className="page-title">New Event</h1>
       <p className="page-sub">
-        Creates the event directly in Kona OS — one entry, no double work. Segmented controls
-        keep typing minimal; the right panel shows the exact notes the AI reads.
+        Creates the event directly in Kona OS — one entry, no double work. Pick the billing
+        model from the predefined list; the right panel shows the exact notes the AI reads.
       </p>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 380px", alignItems: "start", gap: 20 }}>
@@ -284,41 +380,60 @@ export default function NewEvent() {
           </Card>
 
           {/* ADMIN — financial */}
-          <Card title="Admin — financial setup">
-            <Field label="Tax exempt" req>
+          <Card title="Admin — financial setup" tag="at booking">
+            <Field label="Tax exempt" req hint="Drives the 6% sales tax. If YES, tax is $0 and a certificate should be on file.">
               <Seg options={[["NO", "No — taxable"], ["YES", "Yes — exempt"]]} value={f.taxExempt} onChange={(v) => up({ taxExempt: v as F["taxExempt"] })} />
               {f.taxExempt === "YES" && <div className="cond warn">Tax-exempt — keep the exemption certificate on file for this event.</div>}
             </Field>
             <Row3>
-              <Field label="Giveback %"><input className="input" type="number" value={f.giveback} onChange={(e) => up({ giveback: e.target.value })} placeholder="0" /></Field>
               <Field label="Deposit ($)"><input className="input" type="number" value={f.deposit} onChange={(e) => up({ deposit: e.target.value })} placeholder="0" /></Field>
               <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
+              <Field label="Location fee ($)"><input className="input" type="number" value={f.locationFee} onChange={(e) => up({ locationFee: e.target.value })} placeholder="0" /></Field>
             </Row3>
           </Card>
 
           {/* EVENT — contract */}
-          <Card title="Event — the contract">
+          <Card title="Event — the contract" tag="at booking">
             <Field label="Event type" req>
-              <Seg options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]} value={f.eventType} onChange={(v) => up({ eventType: v as EventType })} />
-              {f.eventType === "Min Guarantee" && (
-                <div className="cond">
-                  <label className="lbl-sm">Amount guaranteed per hour ($) *</label>
-                  <input className="input" type="number" value={f.mgPerHour} onChange={(e) => up({ mgPerHour: e.target.value })} placeholder="e.g. 300" />
-                </div>
-              )}
+              <Seg
+                options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
+                value={f.eventType}
+                onChange={(v) => {
+                  const models = modelsFor(v);
+                  up({ eventType: v as EventType, billing: models.length === 1 ? models[0].key : "" });
+                }}
+              />
             </Field>
-            <Row>
-              <Field label="Attendees"><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
-              <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
-            </Row>
-            {needServe(f.eventType) && (
-              <Field label="Serve / Keep count" req hint='Pricing tiers, e.g. "$295 covers 60 servings, each additional $4".'>
-                <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 covers 60 12oz Konas, each additional $4" />
+            {f.eventType && (
+              <Field label="Billing model" req hint="Predefined models — pick one and fill its numbers below.">
+                <select className="select" value={f.billing} onChange={(e) => up({ billing: e.target.value })}>
+                  <option value="">Select billing model…</option>
+                  {modelsFor(f.eventType).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                </select>
               </Field>
             )}
-            <Field label="Payment — pricing model" req hint='The billing basis, e.g. "$295 plus tax for the hour".'>
-              <input className="input" value={f.paymentModel} onChange={(e) => up({ paymentModel: e.target.value })} placeholder="$295 plus tax for the hour" />
-            </Field>
+            {f.billing && (FIELD_MAP[f.billing] ?? []).length > 0 && (
+              <div className="cond">
+                <Row3>
+                  {(FIELD_MAP[f.billing] ?? []).map((field) => (
+                    <Field key={field} label={FIELD_LABELS[field]} req>
+                      <input className="input" type="number" step="0.01"
+                        value={(f as any)[field]}
+                        onChange={(e) => up({ [field]: e.target.value } as Partial<F>)} />
+                    </Field>
+                  ))}
+                  {f.billing === "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA" && (
+                    <Field label="Guest rate per serving ($)">
+                      <input className="input" type="number" step="0.01" value={f.guestRate} onChange={(e) => up({ guestRate: e.target.value })} />
+                    </Field>
+                  )}
+                </Row3>
+              </div>
+            )}
+            <Row>
+              <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
+              <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
+            </Row>
             <Field label="Additional instructions">
               <input className="input" value={f.additional} onChange={(e) => up({ additional: e.target.value })} placeholder='e.g. "Hard stop at 100 servings"' />
             </Field>
@@ -326,12 +441,16 @@ export default function NewEvent() {
           </Card>
 
           {/* DRIVER — actuals */}
-          <Card title="Driver — actuals (at event close, optional)">
-            {needServe(f.eventType) && (
-              <Field label="Actual serving count" hint="Total number served.">
-                <input className="input" type="number" value={f.actualCount} onChange={(e) => up({ actualCount: e.target.value })} placeholder="79" />
-              </Field>
-            )}
+          <Card title="Driver — the actuals" tag="at event close">
+            <Field
+              label="Actual serving count"
+              req={needServe(f.eventType)}
+              hint={needServe(f.eventType)
+                ? "Total number served. Required for Invoice / Hybrid events."
+                : "Total number served (optional for this event type)."}
+            >
+              <input className="input" type="number" value={f.actualCount} onChange={(e) => up({ actualCount: e.target.value })} placeholder="79" />
+            </Field>
             <label className="chk"><input type="checkbox" checked={f.paid} onChange={(e) => up({ paid: e.target.checked })} /> Payment received</label>
             {f.paid && (
               <div className="cond">
@@ -354,7 +473,7 @@ export default function NewEvent() {
           <div className={"status " + (missing.length ? "bad" : "ok")}>
             {missing.length ? (
               <div>
-                <strong>{missing.length} required field{missing.length > 1 ? "s" : ""} left</strong>
+                <strong>Human review required — {missing.length} missing</strong>
                 <ul>{missing.map((m) => <li key={m}>{m}</li>)}</ul>
               </div>
             ) : (
@@ -363,22 +482,26 @@ export default function NewEvent() {
           </div>
 
           <div className="card" style={{ marginBottom: 14 }}>
-            <div className="section-title" style={{ marginTop: 0 }}>Notes the AI will read</div>
+            <div className="section-title" style={{ marginTop: 0 }}>Generated notes → invoicing engine</div>
             <pre className="json" style={{ whiteSpace: "pre-wrap", maxHeight: "30vh" }}>{notes}</pre>
           </div>
 
           <div className="card">
             <div className="section-title" style={{ marginTop: 0 }}>Estimated invoice</div>
             {!est ? (
-              <p className="muted" style={{ margin: 0 }}>Fill pricing + type for an estimate.</p>
+              <p className="muted" style={{ margin: 0 }}>
+                {f.eventType === "Selling"
+                  ? "Selling event — guests pay via Square; no host invoice."
+                  : "Pick a billing model + fill its numbers for an estimate."}
+              </p>
             ) : (
               <div className="kv" style={{ gridTemplateColumns: "1fr auto", gap: "4px 12px" }}>
-                <div className="k">Base</div><div className="v right">${est.baseN.toFixed(2)}</div>
-                {est.over > 0 && <><div className="k">Overage {est.over} × ${est.extraN}</div><div className="v right">${est.overAmt.toFixed(2)}</div></>}
-                {est.disc > 0 && <><div className="k">Discount</div><div className="v right">−${est.disc.toFixed(2)}</div></>}
+                <div className="k">Subtotal ({est.detail})</div><div className="v right">${est.subtotal.toFixed(2)}</div>
                 <div className="k">Sales tax {f.taxExempt === "YES" ? "(exempt)" : "6%"}</div><div className="v right">${est.tax.toFixed(2)}</div>
                 <div className="k">Card fee {est.noFee ? "(check — none)" : "4%"}</div><div className="v right">${est.cc.toFixed(2)}</div>
-                <div className="k" style={{ fontWeight: 700 }}>Balance due</div><div className="v right" style={{ fontWeight: 700 }}>${est.total.toFixed(2)}</div>
+                {est.deposit > 0 && <><div className="k">Deposit</div><div className="v right">−${est.deposit.toFixed(2)}</div></>}
+                <div className="k" style={{ fontWeight: 700 }}>Balance due</div>
+                <div className="v right" style={{ fontWeight: 700 }}>${Math.max(0, est.total - est.deposit).toFixed(2)}</div>
               </div>
             )}
           </div>
@@ -394,10 +517,13 @@ export default function NewEvent() {
 }
 
 /* ── small presentational helpers ─────────────────────────────────────────── */
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, tag, children }: { title: string; tag?: string; children: React.ReactNode }) {
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="section-title" style={{ marginTop: 0 }}>{title}</div>
+      <div className="flex between">
+        <div className="section-title" style={{ marginTop: 0 }}>{title}</div>
+        {tag && <span className="muted" style={{ fontSize: 11 }}>{tag}</span>}
+      </div>
       {children}
     </div>
   );
