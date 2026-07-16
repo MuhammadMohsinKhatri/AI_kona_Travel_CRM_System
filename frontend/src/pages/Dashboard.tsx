@@ -58,14 +58,19 @@ export default function Dashboard() {
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            title="Optional: run for a specific event date. Leave empty for all events."
+            title="Pick the event date to process — required."
           />
           {targetDate && (
             <button className="btn" onClick={() => setTargetDate("")} title="Clear date">
               ✕
             </button>
           )}
-          <button className="btn primary" onClick={runPipeline} disabled={phase === "running"}>
+          <button
+            className="btn primary"
+            onClick={runPipeline}
+            disabled={phase === "running" || !targetDate}
+            title={targetDate ? undefined : "Pick a date first — runs are date-scoped to keep them small and cheap."}
+          >
             {phase === "running" ? (
               <>
                 <span className="spinner sm" /> &nbsp;Running…
@@ -73,7 +78,7 @@ export default function Dashboard() {
             ) : targetDate ? (
               `▶ Run for ${targetDate}`
             ) : (
-              "▶ Run pipeline"
+              "▶ Pick a date to run"
             )}
           </button>
         </div>
