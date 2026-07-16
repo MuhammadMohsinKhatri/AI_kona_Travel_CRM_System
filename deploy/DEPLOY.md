@@ -105,11 +105,32 @@ The nightly pipeline (2:00 AM New York) and the daily KonaOS session check
 
 ## Updating the app later
 
+**Auto-deploy (the normal path).** Every push to `main` triggers GitHub Actions
+(`.github/workflows/deploy.yml`), which builds the backend + frontend images and
+publishes them to GHCR. Watchtower on the VPS polls every 5 minutes and
+auto-pulls + restarts the changed services. **Pushing to main IS the deploy** —
+nothing to run on the server. (db/redis/caddy are unlabeled and never touched.)
+
+One-time setup for private GHCR images (already done on the prod VPS):
+
+```bash
+# PAT: github.com → Settings → Developer settings → Tokens (classic),
+# scope: read:packages only
+docker login ghcr.io -u muhammadmohsinkhatri     # paste the PAT as password
+cd /opt/konaice && git pull
+docker compose -f docker-compose.prod.yml up -d  # pulls images, adds watchtower
+```
+
+**Manual fallback** (CI down, or emergency local patch on the VPS):
+
 ```bash
 cd /opt/konaice
-git pull                          # or re-scp the changed files
+git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+Note: compose-file changes (new service, ports, volumes, env_file edits) still
+need the manual `git pull` + `up -d` on the VPS — Watchtower only swaps images.
 
 ## Operations cheat-sheet
 

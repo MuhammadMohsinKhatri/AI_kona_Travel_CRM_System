@@ -39,8 +39,11 @@ services:
           memory: 160M
 
   backend:
-    build: ./backend
+    image: ghcr.io/muhammadmohsinkhatri/konaice-backend:latest
+    build: ./backend   # local fallback: `up -d --build` still works without CI
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     env_file: ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg2://konaice:${POSTGRES_PASSWORD:-konaice}@db:5432/konaice
@@ -63,8 +66,11 @@ services:
           memory: 512M
 
   worker:
+    image: ghcr.io/muhammadmohsinkhatri/konaice-backend:latest
     build: ./backend
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     command: celery -A app.tasks.celery_app.celery worker --loglevel=info --concurrency=2
     env_file: ./backend/.env
     environment:
@@ -86,8 +92,11 @@ services:
           memory: 640M
 
   beat:
+    image: ghcr.io/muhammadmohsinkhatri/konaice-backend:latest
     build: ./backend
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     command: celery -A app.tasks.celery_app.celery beat --loglevel=info
     env_file: ./backend/.env
     environment:
@@ -102,10 +111,29 @@ services:
           memory: 256M
 
   frontend:
+    image: ghcr.io/muhammadmohsinkhatri/konaice-frontend:latest
     build: ./frontend
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # Auto-deploy: polls GHCR every 5 min; when CI publishes a new :latest it
+  # pulls the image and recreates ONLY the services labeled watchtower.enable
+  # (db/redis/caddy are never touched). Push to main = deployed in ~5-10 min.
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Read the host's `docker login ghcr.io` credentials for private images.
+      - /root/.docker/config.json:/config.json:ro
+    command: --label-enable --cleanup --interval 300
     deploy:
       resources:
         limits:
