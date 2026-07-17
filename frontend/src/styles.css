@@ -51,8 +51,11 @@ a:hover { text-decoration: underline; }
   top: 0;
   height: 100vh;
 }
-.brand { font-weight: 700; font-size: 16px; margin-bottom: 18px; display: flex; gap: 8px; align-items: center; }
-.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand); }
+/* The product name is long and the sidebar is 220px, so it wraps: align the
+   dot to the FIRST line (not the centre of a 3-line block) and stop it being
+   squashed by the flex row. */
+.brand { font-weight: 700; font-size: 15px; line-height: 1.3; margin-bottom: 18px; display: flex; gap: 8px; align-items: flex-start; }
+.brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand); flex: none; margin-top: 4px; }
 .nav-link {
   padding: 9px 12px;
   border-radius: 8px;

@@ -28,10 +28,10 @@ export default function Login() {
     <div className="login-wrap">
       <form className="card login-card" onSubmit={onSubmit}>
         <div className="brand" style={{ marginBottom: 16 }}>
-          <span className="dot" /> Conbyt AI Automation
+          <span className="dot" /> Conbyt AI Automation Financial System
         </div>
         <h1>Sign in</h1>
-        <p className="sub">Financial System — event → invoice automation</p>
+        <p className="sub">Event → invoice automation console</p>
         {error && <div className="error-msg">{error}</div>}
         <div className="field">
           <label>Email</label>
