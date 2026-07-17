@@ -17,7 +17,6 @@ from app.integrations.base import (
     Classifier,
     CRMClient,
     Notifier,
-    SheetsClient,
     SquareClient,
 )
 
@@ -311,15 +310,6 @@ class MockClassifier(Classifier):
         out = c.model_dump()
         out["ALERT"] = alerts
         return out
-
-
-class MockSheetsClient(SheetsClient):
-    def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
-
-    def append_row(self, brand: str, row: dict[str, Any]) -> None:
-        _lag(0.5)
-        self.rows.append({"brand": brand, **row})
 
 
 class MockNotifier(Notifier):

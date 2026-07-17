@@ -43,7 +43,6 @@ class Settings(BaseSettings):
     crm_provider: str = "mock"
     square_provider: str = "mock"
     openai_provider: str = "mock"
-    sheets_provider: str = "mock"
     telegram_provider: str = "mock"
 
     # Square
@@ -64,11 +63,6 @@ class Settings(BaseSettings):
     # Update if OpenAI changes pricing or you switch models.
     openai_input_cost_per_mtok: float = 0.25
     openai_output_cost_per_mtok: float = 2.0
-
-    # Google Sheets
-    google_service_account_json: str = ""
-    kona_sheet_id: str = "1tuLWnWQTHErp50ITvhkOMdBRZ4xDlruISPjMIZ_W-Z0"
-    tom_sheet_id: str = "1ntLyVH37MQypG7nLpnd6JTsaCI4UP1VbN3vfXVzzZhs"
 
     # Telegram
     telegram_bot_token: str = ""

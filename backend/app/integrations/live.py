@@ -18,7 +18,6 @@ from app.config import settings
 from app.integrations.base import (
     Classifier,
     Notifier,
-    SheetsClient,
     SquareClient,
 )
 
@@ -158,30 +157,6 @@ class OpenAIClassifier(Classifier):
             "model": self.model,
         }
         return out
-
-
-class GoogleSheetsClient(SheetsClient):
-    def __init__(self) -> None:
-        import gspread
-        from google.oauth2.service_account import Credentials
-
-        info = json.loads(settings.google_service_account_json)
-        creds = Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        self.gc = gspread.authorize(creds)
-        self.sheet_ids = {"kona": settings.kona_sheet_id, "tom": settings.tom_sheet_id}
-
-    def append_row(self, brand: str, row: dict[str, Any]) -> None:
-        b = (brand or "").lower()
-        sheet_id = self.sheet_ids["tom"] if "tom" in b else self.sheet_ids["kona"]
-        month_tab = row.get("_month_tab", "Sheet1")
-        sh = self.gc.open_by_key(sheet_id)
-        try:
-            ws = sh.worksheet(month_tab)
-        except Exception:
-            ws = sh.sheet1
-        ws.append_row(list(row.values()))
 
 
 class TelegramNotifier(Notifier):

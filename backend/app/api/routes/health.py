@@ -16,7 +16,6 @@ def health() -> dict:
             "crm": settings.crm_provider,
             "square": settings.square_provider,
             "openai": settings.openai_provider,
-            "sheets": settings.sheets_provider,
             "telegram": settings.telegram_provider,
         },
     }

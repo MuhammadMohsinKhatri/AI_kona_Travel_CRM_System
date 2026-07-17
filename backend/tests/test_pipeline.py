@@ -8,7 +8,6 @@ os.environ.setdefault("MOCK_LATENCY_S", "0")  # no simulated latency in tests
 os.environ["CRM_PROVIDER"] = "mock"
 os.environ["SQUARE_PROVIDER"] = "mock"
 os.environ["OPENAI_PROVIDER"] = "mock"
-os.environ["SHEETS_PROVIDER"] = "mock"
 os.environ["TELEGRAM_PROVIDER"] = "mock"
 os.environ["PIPELINE_DRY_RUN"] = "false"
 

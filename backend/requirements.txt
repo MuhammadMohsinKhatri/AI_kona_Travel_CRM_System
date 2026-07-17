@@ -16,7 +16,5 @@ python-multipart==0.0.19
 beautifulsoup4==4.12.3
 python-dotenv==1.0.1
 openai==1.57.0
-gspread==6.1.4
-google-auth==2.36.0
 pytest==8.3.4
 pycryptodome==3.20.0

@@ -277,8 +277,9 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         progress.set("alerts", "done", f"{run.alerts_raised} raised")
 
         # ── PHASE 8: REPORT — financial ledger in Postgres ──────────────────
-        # (Replaces the monthly Google Sheet; SheetsClient remains available
-        # for an optional export but is no longer part of the pipeline.)
+        # This IS the monthly Google Sheet's replacement: one row per event in
+        # financial_entries, read by the Financials tab and its filtered CSV
+        # export. Nothing is written to Google Sheets.
         progress.set("report", "running")
         for i, item in enumerate(list(items), 1):
             progress.counter("report", i, len(items))

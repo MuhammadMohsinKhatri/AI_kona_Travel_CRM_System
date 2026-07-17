@@ -12,7 +12,6 @@ from app.integrations.base import (
     Classifier,
     CRMClient,
     Notifier,
-    SheetsClient,
     SquareClient,
 )
 
@@ -43,15 +42,6 @@ def get_classifier() -> Classifier:
         return OpenAIClassifier()
     from app.integrations.mocks import MockClassifier
     return MockClassifier()
-
-
-@lru_cache
-def get_sheets() -> SheetsClient:
-    if settings.sheets_provider == "live":
-        from app.integrations.live import GoogleSheetsClient
-        return GoogleSheetsClient()
-    from app.integrations.mocks import MockSheetsClient
-    return MockSheetsClient()
 
 
 @lru_cache

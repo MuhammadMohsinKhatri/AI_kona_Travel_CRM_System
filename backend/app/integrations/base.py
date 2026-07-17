@@ -64,12 +64,6 @@ class Classifier(ABC):
         """Return the flat classification_output dict for one cleaned event."""
 
 
-class SheetsClient(ABC):
-    @abstractmethod
-    def append_row(self, brand: str, row: dict[str, Any]) -> None:
-        ...
-
-
 class Notifier(ABC):
     @abstractmethod
     def send(self, message: str) -> None:
