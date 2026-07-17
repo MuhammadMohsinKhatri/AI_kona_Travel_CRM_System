@@ -168,14 +168,15 @@ export default function Financials() {
             <Tot label="Square sales" v={money(data.totals.square_sales)} />
           </div>
 
-          {/* Sheet-order columns. Wide by design — scrolls horizontally. */}
-          <div className="table-wrap" style={{ overflowX: "auto" }}>
+          {/* Sheet-order columns: wide by design, so DATE/EVENT/EVENT TYPE are
+              frozen on the left and the header/totals rows are pinned. */}
+          <div className="table-wrap sheet">
             <table style={{ whiteSpace: "nowrap" }}>
               <thead>
                 <tr>
-                  <th>DATE</th>
-                  <th>EVENT</th>
-                  <th>EVENT TYPE</th>
+                  <th className="stick stick-1"><div className="cell">DATE</div></th>
+                  <th className="stick stick-2"><div className="cell">EVENT</div></th>
+                  <th className="stick stick-3"><div className="cell">EVENT TYPE</div></th>
                   <th className="right">Square: Gross Sales</th>
                   <th className="right">Square: Discounts</th>
                   <th className="right">Square: Net Sales (Card)</th>
@@ -201,18 +202,26 @@ export default function Financials() {
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`)}>
-                    <td>{r.event_date || "—"}</td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{r.event_name}</div>
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {r.brand} · {r.event_code}
+                    <td className="stick stick-1"><div className="cell">{r.event_date || "—"}</div></td>
+                    <td className="stick stick-2" title={r.event_name}>
+                      <div className="cell">
+                        <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {r.event_name}
+                        </div>
+                        <div className="muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {r.brand} · {r.event_code}
+                        </div>
                       </div>
                     </td>
-                    <td>
-                      <div style={{ textTransform: "capitalize", fontWeight: 600 }}>
-                        {r.event_type || "—"}
+                    <td className="stick stick-3" title={r.billing_model || ""}>
+                      <div className="cell">
+                        <div style={{ textTransform: "capitalize", fontWeight: 600 }}>
+                          {r.event_type || "—"}
+                        </div>
+                        <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {r.billing_model || "—"}
+                        </div>
                       </div>
-                      <div className="muted" style={{ fontSize: 11 }}>{r.billing_model || "—"}</div>
                     </td>
                     <td className="right">{money(r.square_gross_sales)}</td>
                     <td className="right">{money(r.square_discounts)}</td>
@@ -251,9 +260,11 @@ export default function Financials() {
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, background: "var(--surface-2)" }}>
-                  <td colSpan={3}>
-                    Totals ({month || ((fromDate || toDate) ? `${fromDate || "…"} → ${toDate || "…"}` : "all")})
-                    <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
+                  <td colSpan={3} className="stick stick-span">
+                    <div className="cell">
+                      Totals ({month || ((fromDate || toDate) ? `${fromDate || "…"} → ${toDate || "…"}` : "all")})
+                      <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
+                    </div>
                   </td>
                   <td className="right">{money(sum("square_gross_sales"))}</td>
                   <td className="right">{money(sum("square_discounts"))}</td>

@@ -92,6 +92,61 @@ th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: v
 tbody tr:hover { background: var(--surface-2); cursor: pointer; }
 tbody tr:last-child td { border-bottom: none; }
 
+/* ── Sheet view: a wide ledger you can actually read ───────────────────────
+   Frozen header + frozen identity columns (DATE / EVENT / EVENT TYPE), so a
+   value 20 columns to the right still tells you which event it belongs to.
+   Scrolls in both axes inside its own viewport, like a spreadsheet. */
+.table-wrap.sheet { max-height: calc(100vh - 300px); overflow: auto; }
+
+/* Cell backgrounds must be opaque — sticky cells slide over other cells.
+   Setting the background on every td lets zebra/hover cover sticky ones too. */
+.sheet tbody td { background: var(--surface); }
+.sheet tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.sheet tbody tr:hover td { background: var(--surface-2); }
+
+/* Frozen header row */
+.sheet thead th { position: sticky; top: 0; z-index: 3; }
+.sheet thead th::after {  /* keeps a visible edge while rows scroll under */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Frozen identity columns.
+   `width` on a <td> is only a hint under auto table-layout — the browser
+   widens cells to fit content, which would desync the `left` offsets (and
+   the needed width changes with the data). So the width lives on an inner
+   .cell div (padding moves there too, keeping the offsets exact). */
+.sheet th.stick, .sheet td.stick { position: sticky; z-index: 2; padding: 0; }
+.sheet thead th.stick { z-index: 4; }           /* header ∩ frozen column */
+.sheet .stick > .cell { padding: 11px 14px; box-sizing: border-box; overflow: hidden; }
+.sheet .stick-1 { left: 0; }
+.sheet .stick-1 > .cell { width: 104px; }
+.sheet .stick-2 { left: 104px; }
+.sheet .stick-2 > .cell { width: 260px; }
+.sheet .stick-3 { left: 364px; }
+.sheet .stick-3 > .cell { width: 170px; }
+/* Shadow marks where the frozen block ends — only while scrolled right. */
+.sheet .stick-3::before {
+  content: ""; position: absolute; top: 0; right: -6px; bottom: 0; width: 6px;
+  background: linear-gradient(to right, rgba(16,24,40,.10), transparent);
+  pointer-events: none;
+}
+
+/* Totals row pinned to the bottom of the scroll box.
+   The sticky must go on the <tfoot> row group, not its cells: a sticky <td>
+   is bound by its own row group, and tfoot is one row tall — so bottom:0 on
+   the cells has nowhere to move and silently does nothing. */
+.sheet tfoot { position: sticky; bottom: 0; z-index: 3; }
+.sheet tfoot td {
+  background: var(--surface-2); border-top: 1px solid var(--border);
+}
+.sheet tfoot td.stick { z-index: 5; }
+/* Totals label spans the three frozen columns — pin the whole block. */
+.sheet tfoot td.stick-span { left: 0; }
+.sheet tfoot td.stick-span > .cell { width: 534px; }  /* 104 + 260 + 170 */
+/* Numbers align on the decimal — makes columns scannable at a glance. */
+.sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
+
 /* Badges */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.gray { background: var(--surface-2); color: var(--text-dim); }
