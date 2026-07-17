@@ -173,8 +173,11 @@ pre.json {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Modal overlay */
-.overlay { position: fixed; inset: 0; background: rgba(10, 15, 22, 0.55); display: grid; place-items: center; z-index: 50; backdrop-filter: blur(2px); }
-.modal { width: 420px; max-width: calc(100vw - 40px); text-align: center; }
+.overlay { position: fixed; inset: 0; background: rgba(10, 15, 22, 0.55); display: grid; place-items: center; z-index: 50; backdrop-filter: blur(2px); padding: 20px; overflow-y: auto; }
+/* A completed run (8 steps + stat tiles + footer) is taller than a laptop
+   viewport — cap the height and scroll inside so the Done button stays
+   reachable instead of the box growing off-screen. */
+.modal { width: 420px; max-width: calc(100vw - 40px); max-height: calc(100vh - 40px); overflow-y: auto; text-align: center; }
 .modal .spinner { margin: 6px auto 16px; }
 .modal h2 { margin: 0 0 6px; font-size: 18px; }
 /* API Explorer */
