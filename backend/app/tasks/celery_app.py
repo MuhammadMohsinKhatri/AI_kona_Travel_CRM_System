@@ -27,15 +27,21 @@ celery.conf.update(
 )
 
 celery.conf.beat_schedule = {
+    # 23:30 America/New_York, scoped to THAT day's events — by late evening the
+    # day's events have finished and drivers have filed their actuals.
+    # target_date is the "today" sentinel, resolved to a real date at run time
+    # (a literal here would freeze to whenever the worker booted). Scoping the
+    # run matters: with no date the pipeline sweeps the last 30 days and pays
+    # for an AI call on ~300 events it already processed the night before.
     "nightly-pipeline": {
         "task": "app.tasks.pipeline_tasks.run_pipeline_task",
-        "schedule": crontab(hour=2, minute=0),  # 02:00 America/New_York
-        "kwargs": {"trigger": "scheduled"},
+        "schedule": crontab(hour=23, minute=30),
+        "kwargs": {"trigger": "scheduled", "target_date": "today"},
     },
-    # KonaOS session keys rotate ~every 15-30 days; check daily, refresh
-    # proactively after 13 days, notify if manual paste is needed.
+    # KonaOS session keys rotate ~every 15-30 days; check before the nightly
+    # run so a dead key is refreshed/notified rather than failing the pipeline.
     "konaos-session-maintenance": {
         "task": "app.tasks.konaos_tasks.maintain_konaos_session",
-        "schedule": crontab(hour=1, minute=30),  # daily, before the pipeline
+        "schedule": crontab(hour=23, minute=0),  # 30 min before the pipeline
     },
 }
