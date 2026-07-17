@@ -5,19 +5,38 @@ import { Loading, money } from "../components/ui";
 
 type RunPhase = "idle" | "running" | "done";
 
+/** Today in America/New_York — the business's day, not the browser's. */
+function todayNY(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [targetDate, setTargetDate] = useState("");
+  // One date drives both things: which day the tiles below describe, and which
+  // day "Run" processes. Empty = all-time view (and running is disabled).
+  const [targetDate, setTargetDate] = useState(todayNY());
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [result, setResult] = useState<PipelineRun | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const navigate = useNavigate();
 
-  async function load() {
-    setStats(await api.stats());
+  async function load(date = targetDate) {
+    // Never blank `stats` on a refetch — doing so unmounts the whole page
+    // (including the date picker being used) behind the full-page loader.
+    setRefreshing(true);
+    try {
+      setStats(await api.stats(date ? { from_date: date, to_date: date } : {}));
+    } finally {
+      setRefreshing(false);
+    }
   }
   useEffect(() => {
-    load();
-  }, []);
+    load(targetDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetDate]);
 
   async function runPipeline() {
     setPhase("running");
@@ -43,14 +62,23 @@ export default function Dashboard() {
     }
   }
 
-  if (!stats) return <Loading />;
+  if (!stats) return <Loading />;  // first load only
 
   return (
-    <>
+    <div style={{ opacity: refreshing ? 0.55 : 1, transition: "opacity .15s" }}>
       <div className="topbar">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="page-sub">Overview of event processing, invoices and alerts.</p>
+          <p className="page-sub">
+            {targetDate ? (
+              <>
+                Showing events dated <strong>{targetDate}</strong>
+                {targetDate === todayNY() && " (today)"} — the figures below cover this day only.
+              </>
+            ) : (
+              <>Showing <strong>all time</strong> — every event ever processed.</>
+            )}
+          </p>
         </div>
         <div className="run-controls">
           <input
@@ -58,13 +86,15 @@ export default function Dashboard() {
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            title="Pick the event date to process — required."
+            title="Sets the day these figures cover, and the day Run processes."
           />
-          {targetDate && (
-            <button className="btn" onClick={() => setTargetDate("")} title="Clear date">
-              ✕
-            </button>
-          )}
+          <button
+            className="btn"
+            onClick={() => setTargetDate(targetDate ? "" : todayNY())}
+            title={targetDate ? "Show totals across all dates" : "Back to today"}
+          >
+            {targetDate ? "All time" : "Today"}
+          </button>
           <button
             className="btn primary"
             onClick={runPipeline}
@@ -83,6 +113,16 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {targetDate && stats.total_events === 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <strong>No events processed for {targetDate} yet.</strong>
+          <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+            Either nothing ran for this date, or the day's events haven't been processed —
+            hit <em>Run for {targetDate}</em>, or switch to <em>All time</em> to see everything.
+          </div>
+        </div>
+      )}
 
       <div className="grid cols-4">
         <Stat label="Events" value={stats.total_events} />
@@ -141,7 +181,7 @@ export default function Dashboard() {
           onViewRun={() => result && navigate("/runs")}
         />
       )}
-    </>
+    </div>
   );
 }
 

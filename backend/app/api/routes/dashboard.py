@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,46 +14,89 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/stats")
-def stats(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
-    total_events = db.query(func.count(Event.id)).scalar() or 0
-    needs_review = (
-        db.query(func.count(Event.id)).filter(Event.status == "needs_review").scalar() or 0
-    )
-    errored = db.query(func.count(Event.id)).filter(Event.status == "error").scalar() or 0
-    total_invoices = db.query(func.count(Invoice.id)).scalar() or 0
-    invoiced_amount = db.query(func.coalesce(func.sum(Invoice.grand_total), 0.0)).scalar() or 0.0
-    open_alerts = (
-        db.query(func.count(Alert.id)).filter(Alert.resolved == False).scalar() or 0  # noqa: E712
-    )
+def stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    from_date: Optional[str] = Query(None, description="Inclusive event_date lower bound (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="Inclusive event_date upper bound (YYYY-MM-DD)"),
+) -> dict:
+    """Dashboard tiles, optionally scoped to an event-date window.
+
+    With no dates these are lifetime totals. Invoices and alerts have no date
+    column of their own, so they're scoped through their parent event's date.
+    """
+
+    def scoped(q):
+        """Apply the date window to a query that touches Event."""
+        if from_date:
+            q = q.filter(Event.event_date >= from_date)
+        if to_date:
+            q = q.filter(Event.event_date <= to_date)
+        return q
+
+    total_events = scoped(db.query(func.count(Event.id))).scalar() or 0
+    needs_review = scoped(
+        db.query(func.count(Event.id)).filter(Event.status == "needs_review")
+    ).scalar() or 0
+    errored = scoped(
+        db.query(func.count(Event.id)).filter(Event.status == "error")
+    ).scalar() or 0
+
+    # Invoices/alerts carry no date — join to their event to scope them.
+    total_invoices = scoped(
+        db.query(func.count(Invoice.id)).join(Event, Invoice.event_id == Event.id)
+    ).scalar() or 0
+    invoiced_amount = scoped(
+        db.query(func.coalesce(func.sum(Invoice.grand_total), 0.0))
+        .join(Event, Invoice.event_id == Event.id)
+    ).scalar() or 0.0
+    open_alerts = scoped(
+        db.query(func.count(Alert.id))
+        .join(Event, Alert.event_id == Event.id)
+        .filter(Alert.resolved == False)  # noqa: E712
+    ).scalar() or 0
 
     by_severity = dict(
-        db.query(Alert.severity, func.count(Alert.id))
-        .filter(Alert.resolved == False)  # noqa: E712
-        .group_by(Alert.severity)
-        .all()
+        scoped(
+            db.query(Alert.severity, func.count(Alert.id))
+            .join(Event, Alert.event_id == Event.id)
+            .filter(Alert.resolved == False)  # noqa: E712
+        ).group_by(Alert.severity).all()
     )
     by_model = dict(
-        db.query(Event.billing_model, func.count(Event.id))
-        .filter(Event.billing_model != "")
-        .group_by(Event.billing_model)
-        .all()
+        scoped(
+            db.query(Event.billing_model, func.count(Event.id))
+            .filter(Event.billing_model != "")
+        ).group_by(Event.billing_model).all()
     )
     by_type = dict(
-        db.query(Event.event_type, func.count(Event.id))
-        .filter(Event.event_type != "")
-        .group_by(Event.event_type)
-        .all()
+        scoped(
+            db.query(Event.event_type, func.count(Event.id))
+            .filter(Event.event_type != "")
+        ).group_by(Event.event_type).all()
     )
 
-    ai_totals = db.query(
+    # AI usage is per RUN, and a run is keyed to the date it targeted — scope
+    # it by target_date rather than by event dates.
+    ai_q = db.query(
         func.coalesce(func.sum(PipelineRun.ai_prompt_tokens), 0),
         func.coalesce(func.sum(PipelineRun.ai_completion_tokens), 0),
         func.coalesce(func.sum(PipelineRun.ai_cost_usd), 0.0),
-    ).one()
+    )
+    if from_date:
+        ai_q = ai_q.filter(PipelineRun.target_date >= from_date)
+    if to_date:
+        ai_q = ai_q.filter(PipelineRun.target_date <= to_date)
+    ai_totals = ai_q.one()
 
     last_run = db.query(PipelineRun).order_by(PipelineRun.id.desc()).first()
 
     return {
+        "scope": {
+            "from_date": from_date,
+            "to_date": to_date,
+            "all_time": not (from_date or to_date),
+        },
         "total_events": total_events,
         "needs_review": needs_review,
         "errored": errored,

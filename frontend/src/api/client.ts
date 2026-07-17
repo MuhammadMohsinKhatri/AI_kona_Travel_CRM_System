@@ -61,7 +61,8 @@ export const api = {
     return data;
   },
   me: () => request<User>("/api/auth/me"),
-  stats: () => request<DashboardStats>("/api/dashboard/stats"),
+  stats: (params: Record<string, string> = {}) =>
+    request<DashboardStats>("/api/dashboard/stats?" + new URLSearchParams(params)),
   runPipeline: (targetDate?: string) =>
     request<RunTriggerResponse>("/api/pipeline/run", {
       method: "POST",
@@ -203,6 +204,7 @@ export interface Page<T> {
   page_size: number;
 }
 export interface DashboardStats {
+  scope: { from_date: string | null; to_date: string | null; all_time: boolean };
   total_events: number;
   needs_review: number;
   errored: number;
