@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
-import { Badge, Empty, Loading, money } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, money } from "../components/ui";
 
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
  *  Postgres and are upserted by every pipeline run.
@@ -49,12 +49,17 @@ export default function Financials() {
     return p;
   }, [month, fromDate, toDate, brand, eventType, paid, debounced]);
 
-  useEffect(() => {
-    setData(null);
-    setError("");
+  /** Refetch with the current filters — also used after a row delete. */
+  const reload = () =>
     api.financials(params)
       .then(setData)
       .catch((e: any) => setError(e?.message || "Failed to load the ledger."));
+
+  useEffect(() => {
+    setData(null);
+    setError("");
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
   /** Month shortcut and custom range are alternatives — using one clears the other. */
@@ -197,6 +202,7 @@ export default function Financials() {
                   <th className="right">Location Fee</th>
                   <th>PAID?</th>
                   <th>Reasoning</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -255,6 +261,12 @@ export default function Financials() {
                     >
                       {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
                     </td>
+                    <td className="actions">
+                      <DeleteButton
+                        title="Delete this ledger row (the event is kept; re-run rebuilds it)"
+                        onDelete={async () => { await api.deleteFinancialEntry(r.id); await reload(); }}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -284,6 +296,7 @@ export default function Financials() {
                   <td className="right">{money(sum("giveback_amount"))}</td>
                   <td className="right">{money(sum("net_event_sales"))}</td>
                   <td className="right">{money(sum("location_fee"))}</td>
+                  <td />
                   <td />
                   <td />
                 </tr>

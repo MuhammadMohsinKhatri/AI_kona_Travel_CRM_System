@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, Invoice, Page } from "../api/client";
-import { Badge, Empty, Loading, money } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, money } from "../components/ui";
 
 export default function Invoices() {
   const [data, setData] = useState<Page<Invoice> | null>(null);
   const [onlyVariance, setOnlyVariance] = useState(false);
   const navigate = useNavigate();
 
+  const reload = () =>
+    api.invoices(onlyVariance ? { has_variance: "true" } : {}).then(setData);
+
   useEffect(() => {
     setData(null);
-    api.invoices(onlyVariance ? { has_variance: "true" } : {}).then(setData);
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlyVariance]);
 
   return (
@@ -46,6 +50,7 @@ export default function Invoices() {
                 <th className="right">Tax</th>
                 <th className="right">Total</th>
                 <th className="right">Variance</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -66,6 +71,12 @@ export default function Invoices() {
                     ) : (
                       <span className="muted">—</span>
                     )}
+                  </td>
+                  <td className="actions">
+                    <DeleteButton
+                      title="Delete this invoice record (KonaOS is not touched)"
+                      onDelete={async () => { await api.deleteInvoice(inv.id); await reload(); }}
+                    />
                   </td>
                 </tr>
               ))}

@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 export function Badge({ kind, children }: { kind: string; children: ReactNode }) {
   const map: Record<string, string> = {
@@ -35,4 +35,52 @@ export function Loading() {
 
 export function Empty({ text }: { text: string }) {
   return <div className="loading">{text}</div>;
+}
+
+/** Per-row delete. Two-step: the first click arms it, the second confirms —
+ *  a plain window.confirm is easy to click through, and rows sit close
+ *  together in dense tables. Auto-disarms after 4s.
+ *
+ *  `stopPropagation` matters: most rows are click-to-navigate. */
+export function DeleteButton({
+  onDelete,
+  title = "Delete",
+  confirmTitle = "Click again to confirm — this cannot be undone",
+}: {
+  onDelete: () => Promise<void> | void;
+  title?: string;
+  confirmTitle?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <button
+      className={"btn icon-btn" + (armed ? " danger" : "")}
+      disabled={busy}
+      title={armed ? confirmTitle : title}
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setBusy(true);
+        try {
+          await onDelete();
+        } finally {
+          setBusy(false);
+          setArmed(false);
+        }
+      }}
+    >
+      {busy ? "…" : armed ? "Confirm?" : "🗑"}
+    </button>
+  );
 }

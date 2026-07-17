@@ -110,3 +110,20 @@ def get_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
+
+
+@router.delete("/{event_id}", status_code=204)
+def delete_event(
+    event_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Remove an event from THIS database (KonaOS is not touched).
+
+    Cascades to the event's invoices, alerts and ledger row. Note the event
+    reappears if the pipeline is re-run for its date — KonaOS remains the
+    source of truth; this only clears our copy.
+    """
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.delete(event)
+    db.commit()

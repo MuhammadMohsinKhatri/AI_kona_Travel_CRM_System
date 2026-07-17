@@ -92,3 +92,16 @@ def get_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@router.delete("/runs/{run_id}", status_code=204)
+def delete_run(
+    run_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Delete a run from history. Events/ledger rows keep their run_id (a plain
+    column, no FK), so nothing else is affected."""
+    run = db.get(PipelineRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    db.delete(run)
+    db.commit()

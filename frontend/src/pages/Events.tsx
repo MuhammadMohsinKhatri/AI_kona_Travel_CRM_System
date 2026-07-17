@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, EventSummary, Page } from "../api/client";
-import { Badge, Empty, Loading, money } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, money } from "../components/ui";
 
 const STATUSES = ["", "processed", "needs_review", "error", "skipped"];
 
@@ -11,13 +11,18 @@ export default function Events() {
   const [q, setQ] = useState("");
   const navigate = useNavigate();
 
-  useEffect(() => {
+  function reload() {
     const params: Record<string, string> = {};
     if (status) params.status = status;
     if (q) params.q = q;
+    return api.events(params).then(setData);
+  }
+
+  useEffect(() => {
     setData(null);
-    const t = setTimeout(() => api.events(params).then(setData), q ? 300 : 0);
+    const t = setTimeout(reload, q ? 300 : 0);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, q]);
 
   return (
@@ -64,6 +69,7 @@ export default function Events() {
                 <th>Billing model</th>
                 <th>Status</th>
                 <th className="right">Invoice</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -87,6 +93,12 @@ export default function Events() {
                   <td>{e.billing_model || <span className="muted">—</span>}</td>
                   <td><Badge kind={e.status}>{e.status}</Badge></td>
                   <td className="right">{money(e.final_invoice_amount)}</td>
+                  <td className="actions">
+                    <DeleteButton
+                      title="Delete this event and its invoice, alerts and ledger row"
+                      onDelete={async () => { await api.deleteEvent(e.id); await reload(); }}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

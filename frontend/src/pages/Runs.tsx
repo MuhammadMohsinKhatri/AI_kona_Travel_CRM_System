@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, Page, PipelineRun } from "../api/client";
-import { Badge, Empty, Loading } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading } from "../components/ui";
 
 export default function Runs() {
   const [data, setData] = useState<Page<PipelineRun> | null>(null);
   const [selected, setSelected] = useState<PipelineRun | null>(null);
 
+  const reload = () => api.runs().then(setData);
+
   useEffect(() => {
-    api.runs().then(setData);
+    reload();
   }, []);
 
   return (
@@ -30,6 +32,7 @@ export default function Runs() {
                 <th className="right">Invoices</th><th className="right">Alerts</th>
                 <th className="right">AI tokens</th><th className="right">AI cost</th>
                 <th>Started</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -54,6 +57,12 @@ export default function Runs() {
                     {r.ai_cost_usd > 0 ? "$" + r.ai_cost_usd.toFixed(3) : "—"}
                   </td>
                   <td>{new Date(r.started_at).toLocaleString()}</td>
+                  <td className="actions">
+                    <DeleteButton
+                      title="Delete this run from history (events and ledger are unaffected)"
+                      onDelete={async () => { await api.deleteRun(r.id); await reload(); }}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

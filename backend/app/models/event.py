@@ -64,3 +64,11 @@ class Event(Base):
     alerts = relationship(
         "Alert", back_populates="event", cascade="all, delete-orphan"
     )
+    # One ledger row per event. Declared so the ORM cascades the delete itself
+    # rather than leaving it to the DB's FK: Postgres enforces ondelete=CASCADE
+    # but SQLite only does with PRAGMA foreign_keys=ON, so relying on the FK
+    # alone orphans the row in tests/local dev while passing in production.
+    financial_entry = relationship(
+        "FinancialEntry", back_populates="event",
+        cascade="all, delete-orphan", uselist=False,
+    )

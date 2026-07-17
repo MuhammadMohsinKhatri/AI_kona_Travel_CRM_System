@@ -52,3 +52,15 @@ def resolve_alert(
     db.commit()
     db.refresh(alert)
     return alert
+
+
+@router.delete("/{alert_id}", status_code=204)
+def delete_alert(
+    alert_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Delete an alert outright (use /resolve to keep it as history)."""
+    alert = db.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    db.delete(alert)
+    db.commit()

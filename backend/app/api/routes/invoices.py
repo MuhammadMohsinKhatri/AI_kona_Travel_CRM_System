@@ -44,3 +44,20 @@ def get_invoice(
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
+
+
+@router.delete("/{invoice_id}", status_code=204)
+def delete_invoice(
+    invoice_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Remove an invoice record from THIS database.
+
+    Does not delete anything in KonaOS — under PIPELINE_DRY_RUN no KonaOS
+    draft exists anyway. Re-running the pipeline for the event's date
+    recreates the record.
+    """
+    invoice = db.get(Invoice, invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    db.delete(invoice)
+    db.commit()

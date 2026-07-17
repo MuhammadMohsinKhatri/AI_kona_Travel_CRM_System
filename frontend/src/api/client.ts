@@ -70,20 +70,30 @@ export const api = {
     }),
   runs: () => request<Page<PipelineRun>>("/api/pipeline/runs"),
   run: (id: number) => request<PipelineRun>(`/api/pipeline/runs/${id}`),
+  deleteRun: (id: number) =>
+    request<void>(`/api/pipeline/runs/${id}`, { method: "DELETE" }),
   events: (params: Record<string, string> = {}) =>
     request<Page<EventSummary>>("/api/events?" + new URLSearchParams(params)),
   event: (id: number) => request<EventDetail>(`/api/events/${id}`),
+  deleteEvent: (id: number) =>
+    request<void>(`/api/events/${id}`, { method: "DELETE" }),
   waiveCcFee: (id: number) =>
     request<EventDetail>(`/api/events/${id}/waive-cc-fee`, { method: "POST" }),
   invoices: (params: Record<string, string> = {}) =>
     request<Page<Invoice>>("/api/invoices?" + new URLSearchParams(params)),
+  deleteInvoice: (id: number) =>
+    request<void>(`/api/invoices/${id}`, { method: "DELETE" }),
   alerts: (params: Record<string, string> = {}) =>
     request<Page<Alert>>("/api/alerts?" + new URLSearchParams(params)),
   resolveAlert: (id: number) =>
     request<Alert>(`/api/alerts/${id}/resolve`, { method: "POST" }),
+  deleteAlert: (id: number) =>
+    request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
   financialMonths: () => request<string[]>("/api/financials/months"),
   financials: (params: Record<string, string> = {}) =>
     request<FinancialsResponse>("/api/financials?" + new URLSearchParams(params)),
+  deleteFinancialEntry: (id: number) =>
+    request<void>(`/api/financials/${id}`, { method: "DELETE" }),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {

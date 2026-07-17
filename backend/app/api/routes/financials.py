@@ -4,7 +4,7 @@ import csv
 import io
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -176,6 +176,19 @@ def list_entries(
             "check_invoice": round(float(totals[6]), 2), "units_served": round(float(totals[7]), 1),
         },
     }
+
+
+@router.delete("/{entry_id}", status_code=204)
+def delete_entry(
+    entry_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> None:
+    """Remove a ledger row. The event itself is kept — re-running the pipeline
+    for its date rebuilds the row from the event."""
+    entry = db.get(FinancialEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Ledger entry not found")
+    db.delete(entry)
+    db.commit()
 
 
 @router.get("/export.csv")

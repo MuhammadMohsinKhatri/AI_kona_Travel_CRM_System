@@ -150,6 +150,11 @@ tbody tr:last-child td { border-bottom: none; }
 /* Numbers align on the decimal — makes columns scannable at a glance. */
 .sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
 
+/* Per-row delete button */
+.icon-btn { padding: 4px 9px; font-size: 13px; line-height: 1.4; }
+.btn.danger { background: var(--crit); border-color: var(--crit); color: #fff; font-weight: 600; }
+td.actions { width: 1%; white-space: nowrap; text-align: right; }
+
 /* Badges */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.gray { background: var(--surface-2); color: var(--text-dim); }

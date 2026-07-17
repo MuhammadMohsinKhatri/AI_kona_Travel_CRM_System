@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, api, Page } from "../api/client";
-import { Badge, Empty, Loading } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading } from "../components/ui";
 
 const SEVERITIES = ["", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 
@@ -55,9 +55,15 @@ export default function Alerts() {
                 <Badge kind={a.severity}>{a.severity}</Badge>
                 {a.resolved && <span className="badge green">resolved</span>}
               </div>
-              {!a.resolved && (
-                <button className="btn" onClick={() => resolve(a.id)}>Mark resolved</button>
-              )}
+              <div className="flex" style={{ gap: 6 }}>
+                {!a.resolved && (
+                  <button className="btn" onClick={() => resolve(a.id)}>Mark resolved</button>
+                )}
+                <DeleteButton
+                  title="Delete this alert (resolve keeps it as history)"
+                  onDelete={async () => { await api.deleteAlert(a.id); await load(); }}
+                />
+              </div>
             </div>
             <div style={{ fontWeight: 600, marginTop: 8 }}>{a.issue}</div>
             <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>👉 {a.action}</div>
