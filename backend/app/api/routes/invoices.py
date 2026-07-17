@@ -46,7 +46,8 @@ def get_invoice(
     return invoice
 
 
-@router.delete("/{invoice_id}", status_code=204)
+# response_model=None: see alerts.py — required for 204 + `-> None` on FastAPI 0.115.
+@router.delete("/{invoice_id}", status_code=204, response_model=None)
 def delete_invoice(
     invoice_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
 ) -> None:

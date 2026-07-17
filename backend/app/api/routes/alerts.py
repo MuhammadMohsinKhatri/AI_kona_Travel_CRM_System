@@ -54,7 +54,10 @@ def resolve_alert(
     return alert
 
 
-@router.delete("/{alert_id}", status_code=204)
+# response_model=None is load-bearing: with `from __future__ import annotations`,
+# FastAPI 0.115's return-type inference turns `-> None` into a response body and
+# asserts at import ("Status code 204 must not have a response body").
+@router.delete("/{alert_id}", status_code=204, response_model=None)
 def delete_alert(
     alert_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
 ) -> None:

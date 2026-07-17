@@ -171,13 +171,15 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 usage = item["classification"].get("_usage") or {}
                 run.ai_prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
                 run.ai_completion_tokens += int(usage.get("completion_tokens", 0) or 0)
+                # Recompute cost each iteration so a still-running run shows a
+                # live AI cost (not just tokens) instead of "—" until it ends.
+                run.ai_cost_usd = round(
+                    run.ai_prompt_tokens / 1e6 * _s.openai_input_cost_per_mtok
+                    + run.ai_completion_tokens / 1e6 * _s.openai_output_cost_per_mtok,
+                    4,
+                )
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "classify")
-        run.ai_cost_usd = round(
-            run.ai_prompt_tokens / 1e6 * _s.openai_input_cost_per_mtok
-            + run.ai_completion_tokens / 1e6 * _s.openai_output_cost_per_mtok,
-            4,
-        )
         total_tok = run.ai_prompt_tokens + run.ai_completion_tokens
         classify_detail = f"{len(items)} classified"
         if rule_classified:

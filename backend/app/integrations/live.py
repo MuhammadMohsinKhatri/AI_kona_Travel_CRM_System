@@ -125,11 +125,34 @@ def _sanitize_for_classifier(cleaned: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _clean_api_key(raw: str) -> str:
+    """The API key becomes the ``Authorization`` header, and httpx encodes
+    header values as ASCII — a single non-ASCII byte there raises a cryptic
+    ``'ascii' codec can't encode`` deep in the request, once per event.
+
+    Strip the whitespace/quotes that copy-paste and Windows-edited ``.env``
+    files sneak in (``str.strip`` also removes non-breaking spaces and BOMs),
+    then fail loudly with an actionable message if anything non-ASCII remains
+    (usually a ``.env`` saved as UTF-16 or a mangled paste — the whole key is
+    then mojibake and must be re-entered as plain UTF-8/ASCII).
+    """
+    key = (raw or "").strip().strip("\"'").strip()
+    try:
+        key.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            "OPENAI_API_KEY contains non-ASCII characters — the key is corrupted "
+            "(commonly a .env saved as UTF-16/with a BOM, or a bad copy-paste). "
+            "Re-set OPENAI_API_KEY in the server .env as plain UTF-8/ASCII text."
+        ) from exc
+    return key
+
+
 class OpenAIClassifier(Classifier):
     def __init__(self) -> None:
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client = OpenAI(api_key=_clean_api_key(settings.openai_api_key))
         self.model = settings.openai_model
         self.system_prompt = _load_prompt()
 

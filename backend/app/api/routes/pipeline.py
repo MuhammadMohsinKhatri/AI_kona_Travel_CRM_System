@@ -94,7 +94,8 @@ def get_run(
     return run
 
 
-@router.delete("/runs/{run_id}", status_code=204)
+# response_model=None: see alerts.py — required for 204 + `-> None` on FastAPI 0.115.
+@router.delete("/runs/{run_id}", status_code=204, response_model=None)
 def delete_run(
     run_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)
 ) -> None:
