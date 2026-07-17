@@ -70,14 +70,8 @@ export default function Dashboard() {
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="page-sub">
-            {targetDate ? (
-              <>
-                Showing events dated <strong>{targetDate}</strong>
-                {targetDate === todayNY() && " (today)"} — the figures below cover this day only.
-              </>
-            ) : (
-              <>Showing <strong>all time</strong> — every event ever processed.</>
-            )}
+            Showing events dated <strong>{targetDate}</strong>
+            {targetDate === todayNY() && " (today)"} — the figures below cover this day only.
           </p>
         </div>
         <div className="run-controls">
@@ -85,16 +79,16 @@ export default function Dashboard() {
             className="date-input"
             type="date"
             value={targetDate}
-            onChange={(e) => setTargetDate(e.target.value)}
+            // The dashboard is always day-scoped: ignore attempts to clear the
+            // date (native pickers offer a "clear" that would blank the view).
+            onChange={(e) => e.target.value && setTargetDate(e.target.value)}
             title="Sets the day these figures cover, and the day Run processes."
           />
-          <button
-            className="btn"
-            onClick={() => setTargetDate(targetDate ? "" : todayNY())}
-            title={targetDate ? "Show totals across all dates" : "Back to today"}
-          >
-            {targetDate ? "All time" : "Today"}
-          </button>
+          {targetDate !== todayNY() && (
+            <button className="btn" onClick={() => setTargetDate(todayNY())} title="Back to today">
+              Today
+            </button>
+          )}
           <button
             className="btn primary"
             onClick={runPipeline}
@@ -118,8 +112,8 @@ export default function Dashboard() {
         <div className="card" style={{ marginBottom: 16 }}>
           <strong>No events processed for {targetDate} yet.</strong>
           <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
-            Either nothing ran for this date, or the day's events haven't been processed —
-            hit <em>Run for {targetDate}</em>, or switch to <em>All time</em> to see everything.
+            Hit <em>Run for {targetDate}</em> to process this day, or pick another date
+            to see a day that's already been processed.
           </div>
         </div>
       )}
