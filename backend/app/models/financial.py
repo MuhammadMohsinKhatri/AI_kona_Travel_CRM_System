@@ -73,9 +73,16 @@ class FinancialEntry(Base):
     hours_paid: Mapped[bool] = mapped_column(Boolean, default=False)           # HOURS PAID?
 
     # 29-31
-    note: Mapped[str] = mapped_column(String, default="")                      # Note
+    note: Mapped[str] = mapped_column(String, default="")                      # Note (classifier reasoning)
     invoice_drafted: Mapped[bool] = mapped_column(Boolean, default=False)      # Invoice drafted?
     invoice_sent: Mapped[bool] = mapped_column(Boolean, default=False)         # Invoice Sent?
+
+    # AI tracking (per event) — "rule-based" means the deterministic parser
+    # handled it and no LLM call was made (0 tokens, $0).
+    ai_model: Mapped[str] = mapped_column(String(64), default="")
+    ai_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    ai_completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    ai_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
     # 32-46 Classifier / calculation
     total_event_hours: Mapped[float] = mapped_column(Float, default=0.0)       # TOTAL_EVENT_HOURS

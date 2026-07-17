@@ -39,6 +39,9 @@ SHEET_COLUMNS: list[tuple[str, str]] = [
     ("PAYMENT_METHOD", "payment_method"), ("TAX_MODE", "tax_mode"), ("SUBTOTAL", "subtotal"),
     ("ACTUAL_SALES", "actual_sales"), ("MG_SHORTFALL", "mg_shortfall"),
     ("TOTAL_TAX_RATE", "total_tax_rate"), ("TOTAL_TAX", "total_tax"),
+    # AI tracking (beyond the original 46 sheet columns)
+    ("AI_MODEL", "ai_model"), ("AI_PROMPT_TOKENS", "ai_prompt_tokens"),
+    ("AI_COMPLETION_TOKENS", "ai_completion_tokens"), ("AI_COST_USD", "ai_cost_usd"),
 ]
 
 
@@ -130,11 +133,34 @@ def list_entries(
             "final_status": e.final_status, "event_type": e.event_type,
             "billing_model": e.billing_model, "units_served": e.units_served,
             "subtotal": e.subtotal, "sales_tax": e.sales_tax, "cc_fee": e.cc_fee,
-            "check_invoice": e.check_invoice, "square_net_card": e.square_net_card,
-            "square_cc_fee": e.square_cc_fee, "square_orders": e.square_orders,
+            "check_invoice": e.check_invoice,
+            # Square breakdown (sheet columns 5-10)
+            "square_gross_sales": e.square_gross_sales,
+            "square_discounts": e.square_discounts,
+            "square_net_card": e.square_net_card,
+            "square_card_tax": e.square_card_tax,
+            "square_tips_card": e.square_tips_card,
+            "square_cc_fee": e.square_cc_fee,
+            "square_orders": e.square_orders, "square_device": e.square_device,
+            # Cash split (11-13)
+            "cash_collected": e.cash_collected, "cash_tax": e.cash_tax,
+            "cash_pre_tax": e.cash_pre_tax,
+            # Billing (14-22)
+            "taxable": e.taxable,
+            "event_sales_collected": e.event_sales_collected,
+            "sales_dollars": e.sales_dollars,
+            "giveback_amount": e.giveback_amount,
+            "net_event_sales": e.net_event_sales,
+            "location_fee": e.location_fee,
             "invoice_total": e.invoice_total, "deposit": e.deposit, "balance_due": e.balance_due,
             "payment_method": e.payment_method, "paid": e.paid,
             "has_variance": e.has_variance, "variance_amount": e.variance_amount,
+            # Reasoning + AI tracking
+            "note": e.note,
+            "ai_model": e.ai_model,
+            "ai_prompt_tokens": e.ai_prompt_tokens,
+            "ai_completion_tokens": e.ai_completion_tokens,
+            "ai_cost_usd": e.ai_cost_usd,
             "updated_at": e.updated_at.isoformat() if e.updated_at else None,
         }
 

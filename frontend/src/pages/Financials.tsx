@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, FinancialsResponse, getToken } from "../api/client";
+import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
 import { Badge, Empty, Loading, money } from "../components/ui";
 
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
@@ -73,6 +73,11 @@ export default function Financials() {
   }
   const hasFilters =
     !!(month || fromDate || toDate || brand || eventType || paid || search);
+
+  /** Column total across the loaded rows (the list isn't paginated, so the
+   *  rows in hand are the whole filtered set). */
+  const sum = (key: keyof FinancialRow): number =>
+    (data?.items ?? []).reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
 
   async function downloadCsv() {
     const qs = new URLSearchParams(params);
@@ -163,21 +168,36 @@ export default function Financials() {
             <Tot label="Square sales" v={money(data.totals.square_sales)} />
           </div>
 
-          <div className="table-wrap">
-            <table>
+          {/* Sheet-order columns. Wide by design — scrolls horizontally. */}
+          <div className="table-wrap" style={{ overflowX: "auto" }}>
+            <table style={{ whiteSpace: "nowrap" }}>
               <thead>
                 <tr>
-                  <th>Date</th><th>Event</th><th>Brand</th><th>Type</th><th>Status</th>
-                  <th className="right">Units</th>
-                  <th className="right">Subtotal</th>
-                  <th className="right">Tax</th>
-                  <th className="right">CC fee</th>
+                  <th>DATE</th>
+                  <th>EVENT</th>
+                  <th className="right">Square: Gross Sales</th>
+                  <th className="right">Square: Discounts</th>
+                  <th className="right">Square: Net Sales (Card)</th>
+                  <th className="right">Square: Card Tax</th>
+                  <th className="right">Square: Tips (Card)</th>
+                  <th className="right">Square: CC Fee (4%)</th>
+                  <th className="right">Cash Collected</th>
+                  <th className="right">Cash Tax</th>
+                  <th className="right">Cash Pre-Tax</th>
                   <th className="right">Check / Invoice</th>
-                  <th className="right">Invoice total</th>
-                  <th className="right">Deposit</th>
-                  <th className="right">Balance due</th>
-                  <th className="right">Square net</th>
-                  <th>Pay</th>
+                  <th className="right">Deposit / Prepay</th>
+                  <th>Taxable?</th>
+                  <th className="right">Event Sales - Collected</th>
+                  <th className="right">Sales Tax Amount</th>
+                  <th className="right">Sales $</th>
+                  <th className="right">Giveback Amount</th>
+                  <th className="right">Net Event Sales</th>
+                  <th className="right">Location Fee</th>
+                  <th>PAID?</th>
+                  <th>Reasoning</th>
+                  <th>AI model</th>
+                  <th className="right">AI tokens</th>
+                  <th className="right">AI cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,52 +207,88 @@ export default function Financials() {
                     <td>
                       <div style={{ fontWeight: 600 }}>{r.event_name}</div>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {r.event_code} · {r.billing_model || "—"}
+                        {r.brand} · {r.event_code} · {r.billing_model || "—"}
                       </div>
                     </td>
-                    <td>{r.brand}</td>
-                    <td style={{ textTransform: "capitalize" }}>{r.event_type || "—"}</td>
+                    <td className="right">{money(r.square_gross_sales)}</td>
+                    <td className="right">{money(r.square_discounts)}</td>
+                    <td className="right">{money(r.square_net_card)}</td>
+                    <td className="right">{money(r.square_card_tax)}</td>
+                    <td className="right">{money(r.square_tips_card)}</td>
+                    <td className="right">{money(r.square_cc_fee)}</td>
+                    <td className="right">{money(r.cash_collected)}</td>
+                    <td className="right">{money(r.cash_tax)}</td>
+                    <td className="right">{money(r.cash_pre_tax)}</td>
+                    <td className="right">{money(r.check_invoice)}</td>
+                    <td className="right">{money(r.deposit)}</td>
                     <td>
-                      <Badge kind={r.final_status === "completed" ? "green" : "gray"}>
-                        {r.final_status || "—"}
-                      </Badge>
+                      <Badge kind={r.taxable ? "gray" : "green"}>{r.taxable ? "Taxable" : "Exempt"}</Badge>
                     </td>
-                    <td className="right">{r.units_served || "—"}</td>
-                    <td className="right">{money(r.subtotal)}</td>
+                    <td className="right">{money(r.event_sales_collected)}</td>
                     <td className="right">{money(r.sales_tax)}</td>
-                    <td className="right">{money(r.cc_fee)}</td>
-                    <td className="right">{r.check_invoice > 0 ? money(r.check_invoice) : "—"}</td>
-                    <td className="right"><strong>{money(r.invoice_total)}</strong></td>
-                    <td className="right">{r.deposit > 0 ? money(r.deposit) : "—"}</td>
-                    <td className="right">{money(r.balance_due)}</td>
-                    <td className="right">
-                      {r.square_net_card > 0 ? (
-                        <>{money(r.square_net_card)} <span className="muted" style={{ fontSize: 11 }}>({r.square_orders})</span></>
-                      ) : "—"}
-                    </td>
+                    <td className="right">{money(r.sales_dollars)}</td>
+                    <td className="right">{money(r.giveback_amount)}</td>
+                    <td className="right">{money(r.net_event_sales)}</td>
+                    <td className="right">{money(r.location_fee)}</td>
                     <td>
                       <Badge kind={r.paid ? "green" : "gray"}>
-                        {(r.payment_method || "—") + (r.paid ? " ✓" : "")}
+                        {r.paid ? `Paid${r.payment_method ? ` · ${r.payment_method}` : ""}` : "Unpaid"}
                       </Badge>
+                    </td>
+                    {/* Classifier reasoning — full text on hover (it's long). */}
+                    <td
+                      title={r.note || ""}
+                      style={{ whiteSpace: "normal", minWidth: 240, maxWidth: 320, fontSize: 12 }}
+                    >
+                      {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
+                    </td>
+                    <td>
+                      {r.ai_model ? (
+                        <Badge kind={r.ai_model === "rule-based" ? "green" : "gray"}>{r.ai_model}</Badge>
+                      ) : "—"}
+                    </td>
+                    <td className="right">
+                      {r.ai_prompt_tokens + r.ai_completion_tokens > 0
+                        ? (r.ai_prompt_tokens + r.ai_completion_tokens).toLocaleString()
+                        : "0"}
+                    </td>
+                    <td className="right">
+                      {r.ai_cost_usd > 0 ? `$${r.ai_cost_usd.toFixed(4)}` : "$0"}
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, background: "var(--surface-2)" }}>
-                  <td colSpan={5}>
+                  <td colSpan={2}>
                     Totals ({month || ((fromDate || toDate) ? `${fromDate || "…"} → ${toDate || "…"}` : "all")})
+                    <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
                   </td>
-                  <td className="right">{data.totals.units_served}</td>
-                  <td className="right">{money(data.totals.subtotal)}</td>
-                  <td className="right">{money(data.totals.sales_tax)}</td>
-                  <td className="right">{money(data.totals.cc_fee)}</td>
-                  <td className="right">{money(data.totals.check_invoice)}</td>
-                  <td className="right">{money(data.totals.invoice_total)}</td>
+                  <td className="right">{money(sum("square_gross_sales"))}</td>
+                  <td className="right">{money(sum("square_discounts"))}</td>
+                  <td className="right">{money(sum("square_net_card"))}</td>
+                  <td className="right">{money(sum("square_card_tax"))}</td>
+                  <td className="right">{money(sum("square_tips_card"))}</td>
+                  <td className="right">{money(sum("square_cc_fee"))}</td>
+                  <td className="right">{money(sum("cash_collected"))}</td>
+                  <td className="right">{money(sum("cash_tax"))}</td>
+                  <td className="right">{money(sum("cash_pre_tax"))}</td>
+                  <td className="right">{money(sum("check_invoice"))}</td>
+                  <td className="right">{money(sum("deposit"))}</td>
                   <td />
-                  <td className="right">{money(data.totals.balance_due)}</td>
-                  <td className="right">{money(data.totals.square_sales)}</td>
+                  <td className="right">{money(sum("event_sales_collected"))}</td>
+                  <td className="right">{money(sum("sales_tax"))}</td>
+                  <td className="right">{money(sum("sales_dollars"))}</td>
+                  <td className="right">{money(sum("giveback_amount"))}</td>
+                  <td className="right">{money(sum("net_event_sales"))}</td>
+                  <td className="right">{money(sum("location_fee"))}</td>
                   <td />
+                  <td />
+                  <td />
+                  <td className="right">
+                    {(sum("ai_prompt_tokens") + sum("ai_completion_tokens")).toLocaleString()}
+                  </td>
+                  <td className="right">${sum("ai_cost_usd").toFixed(4)}</td>
                 </tr>
               </tfoot>
             </table>

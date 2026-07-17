@@ -129,9 +129,26 @@ export interface FinancialRow {
   sales_tax: number;
   cc_fee: number;
   check_invoice: number;
+  // Square breakdown
+  square_gross_sales: number;
+  square_discounts: number;
   square_net_card: number;
+  square_card_tax: number;
+  square_tips_card: number;
   square_cc_fee: number;
   square_orders: number;
+  square_device: string | null;
+  // Cash split
+  cash_collected: number;
+  cash_tax: number;
+  cash_pre_tax: number;
+  // Billing
+  taxable: boolean;
+  event_sales_collected: number;
+  sales_dollars: number;
+  giveback_amount: number;
+  net_event_sales: number;
+  location_fee: number;
   invoice_total: number;
   deposit: number;
   balance_due: number;
@@ -139,6 +156,12 @@ export interface FinancialRow {
   paid: boolean;
   has_variance: boolean;
   variance_amount: number;
+  // Reasoning + AI tracking
+  note: string;
+  ai_model: string;
+  ai_prompt_tokens: number;
+  ai_completion_tokens: number;
+  ai_cost_usd: number;
   updated_at: string | null;
 }
 export interface FinancialsResponse {

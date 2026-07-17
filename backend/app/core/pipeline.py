@@ -526,6 +526,19 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     entry.hours_paid = entry.hours_paid or False  # manual flag, preserved across runs
     # notes/flags
     entry.note = str(cls.get("NOTE", ""))
+    # AI tracking — _usage is set by both classifiers; rule-based reports
+    # model="rule-based" with zero tokens, so cost lands at $0.
+    from app.config import settings as _cfg
+
+    _usage = cls.get("_usage") or {}
+    entry.ai_model = str(_usage.get("model", "") or "")
+    entry.ai_prompt_tokens = int(_usage.get("prompt_tokens", 0) or 0)
+    entry.ai_completion_tokens = int(_usage.get("completion_tokens", 0) or 0)
+    entry.ai_cost_usd = round(
+        entry.ai_prompt_tokens / 1e6 * _cfg.openai_input_cost_per_mtok
+        + entry.ai_completion_tokens / 1e6 * _cfg.openai_output_cost_per_mtok,
+        6,
+    )
     entry.invoice_drafted = invoice_total > 0 and str(cls.get("EVENT_TYPE", "")).lower() in ("invoice", "hybrid")
     entry.invoice_sent = entry.invoice_sent or False  # manual flag, preserved
     # classifier / calc
