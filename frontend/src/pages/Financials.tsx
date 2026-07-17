@@ -196,9 +196,6 @@ export default function Financials() {
                   <th className="right">Location Fee</th>
                   <th>PAID?</th>
                   <th>Reasoning</th>
-                  <th>AI model</th>
-                  <th className="right">AI tokens</th>
-                  <th className="right">AI cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -249,19 +246,6 @@ export default function Financials() {
                     >
                       {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
                     </td>
-                    <td>
-                      {r.ai_model ? (
-                        <Badge kind={r.ai_model === "rule-based" ? "green" : "gray"}>{r.ai_model}</Badge>
-                      ) : "—"}
-                    </td>
-                    <td className="right">
-                      {r.ai_prompt_tokens + r.ai_completion_tokens > 0
-                        ? (r.ai_prompt_tokens + r.ai_completion_tokens).toLocaleString()
-                        : "0"}
-                    </td>
-                    <td className="right">
-                      {r.ai_cost_usd > 0 ? `$${r.ai_cost_usd.toFixed(4)}` : "$0"}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -291,11 +275,6 @@ export default function Financials() {
                   <td className="right">{money(sum("location_fee"))}</td>
                   <td />
                   <td />
-                  <td />
-                  <td className="right">
-                    {(sum("ai_prompt_tokens") + sum("ai_completion_tokens")).toLocaleString()}
-                  </td>
-                  <td className="right">${sum("ai_cost_usd").toFixed(4)}</td>
                 </tr>
               </tfoot>
             </table>
