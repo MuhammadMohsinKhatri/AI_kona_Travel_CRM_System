@@ -175,6 +175,7 @@ export default function Financials() {
                 <tr>
                   <th>DATE</th>
                   <th>EVENT</th>
+                  <th>EVENT TYPE</th>
                   <th className="right">Square: Gross Sales</th>
                   <th className="right">Square: Discounts</th>
                   <th className="right">Square: Net Sales (Card)</th>
@@ -207,8 +208,14 @@ export default function Financials() {
                     <td>
                       <div style={{ fontWeight: 600 }}>{r.event_name}</div>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {r.brand} · {r.event_code} · {r.billing_model || "—"}
+                        {r.brand} · {r.event_code}
                       </div>
+                    </td>
+                    <td>
+                      <div style={{ textTransform: "capitalize", fontWeight: 600 }}>
+                        {r.event_type || "—"}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11 }}>{r.billing_model || "—"}</div>
                     </td>
                     <td className="right">{money(r.square_gross_sales)}</td>
                     <td className="right">{money(r.square_discounts)}</td>
@@ -260,7 +267,7 @@ export default function Financials() {
               </tbody>
               <tfoot>
                 <tr style={{ fontWeight: 700, background: "var(--surface-2)" }}>
-                  <td colSpan={2}>
+                  <td colSpan={3}>
                     Totals ({month || ((fromDate || toDate) ? `${fromDate || "…"} → ${toDate || "…"}` : "all")})
                     <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
                   </td>
