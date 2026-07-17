@@ -17,7 +17,7 @@ export default function Layout() {
     <div className="layout">
       <aside className="sidebar">
         <div className="brand">
-          <span className="dot" /> Kona Ice Ops
+          <span className="dot" /> Conbyt AI Automation
         </div>
         {links.map((l) => (
           <NavLink

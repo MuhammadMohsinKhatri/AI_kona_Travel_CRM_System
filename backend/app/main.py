@@ -23,7 +23,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
-    description="Kona Ice / Travelin' Tom event → invoice automation.",
+    description="Conbyt AI Automation Financial System — Kona Ice / Travelin' Tom "
+                "event → invoice automation.",
     lifespan=lifespan,
 )
 

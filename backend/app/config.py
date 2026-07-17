@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_name: str = "Kona Ice Invoice Automation"
+    app_name: str = "Conbyt AI Automation Financial System"
     environment: str = "development"
     secret_key: str = "change-me"
     access_token_expire_minutes: int = 480
