@@ -21,6 +21,17 @@ def setup_module(_):
     Base.metadata.create_all(bind=engine)
 
 
+def test_selling_events_default_to_card_payment():
+    """Selling events settle via Square — a defaulted CHECK becomes card;
+    an explicit CASH (driver wrote it) is kept; invoice events untouched."""
+    from app.core.pipeline import _normalize_classification as norm
+
+    assert norm({"EVENT_TYPE": "selling", "PAYMENT_METHOD": "CHECK"})["PAYMENT_METHOD"] == "CREDIT_CARD"
+    assert norm({"EVENT_TYPE": "selling", "PAYMENT_METHOD": ""})["PAYMENT_METHOD"] == "CREDIT_CARD"
+    assert norm({"EVENT_TYPE": "selling", "PAYMENT_METHOD": "CASH"})["PAYMENT_METHOD"] == "CASH"
+    assert norm({"EVENT_TYPE": "invoice", "PAYMENT_METHOD": "CHECK"})["PAYMENT_METHOD"] == "CHECK"
+
+
 def test_full_pipeline_runs_end_to_end():
     db = SessionLocal()
     try:

@@ -169,7 +169,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     rule_classified += 1
                 else:
                     classification = classifier.classify(item["cleaned"])
-                item["classification"] = classification
+                item["classification"] = _normalize_classification(classification)
                 usage = item["classification"].get("_usage") or {}
                 run.ai_prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
                 run.ai_completion_tokens += int(usage.get("completion_tokens", 0) or 0)
@@ -474,6 +474,21 @@ def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Opt
     start = to_utc_iso(cls.get("ACTUAL_EVENT_START_TIME") or cleaned.get("EVENT_STARTED"))
     end = to_utc_iso(cls.get("ACTUAL_EVENT_END_TIME") or cleaned.get("EVENT_ENDED"))
     return start, end
+
+
+def _normalize_classification(cls: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic post-rules on top of the classifier's output.
+
+    Selling events settle at the truck via Square — when the classifier fell
+    back to the CHECK default because the notes had no payment language, the
+    truthful default for a selling event is card. An explicit CASH (driver
+    wrote it) is kept.
+    """
+    event_type = str(cls.get("EVENT_TYPE", "")).strip().lower()
+    method = str(cls.get("PAYMENT_METHOD", "")).strip().upper()
+    if event_type == "selling" and method in ("", "CHECK"):
+        cls["PAYMENT_METHOD"] = "CREDIT_CARD"
+    return cls
 
 
 def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any]) -> None:

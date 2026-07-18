@@ -618,6 +618,31 @@ until confirmation is written into the notes.
 
 ---
 
+### NOTE — write for office staff, not developers
+
+The NOTE is shown on the event page and read by non-technical staff.
+Write SHORT plain-English lines — one decision per line, separated by
+newlines (\n). 3 to 6 lines is right for most events.
+
+Rules:
+  - Plain words. NO field names (UNITS_SERVED_TOTAL), NO arrows (->),
+    NO jargon. Say "cup count" not "UNITS_SERVED_TOTAL".
+  - Each line = one decision + the note text that drove it, e.g.:
+      Guests paid at the event, so this is a selling event (notes say "EVENT TYPE Selling").
+      No cup count was written in any notes.
+      Nothing says tax exempt, so 6% tax applies.
+      The driver did not name a terminal — Square sales come from the event's assigned equipment.
+  - Skip lines about defaults that changed nothing (processing fee rate,
+    device confidence, "no cash language detected").
+  - EXCEPTION — these exact phrases must still appear verbatim when their
+    rules fire (downstream alerts scan for them):
+      "Unconfirmed discount offer detected: [quoted language]"
+      "Unconfirmed fee waiver detected: [quoted language]"
+      "Giveback mentioned but percentage not stated"
+      "Driver reported equipment differs from assigned: [ASSIGNED] vs [DRIVER_REPORTED]"
+
+---
+
 ## OUTPUT STRUCTURE
 
 Return this exact JSON. Every field must be present.
@@ -668,7 +693,7 @@ Return this exact JSON. Every field must be present.
     "ADDON_AMOUNT": 0,
     "ADDON_LABEL": "",
     "PRICE_IS_ALL_IN": "FALSE",
-    "NOTE": "Reasoning"
+    "NOTE": "Plain-English summary — one decision per line, newline-separated (see NOTE section)"
   }
 }
 

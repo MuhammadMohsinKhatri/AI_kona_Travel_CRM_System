@@ -15,6 +15,16 @@ export default function EventDetail() {
 
   const calc = ev.calculations || {};
   const cls = ev.classification || {};
+  const sq = (ev.square || {}) as any;
+  const bd = sq.breakdown || {};
+  const equip = sq.equipment || {};
+  // Selling events settle at the truck via Square/cash — no client invoice
+  // exists, so the invoice card is replaced by the at-event sales card.
+  const isSelling = (ev.event_type || "").toLowerCase() === "selling";
+  const squareMentioned = String(cls.SQUARE_USED ?? "").toUpperCase() === "TRUE";
+  const deviceLabel = equip.equipment_name
+    ? `${equip.equipment_name} · ${squareMentioned ? "named by driver" : "assigned to event"}`
+    : "—";
 
   return (
     <>
@@ -48,52 +58,73 @@ export default function EventDetail() {
             <div className="k">Payment method</div><div className="v">{String(cls.PAYMENT_METHOD ?? "—")}</div>
             <div className="k">Units served</div><div className="v">{String(cls.UNITS_SERVED_TOTAL ?? "—")}</div>
             <div className="k">Rate / serving</div><div className="v">{money(Number(cls.RATE_PER_SERVING) || 0)}</div>
-            <div className="k">Square used</div><div className="v">{String(cls.SQUARE_USED ?? "—")}</div>
+            <div className="k">Square device</div><div className="v">{deviceLabel}</div>
           </div>
-          {cls.NOTE ? <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>{String(cls.NOTE)}</p> : null}
+          {cls.NOTE ? <ReasoningNotes note={String(cls.NOTE)} /> : null}
         </div>
 
-        <div className="card">
-          <div className="flex between">
-            <div className="section-title" style={{ marginTop: 0 }}>Invoice calculation</div>
-            {Number(calc.CC_FEE) > 0 && (
-              <button
-                className="btn"
-                title="Client paid by check — recalculate the invoice without the 4% processing fee"
-                onClick={async () => {
-                  if (!id) return;
-                  setEv(await api.waiveCcFee(Number(id)));
-                }}
-              >
-                Paid by check — remove CC fee
-              </button>
-            )}
-            {calc.CC_FEE_WAIVED ? <span className="badge green">CC fee waived</span> : null}
+        {isSelling ? (
+          <div className="card">
+            <div className="section-title" style={{ marginTop: 0 }}>At-event sales</div>
+            <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+              Selling event — guests pay at the truck, so no client invoice is raised.
+              Card sales are pulled from Square for this event's device during the event window.
+            </p>
+            <div className="kv">
+              <div className="k">Square device</div><div className="v">{deviceLabel}</div>
+              <div className="k">Card orders</div><div className="v">{String(sq.order_count ?? 0)}</div>
+              <div className="k">Net card sales</div>
+              <div className="v" style={{ fontSize: 18, fontWeight: 700 }}>{money(Number(bd.net_card) || 0)}</div>
+              <div className="k">Card tax</div><div className="v">{money(Number(bd.card_tax) || 0)}</div>
+              <div className="k">Tips</div><div className="v">{money(Number(bd.tips_card) || 0)}</div>
+              <div className="k">Cash collected</div><div className="v">{money(Number(cls.CASH_COLLECTED_AMOUNT) || 0)}</div>
+            </div>
           </div>
-          <div className="kv">
-            <div className="k">Subtotal</div><div className="v">{money(Number(calc.SUBTOTAL) || 0)}</div>
-            <div className="k">Sales tax</div><div className="v">{money(Number(calc.SALES_TAX) || 0)}</div>
-            <div className="k">CC fee</div><div className="v">{money(Number(calc.CC_FEE) || 0)}</div>
-            <div className="k">Final invoice</div>
-            <div className="v" style={{ fontSize: 18, fontWeight: 700 }}>{money(Number(calc.FINAL_INVOICE_AMOUNT) || 0)}</div>
-            <div className="k">Balance due</div><div className="v">{money(Number(calc.BALANCE_DUE) || 0)}</div>
-            {calc.HAS_VARIANCE ? (
-              <>
-                <div className="k">Variance</div>
-                <div className="v" style={{ color: "var(--warn)" }}>{money(Number(calc.VARIANCE_AMOUNT) || 0)}</div>
-              </>
-            ) : null}
+        ) : (
+          <div className="card">
+            <div className="flex between">
+              <div className="section-title" style={{ marginTop: 0 }}>Invoice calculation</div>
+              {Number(calc.CC_FEE) > 0 && (
+                <button
+                  className="btn"
+                  title="Client paid by check — recalculate the invoice without the 4% processing fee"
+                  onClick={async () => {
+                    if (!id) return;
+                    setEv(await api.waiveCcFee(Number(id)));
+                  }}
+                >
+                  Paid by check — remove CC fee
+                </button>
+              )}
+              {calc.CC_FEE_WAIVED ? <span className="badge green">CC fee waived</span> : null}
+            </div>
+            <div className="kv">
+              <div className="k">Subtotal</div><div className="v">{money(Number(calc.SUBTOTAL) || 0)}</div>
+              <div className="k">Sales tax</div><div className="v">{money(Number(calc.SALES_TAX) || 0)}</div>
+              <div className="k">CC fee</div><div className="v">{money(Number(calc.CC_FEE) || 0)}</div>
+              <div className="k">Final invoice</div>
+              <div className="v" style={{ fontSize: 18, fontWeight: 700 }}>{money(Number(calc.FINAL_INVOICE_AMOUNT) || 0)}</div>
+              <div className="k">Balance due</div><div className="v">{money(Number(calc.BALANCE_DUE) || 0)}</div>
+              {calc.HAS_VARIANCE ? (
+                <>
+                  <div className="k">Variance</div>
+                  <div className="v" style={{ color: "var(--warn)" }}>{money(Number(calc.VARIANCE_AMOUNT) || 0)}</div>
+                </>
+              ) : null}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {ev.square && Object.keys(ev.square).length > 0 && (
+      {/* Selling events show Square in the at-event sales card above. */}
+      {!isSelling && ev.square && Object.keys(ev.square).length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <div className="section-title" style={{ marginTop: 0 }}>Square reconciliation</div>
           <div className="kv">
-            <div className="k">Device</div><div className="v">{String((ev.square as any).device_id ?? "not mapped")}</div>
-            <div className="k">Orders</div><div className="v">{String((ev.square as any).order_count ?? 0)}</div>
-            <div className="k">Total collected</div><div className="v">{money(Number((ev.square as any).total_collected) || 0)}</div>
+            <div className="k">Device</div><div className="v">{String(sq.device_id ?? "not mapped")}</div>
+            <div className="k">Orders</div><div className="v">{String(sq.order_count ?? 0)}</div>
+            <div className="k">Total collected</div><div className="v">{money(Number(sq.total_collected) || 0)}</div>
+            {sq.note ? <><div className="k">Note</div><div className="v muted">{String(sq.note)}</div></> : null}
           </div>
         </div>
       )}
@@ -140,6 +171,22 @@ export default function EventDetail() {
         <Collapsible title="Raw CRM event" obj={ev.raw} />
       </div>
     </>
+  );
+}
+
+/** Classifier reasoning as a scannable bullet list. New notes are written one
+ *  decision per line; older single-paragraph notes are split at sentence
+ *  boundaries so they stop reading as a wall of text. */
+function ReasoningNotes({ note }: { note: string }) {
+  const lines = (note.includes("\n") ? note.split(/\n+/) : note.split(/(?<=\.)\s+(?=[A-Z"'])/))
+    .map((s) => s.trim().replace(/^[-•]\s*/, ""))
+    .filter(Boolean);
+  if (!lines.length) return null;
+  return (
+    <ul className="muted" style={{ marginTop: 12, fontSize: 13, paddingLeft: 18,
+      display: "flex", flexDirection: "column", gap: 4 }}>
+      {lines.map((s, i) => <li key={i}>{s}</li>)}
+    </ul>
   );
 }
 
