@@ -51,6 +51,44 @@ class SquareLiveClient(SquareClient):
     def _key_for(self, brand: str) -> str:
         return "tom" if "tom" in (brand or "").lower() else "kona"
 
+    def _device_order_ids(
+        self, token: str, version: str, location: str,
+        device_id: str, start_iso: str, end_iso: str,
+    ) -> tuple[set, list]:
+        """Order ids paid on ONE Square device within the window.
+
+        Orders/search cannot filter by device, but each card Payment carries
+        card_details.device_details.device_id — so list the window's payments
+        and keep the orders whose payment came from the event's assigned
+        device. EXTERNAL/CASH-source payments carry no device and are
+        deliberately excluded: cash is reconciled from driver notes, and
+        EXTERNAL entries are invoice/online captures, not on-site truck sales
+        (a single event window was seen holding $2k of them).
+        """
+        headers = {"Authorization": f"Bearer {token}", "Square-Version": version}
+        order_ids: set = set()
+        payment_ids: list = []
+        cursor = None
+        with httpx.Client(timeout=_TIMEOUT) as c:
+            while True:
+                params = {"location_id": location, "begin_time": start_iso,
+                          "end_time": end_iso, "limit": 100}
+                if cursor:
+                    params["cursor"] = cursor
+                r = c.get(f"{self.base}/v2/payments", headers=headers, params=params)
+                r.raise_for_status()
+                data = r.json()
+                for p in data.get("payments", []):
+                    dev = (((p.get("card_details") or {}).get("device_details")) or {}).get("device_id")
+                    if dev == device_id:
+                        payment_ids.append(p.get("id"))
+                        if p.get("order_id"):
+                            order_ids.add(p["order_id"])
+                cursor = data.get("cursor")
+                if not cursor:
+                    break
+        return order_ids, payment_ids
+
     def search_orders(self, brand, device_id, date_iso, start_iso=None, end_iso=None):
         key = self._key_for(brand)
         token = self.tokens[key]
@@ -60,16 +98,20 @@ class SquareLiveClient(SquareClient):
                  "total_collected": 0.0, "payment_ids": [], "breakdown": {}}
         if not token or not location:
             return empty
+        # No mapped device or no time window → attribution is impossible; an
+        # honest zero beats crediting the event with the whole location's sales.
+        if not device_id or not (start_iso and end_iso):
+            return empty
 
-        date_filter: dict[str, Any] = {}
-        if start_iso and end_iso:
-            date_filter = {"date_time_filter": {"closed_at": {"start_at": start_iso, "end_at": end_iso}}}
         body = {
             "return_entries": False,
             "limit": 1000,
             "location_ids": [location],
             "query": {
-                "filter": {**date_filter, "state_filter": {"states": cfg["states"]}},
+                "filter": {
+                    "date_time_filter": {"closed_at": {"start_at": start_iso, "end_at": end_iso}},
+                    "state_filter": {"states": cfg["states"]},
+                },
                 "sort": {"sort_field": "UPDATED_AT", "sort_order": "DESC"},
             },
         }
@@ -80,6 +122,12 @@ class SquareLiveClient(SquareClient):
             r = c.post(f"{self.base}/v2/orders/search", headers=headers, json=body)
             r.raise_for_status()
             orders = r.json().get("orders", [])
+
+        # Keep only orders actually paid on THIS event's device.
+        device_orders, device_payments = self._device_order_ids(
+            token, cfg["version"], location, device_id, start_iso, end_iso
+        )
+        orders = [o for o in orders if o.get("id") in device_orders]
 
         def money(o, field):
             return (o.get(field, {}) or {}).get("amount", 0) / 100.0
@@ -94,7 +142,7 @@ class SquareLiveClient(SquareClient):
             "brand": brand, "device_id": device_id, "location": location,
             "order_count": len(orders),
             "total_collected": net_card,
-            "payment_ids": [o.get("id") for o in orders],
+            "payment_ids": device_payments,
             "breakdown": {
                 "gross_sales": round(gross, 2), "discounts": round(discounts, 2),
                 "net_card": net_card, "card_tax": round(card_tax, 2),
