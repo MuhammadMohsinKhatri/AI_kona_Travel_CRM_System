@@ -65,7 +65,10 @@ a:hover { text-decoration: underline; }
 .nav-link:hover { background: var(--surface-2); text-decoration: none; }
 .nav-link.active { background: var(--brand); color: #fff; }
 .sidebar .spacer { flex: 1; }
-.content { flex: 1; padding: 26px 32px; max-width: 1200px; }
+/* min-width: 0 matters: a flex child's default min-width is `auto`, so a wide
+   table stretches the whole page sideways (hiding the sidebar behind a
+   page-level scrollbar) instead of scrolling inside its own box. */
+.content { flex: 1; min-width: 0; padding: 26px 32px; max-width: 1200px; }
 .page-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
 .page-sub { color: var(--text-dim); margin: 0 0 22px; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
@@ -149,6 +152,35 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tfoot td.stick-span > .cell { width: 534px; }  /* 104 + 260 + 170 */
 /* Numbers align on the decimal — makes columns scannable at a glance. */
 .sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
+
+/* ── Sheet visual language: ink + dim ink + ONE brand accent ──────────────
+   Data stays in text colors; the brand blue appears only where the eye
+   should land first (headers' underline, the totals row, key money). */
+.sheet thead th {
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 2px solid var(--brand);
+}
+/* Column-group separators: Square block (4), Cash (10), billing (13),
+   PAID? (21). Hairlines only in head+body — the footer has colSpans, so
+   nth-child would land the lines on the wrong columns there. */
+.sheet thead th:nth-child(4), .sheet tbody td:nth-child(4),
+.sheet thead th:nth-child(10), .sheet tbody td:nth-child(10),
+.sheet thead th:nth-child(13), .sheet tbody td:nth-child(13),
+.sheet thead th:nth-child(21), .sheet tbody td:nth-child(21) {
+  border-left: 1px solid var(--border);
+}
+/* Check / Invoice — the sheet's headline money column (index shifts if
+   columns are reordered; update alongside the header row). */
+.sheet tbody td:nth-child(13) { font-weight: 600; }
+/* Totals: the row the eye should find — brand-tinted, heavy top rule. */
+.sheet tfoot td {
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  border-top: 2px solid var(--brand);
+  font-variant-numeric: tabular-nums;
+}
+.sheet tbody td { font-size: 13px; }
+.sheet .muted { color: var(--text-dim); }
 
 /* Per-row delete button */
 .icon-btn { padding: 4px 9px; font-size: 13px; line-height: 1.4; }
