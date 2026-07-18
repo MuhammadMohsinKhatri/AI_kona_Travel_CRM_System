@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, EventSummary, Page } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading, money } from "../components/ui";
+import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "../components/ui";
 
 const STATUSES = ["", "processed", "needs_review", "error", "skipped"];
 
@@ -9,13 +9,21 @@ export default function Events() {
   const [data, setData] = useState<Page<EventSummary> | null>(null);
   const [status, setStatus] = useState("");
   const [q, setQ] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const navigate = useNavigate();
 
-  function reload() {
+  function filterParams(): Record<string, string> {
     const params: Record<string, string> = {};
     if (status) params.status = status;
     if (q) params.q = q;
-    return api.events(params).then(setData);
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    return params;
+  }
+
+  function reload() {
+    return api.events(filterParams()).then(setData);
   }
 
   useEffect(() => {
@@ -23,7 +31,9 @@ export default function Events() {
     const t = setTimeout(reload, q ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, q]);
+  }, [status, q, dateFrom, dateTo]);
+
+  const hasFilters = Boolean(status || q || dateFrom || dateTo);
 
   return (
     <>
@@ -50,7 +60,31 @@ export default function Events() {
             </option>
           ))}
         </select>
+        <input
+          className="input"
+          type="date"
+          title="From date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+        <span className="muted">–</span>
+        <input
+          className="input"
+          type="date"
+          title="To date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
         {data && <span className="muted">{data.total} events</span>}
+        {hasFilters && data && data.total > 0 && (
+          <BulkDeleteButton
+            count={data.total}
+            onDelete={async () => {
+              await api.deleteEvents(filterParams());
+              await reload();
+            }}
+          />
+        )}
       </div>
 
       {!data ? (
@@ -69,7 +103,7 @@ export default function Events() {
                 <th>Billing model</th>
                 <th>Status</th>
                 <th className="right">Invoice</th>
-                <th></th>
+                <th className="actions"></th>
               </tr>
             </thead>
             <tbody>

@@ -84,3 +84,57 @@ export function DeleteButton({
     </button>
   );
 }
+
+/** Bulk delete for "everything matching the current filters". Same two-step
+ *  arm/confirm as DeleteButton, but labeled with the row count so the user
+ *  sees exactly how many rows are about to go. */
+export function BulkDeleteButton({
+  count,
+  onDelete,
+  noun = "events",
+}: {
+  count: number;
+  onDelete: () => Promise<void> | void;
+  noun?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <button
+      className={"btn" + (armed ? " danger" : "")}
+      disabled={busy}
+      style={{ marginLeft: "auto" }}
+      title={
+        armed
+          ? "Click again to confirm — this cannot be undone"
+          : `Delete every ${noun.replace(/s$/, "")} matching the current filters`
+      }
+      onClick={async () => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setBusy(true);
+        try {
+          await onDelete();
+        } finally {
+          setBusy(false);
+          setArmed(false);
+        }
+      }}
+    >
+      {busy
+        ? "Deleting…"
+        : armed
+        ? `Really delete ${count} ${noun}?`
+        : `🗑 Delete ${count} filtered`}
+    </button>
+  );
+}

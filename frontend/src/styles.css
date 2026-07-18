@@ -154,6 +154,16 @@ tbody tr:last-child td { border-bottom: none; }
 .icon-btn { padding: 4px 9px; font-size: 13px; line-height: 1.4; }
 .btn.danger { background: var(--crit); border-color: var(--crit); color: #fff; font-weight: 600; }
 td.actions { width: 1%; white-space: nowrap; text-align: right; }
+/* Pin the actions column to the right edge so the delete button stays
+   visible on wide tables (Runs etc.) instead of hiding past the h-scroll.
+   Backgrounds must be opaque — sticky cells slide over other cells. */
+td.actions, th.actions {
+  position: sticky; right: 0;
+  background: var(--surface);
+  box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .18);
+}
+th.actions { background: var(--surface-2); }
+tbody tr:hover td.actions { background: var(--surface-2); }
 
 /* Badges */
 .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }

@@ -32,7 +32,7 @@ export default function Runs() {
                 <th className="right">Invoices</th><th className="right">Alerts</th>
                 <th className="right">AI tokens</th><th className="right">AI cost</th>
                 <th>Started</th>
-                <th></th>
+                <th className="actions"></th>
               </tr>
             </thead>
             <tbody>

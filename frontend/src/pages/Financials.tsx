@@ -202,7 +202,7 @@ export default function Financials() {
                   <th className="right">Location Fee</th>
                   <th>PAID?</th>
                   <th>Reasoning</th>
-                  <th></th>
+                  <th className="actions"></th>
                 </tr>
               </thead>
               <tbody>

@@ -66,6 +66,42 @@ def test_deleting_ledger_row_keeps_its_event(db):
     assert db.query(FinancialEntry).count() == 0
 
 
+def test_bulk_delete_filters_by_date_range_and_cascades(db):
+    from app.api.routes.events import _filtered_events
+
+    for i, date in enumerate(["2026-07-10", "2026-07-12", "2026-07-15"], 1):
+        e = Event(crm_event_id=f"D{i}", event_name=f"E{i}", event_date=date,
+                  status="processed")
+        db.add(e)
+        db.commit()
+        db.add(Invoice(event_id=e.id, grand_total=50.0))
+        db.commit()
+
+    # Same deletion path as the endpoint: ORM deletes so cascades run.
+    matched = _filtered_events(db, date_from="2026-07-11", date_to="2026-07-14").all()
+    assert [e.event_date for e in matched] == ["2026-07-12"]
+    for e in matched:
+        db.delete(e)
+    db.commit()
+
+    remaining = {e.event_date for e in db.query(Event).all()}
+    assert remaining == {"2026-07-10", "2026-07-15"}
+    assert db.query(Invoice).count() == 2, "matched event's invoice must cascade"
+
+
+def test_bulk_delete_endpoint_refuses_unfiltered_wipe(db):
+    from fastapi import HTTPException
+
+    from app.api.routes.events import delete_events_bulk
+
+    db.add(Event(crm_event_id="K1", event_name="Keep"))
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        delete_events_bulk(db=db, _=None)
+    assert exc.value.status_code == 400
+    assert db.query(Event).count() == 1, "nothing may be deleted without a filter"
+
+
 def test_deleting_run_does_not_touch_events(db):
     run = PipelineRun(status="completed", trigger="manual")
     db.add(run)

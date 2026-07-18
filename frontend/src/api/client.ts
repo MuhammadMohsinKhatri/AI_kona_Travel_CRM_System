@@ -77,6 +77,10 @@ export const api = {
   event: (id: number) => request<EventDetail>(`/api/events/${id}`),
   deleteEvent: (id: number) =>
     request<void>(`/api/events/${id}`, { method: "DELETE" }),
+  deleteEvents: (params: Record<string, string>) =>
+    request<{ deleted: number }>("/api/events?" + new URLSearchParams(params), {
+      method: "DELETE",
+    }),
   waiveCcFee: (id: number) =>
     request<EventDetail>(`/api/events/${id}/waive-cc-fee`, { method: "POST" }),
   invoices: (params: Record<string, string> = {}) =>

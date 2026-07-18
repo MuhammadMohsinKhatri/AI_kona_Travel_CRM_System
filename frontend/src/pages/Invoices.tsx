@@ -50,7 +50,7 @@ export default function Invoices() {
                 <th className="right">Tax</th>
                 <th className="right">Total</th>
                 <th className="right">Variance</th>
-                <th></th>
+                <th className="actions"></th>
               </tr>
             </thead>
             <tbody>

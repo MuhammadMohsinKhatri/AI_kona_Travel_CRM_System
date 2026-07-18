@@ -68,6 +68,38 @@ def waive_cc_fee(
     return event
 
 
+def _filtered_events(
+    db: Session,
+    status: Optional[str] = None,
+    brand: Optional[str] = None,
+    billing_model: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """One filter builder shared by list + bulk delete, so 'delete filtered'
+    removes exactly the rows the list shows. event_date is a YYYY-MM-DD
+    string, so lexicographic >=/<= is correct date ordering."""
+    query = db.query(Event)
+    if status:
+        query = query.filter(Event.status == status)
+    if brand:
+        query = query.filter(Event.brand == brand)
+    if billing_model:
+        query = query.filter(Event.billing_model == billing_model)
+    if date_from:
+        query = query.filter(Event.event_date >= date_from)
+    if date_to:
+        query = query.filter(Event.event_date <= date_to)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(Event.event_name.ilike(like), Event.event_code.ilike(like),
+                Event.crm_event_id.ilike(like))
+        )
+    return query
+
+
 @router.get("", response_model=Page[EventSummary])
 def list_events(
     db: Session = Depends(get_db),
@@ -78,20 +110,10 @@ def list_events(
     brand: Optional[str] = None,
     billing_model: Optional[str] = None,
     q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> Page[EventSummary]:
-    query = db.query(Event)
-    if status:
-        query = query.filter(Event.status == status)
-    if brand:
-        query = query.filter(Event.brand == brand)
-    if billing_model:
-        query = query.filter(Event.billing_model == billing_model)
-    if q:
-        like = f"%{q}%"
-        query = query.filter(
-            or_(Event.event_name.ilike(like), Event.event_code.ilike(like),
-                Event.crm_event_id.ilike(like))
-        )
+    query = _filtered_events(db, status, brand, billing_model, q, date_from, date_to)
     total = query.with_entities(func.count(Event.id)).scalar() or 0
     items = (
         query.order_by(Event.event_date.desc().nullslast(), Event.id.desc())
@@ -128,3 +150,35 @@ def delete_event(
         raise HTTPException(status_code=404, detail="Event not found")
     db.delete(event)
     db.commit()
+
+
+@router.delete("", response_model=None)
+def delete_events_bulk(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    status: Optional[str] = None,
+    brand: Optional[str] = None,
+    billing_model: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> dict[str, int]:
+    """Bulk-delete every event matching the given filters (same params as the
+    list endpoint), cascading to invoices, alerts and ledger rows. KonaOS is
+    not touched — a pipeline re-run for those dates restores the events.
+
+    At least one filter is required: an unfiltered DELETE wiping the whole
+    table should never happen by accident.
+    """
+    if not any([status, brand, billing_model, q, date_from, date_to]):
+        raise HTTPException(
+            status_code=400,
+            detail="Refusing to delete all events — provide at least one filter",
+        )
+    events = _filtered_events(db, status, brand, billing_model, q, date_from, date_to).all()
+    # ORM-level deletes so relationship cascades run (a bulk query.delete()
+    # would bypass them and orphan invoices/alerts/ledger rows on SQLite).
+    for event in events:
+        db.delete(event)
+    db.commit()
+    return {"deleted": len(events)}
