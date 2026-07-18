@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading, money } from "../components/ui";
+import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "../components/ui";
 
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
  *  Postgres and are upserted by every pipeline run.
@@ -144,6 +144,19 @@ export default function Financials() {
           <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear</button>
         )}
         {data && <span className="muted">{data.total} entries</span>}
+        {/* Bulk delete is date-scoped: wipe the selected day/month (plus any
+            other active filters), then re-run the pipeline to rebuild clean
+            rows. The backend rejects the call without a date scope. */}
+        {(month || fromDate || toDate) && data && data.total > 0 && (
+          <BulkDeleteButton
+            count={data.total}
+            noun="ledger rows"
+            onDelete={async () => {
+              await api.deleteFinancials(params);
+              await reload();
+            }}
+          />
+        )}
       </div>
 
       {error ? (

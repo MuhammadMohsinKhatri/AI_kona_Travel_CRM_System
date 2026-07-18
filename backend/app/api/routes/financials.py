@@ -192,6 +192,38 @@ def delete_entry(
     db.commit()
 
 
+@router.delete("", response_model=None)
+def delete_entries_bulk(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    month: Optional[str] = None,
+    brand: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    event_type: Optional[str] = None,
+    paid: Optional[bool] = None,
+    search: Optional[str] = None,
+) -> dict[str, int]:
+    """Bulk-delete every ledger row matching the given filters (same params as
+    the list endpoint). Events, invoices and alerts are untouched — re-running
+    the pipeline for those dates rebuilds the rows.
+
+    A date scope (month or from/to) is required: the point is "wipe this day /
+    month and re-run", and requiring it keeps a stray click with only e.g.
+    brand set from clearing the whole ledger.
+    """
+    if not (month or from_date or to_date):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a month or a from/to date — bulk delete is date-scoped",
+        )
+    entries = _filtered(db, month, brand, from_date, to_date, event_type, paid, search).all()
+    for entry in entries:
+        db.delete(entry)
+    db.commit()
+    return {"deleted": len(entries)}
+
+
 @router.get("/export.csv")
 def export_csv(
     db: Session = Depends(get_db),

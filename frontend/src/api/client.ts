@@ -98,6 +98,10 @@ export const api = {
     request<FinancialsResponse>("/api/financials?" + new URLSearchParams(params)),
   deleteFinancialEntry: (id: number) =>
     request<void>(`/api/financials/${id}`, { method: "DELETE" }),
+  deleteFinancials: (params: Record<string, string>) =>
+    request<{ deleted: number }>("/api/financials?" + new URLSearchParams(params), {
+      method: "DELETE",
+    }),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {

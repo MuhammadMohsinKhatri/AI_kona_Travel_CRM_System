@@ -102,6 +102,39 @@ def test_bulk_delete_endpoint_refuses_unfiltered_wipe(db):
     assert db.query(Event).count() == 1, "nothing may be deleted without a filter"
 
 
+def test_financials_bulk_delete_is_date_scoped(db):
+    from fastapi import HTTPException
+
+    from app.api.routes.financials import delete_entries_bulk
+
+    # One ledger row per event (event_id is unique) → two events, two rows.
+    for i, date in enumerate(["2026-07-08", "2026-07-09"], 1):
+        e = Event(crm_event_id=f"F{i}", event_name=f"Keep-{i}", status="processed")
+        db.add(e)
+        db.commit()
+        db.add(FinancialEntry(event_id=e.id, crm_event_id=f"F{i}",
+                              event_date=date, month="2026-07"))
+        db.commit()
+
+    # No date scope → 400, nothing deleted (brand alone isn't enough).
+    with pytest.raises(HTTPException) as exc:
+        delete_entries_bulk(db=db, _=None, brand="Kona Ice")
+    assert exc.value.status_code == 400
+    assert db.query(FinancialEntry).count() == 2
+
+    # Single-day scope deletes only that day's rows; the event survives.
+    out = delete_entries_bulk(db=db, _=None, from_date="2026-07-08", to_date="2026-07-08")
+    assert out == {"deleted": 1}
+    remaining = db.query(FinancialEntry).all()
+    assert [r.event_date for r in remaining] == ["2026-07-09"]
+    assert db.query(Event).count() == 2, "ledger bulk delete must not touch events"
+
+    # Month scope wipes the rest of the month.
+    out = delete_entries_bulk(db=db, _=None, month="2026-07")
+    assert out == {"deleted": 1}
+    assert db.query(FinancialEntry).count() == 0
+
+
 def test_deleting_run_does_not_touch_events(db):
     run = PipelineRun(status="completed", trigger="manual")
     db.add(run)
