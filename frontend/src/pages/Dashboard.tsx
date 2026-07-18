@@ -21,6 +21,7 @@ export default function Dashboard() {
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [result, setResult] = useState<PipelineRun | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [dryRun, setDryRun] = useState<boolean | null>(null);
   // Set when the user sends a running pipeline to the background — the poll
   // loop must then stop touching state, or the "done" modal would pop back
   // up minutes later over whatever they're doing.
@@ -42,6 +43,12 @@ export default function Dashboard() {
     load(targetDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetDate]);
+
+  // Invoice mode is server config — show it, don't make the user guess
+  // whether drafts actually reach KonaOS.
+  useEffect(() => {
+    api.health().then((h) => setDryRun(h.pipeline_dry_run)).catch(() => {});
+  }, []);
 
   // A run for this date is executing in the worker (manual, scheduled, or one
   // sent to the background) — keep the banner and tiles fresh until it ends.
@@ -145,6 +152,19 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Server invoice mode — make dry-run visible instead of a surprise. */}
+      {dryRun === true && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--warn)" }}>
+          <strong>Invoice dry-run is ON.</strong>{" "}
+          <span className="muted" style={{ fontSize: 13 }}>
+            Runs calculate and store invoice drafts inside this app only — nothing is
+            created in KonaOS. To create real KonaOS drafts, set{" "}
+            <code>PIPELINE_DRY_RUN=false</code> in the server's backend .env and restart
+            the backend container.
+          </span>
+        </div>
+      )}
+
       {/* Run status for the selected date — always visible, so a background
           or scheduled run is obvious without opening any popup. */}
       {runError && (
@@ -196,6 +216,12 @@ export default function Dashboard() {
               {stats.last_run.finished_at &&
                 ` at ${new Date(stats.last_run.finished_at).toLocaleString()}`}
               {" "}— {stats.last_run.events_processed} events, {stats.last_run.invoices_created} invoices.{" "}
+              {stats.last_run.target_date && stats.last_run.target_date !== targetDate && (
+                <span style={{ cursor: "pointer", textDecoration: "underline", marginRight: 8 }}
+                  onClick={() => setTargetDate(stats.last_run!.target_date!)}>
+                  See that day's numbers
+                </span>
+              )}
               <span style={{ cursor: "pointer", textDecoration: "underline" }}
                 onClick={() => navigate("/runs")}>View runs</span>
             </div>

@@ -61,6 +61,13 @@ export const api = {
     return data;
   },
   me: () => request<User>("/api/auth/me"),
+  health: () =>
+    request<{
+      status: string;
+      environment: string;
+      pipeline_dry_run: boolean;
+      providers: Record<string, string>;
+    }>("/health"),
   stats: (params: Record<string, string> = {}) =>
     request<DashboardStats>("/api/dashboard/stats?" + new URLSearchParams(params)),
   runPipeline: (targetDate?: string) =>
