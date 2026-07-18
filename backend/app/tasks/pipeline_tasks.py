@@ -3,12 +3,48 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from celery.signals import worker_ready
+
 from app.core.pipeline import run_pipeline
 from app.db.base import SessionLocal
 from app.models import PipelineRun
 from app.tasks.celery_app import celery
 
 NY = ZoneInfo("America/New_York")
+
+
+@worker_ready.connect
+def _fail_orphaned_runs(**_kwargs) -> None:
+    """Mark runs orphaned by a worker restart as failed.
+
+    This worker is the only executor, so at boot any run still in "running"
+    is dead — its process was killed mid-run (Watchtower deploys recreate the
+    container). Left alone, the zombie row shows "running" forever and blocks
+    new runs for its date via the duplicate-run guard. All pipeline writes are
+    upsert-safe, so the recovery is simply to re-run the date.
+    """
+    db = SessionLocal()
+    try:
+        orphans = db.query(PipelineRun).filter(PipelineRun.status == "running").all()
+        for run in orphans:
+            run.status = "failed"
+            run.error = (
+                "Interrupted by a worker restart (deploy) before finishing. "
+                "Nothing is corrupted — every write is an upsert. "
+                "Re-run this date to process it completely."
+            )
+            # Freeze the step list truthfully: whatever was mid-flight errored.
+            run.progress = [
+                {**s, "status": "error" if s.get("status") in ("running", "pending") else s.get("status")}
+                for s in (run.progress or [])
+            ]
+            run.finished_at = datetime.now(tz=ZoneInfo("UTC"))
+        if orphans:
+            db.commit()
+    except Exception:  # noqa: BLE001 — cleanup must never block worker boot
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _resolve_target_date(target_date: str | None) -> str | None:
