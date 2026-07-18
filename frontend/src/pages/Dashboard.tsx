@@ -27,14 +27,15 @@ export default function Dashboard() {
   const dismissed = useRef(false);
   const navigate = useNavigate();
 
-  async function load(date = targetDate) {
+  async function load(date = targetDate, silent = false) {
     // Never blank `stats` on a refetch — doing so unmounts the whole page
     // (including the date picker being used) behind the full-page loader.
-    setRefreshing(true);
+    // `silent` skips the dimming too (used by the background-run poll).
+    if (!silent) setRefreshing(true);
     try {
       setStats(await api.stats(date ? { from_date: date, to_date: date } : {}));
     } finally {
-      setRefreshing(false);
+      if (!silent) setRefreshing(false);
     }
   }
   useEffect(() => {
@@ -42,8 +43,21 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetDate]);
 
+  // A run for this date is executing in the worker (manual, scheduled, or one
+  // sent to the background) — keep the banner and tiles fresh until it ends.
+  const runningForDate = stats?.date_run?.running ?? null;
+  useEffect(() => {
+    if (!runningForDate) return;
+    const t = setInterval(() => load(targetDate, true), 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningForDate?.id, targetDate]);
+
+  const [runError, setRunError] = useState("");
+
   async function runPipeline() {
     dismissed.current = false;
+    setRunError("");
     setPhase("running");
     setResult(null);
     try {
@@ -65,8 +79,13 @@ export default function Dashboard() {
       setResult(run);
       setPhase("done");
       await load();
-    } catch {
-      if (!dismissed.current) setPhase("idle");
+    } catch (e: any) {
+      if (!dismissed.current) {
+        setPhase("idle");
+        // e.g. 409 — another run is already processing this date.
+        setRunError(e?.message || "Couldn't start the run.");
+        await load(targetDate, true);
+      }
     }
   }
 
@@ -106,10 +125,14 @@ export default function Dashboard() {
           <button
             className="btn primary"
             onClick={runPipeline}
-            disabled={phase === "running" || !targetDate}
-            title={targetDate ? undefined : "Pick a date first — runs are date-scoped to keep them small and cheap."}
+            disabled={phase === "running" || !targetDate || !!runningForDate}
+            title={
+              runningForDate
+                ? `Run #${runningForDate.id} is already processing this date`
+                : targetDate ? undefined : "Pick a date first — runs are date-scoped to keep them small and cheap."
+            }
           >
-            {phase === "running" ? (
+            {phase === "running" || runningForDate ? (
               <>
                 <span className="spinner sm" /> &nbsp;Running…
               </>
@@ -121,6 +144,42 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* Run status for the selected date — always visible, so a background
+          or scheduled run is obvious without opening any popup. */}
+      {runError && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--crit)" }}>
+          <strong style={{ color: "var(--crit)" }}>Couldn't start the run:</strong> {runError}
+        </div>
+      )}
+      {runningForDate ? (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--accent)" }}>
+          <span className="spinner sm" />{" "}
+          <strong>
+            Run #{runningForDate.id} is processing {targetDate} right now
+          </strong>
+          <span className="muted">
+            {" "}· {runningForDate.trigger} run
+            {runningForDate.started_at &&
+              `, started ${new Date(runningForDate.started_at).toLocaleTimeString()}`}
+            {" "}— it executes on the server, you can keep working.
+          </span>{" "}
+          <button className="btn" style={{ marginLeft: 8 }} onClick={() => navigate("/runs")}>
+            Watch live
+          </button>
+        </div>
+      ) : stats.date_run?.last ? (
+        <p className="muted" style={{ marginTop: -6, marginBottom: 16, fontSize: 13 }}>
+          ✓ {targetDate} was last processed{" "}
+          {stats.date_run.last.finished_at
+            ? `at ${new Date(stats.date_run.last.finished_at).toLocaleString()}`
+            : "earlier"}{" "}
+          by run #{stats.date_run.last.id} ({stats.date_run.last.trigger},{" "}
+          {stats.date_run.last.events_processed} events
+          {stats.date_run.last.status === "failed" ? ", FAILED" : ""}). Re-running is safe —
+          it refreshes the same rows with the latest CRM and Square data.
+        </p>
+      ) : null}
 
       {targetDate && stats.total_events === 0 && (
         <div className="card" style={{ marginBottom: 16 }}>

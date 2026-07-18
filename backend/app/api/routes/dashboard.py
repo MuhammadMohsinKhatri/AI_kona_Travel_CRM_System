@@ -91,7 +91,40 @@ def stats(
 
     last_run = db.query(PipelineRun).order_by(PipelineRun.id.desc()).first()
 
+    # Single-day view: has THIS date been processed, and is a run going on
+    # right now? Drives the status banner next to the Run button.
+    def _mini_run(r: Optional[PipelineRun]) -> Optional[dict]:
+        if r is None:
+            return None
+        return {
+            "id": r.id,
+            "status": r.status,
+            "trigger": r.trigger,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "events_processed": r.events_processed,
+            "invoices_created": r.invoices_created,
+        }
+
+    date_run = None
+    if from_date and from_date == to_date:
+        date_run = {
+            "running": _mini_run(
+                db.query(PipelineRun)
+                .filter(PipelineRun.target_date == from_date, PipelineRun.status == "running")
+                .order_by(PipelineRun.id.desc())
+                .first()
+            ),
+            "last": _mini_run(
+                db.query(PipelineRun)
+                .filter(PipelineRun.target_date == from_date, PipelineRun.status != "running")
+                .order_by(PipelineRun.id.desc())
+                .first()
+            ),
+        }
+
     return {
+        "date_run": date_run,
         "scope": {
             "from_date": from_date,
             "to_date": to_date,

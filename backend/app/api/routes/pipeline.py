@@ -42,6 +42,36 @@ def trigger_run(
     _: User = Depends(get_current_user),
 ) -> RunTriggerResponse:
     target_date = body.target_date if body else None
+
+    # One run per date at a time. RE-running a completed date is fine — every
+    # write is an upsert, so it just refreshes the same rows. But two runs
+    # processing the same events CONCURRENTLY race each other (duplicate
+    # invoice drafts, interleaved ledger writes), so that is refused. A run
+    # stuck in "running" for over 2 hours is treated as dead (worker restart
+    # mid-run) and doesn't block new runs.
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    in_flight = (
+        db.query(PipelineRun)
+        .filter(
+            PipelineRun.status == "running",
+            PipelineRun.target_date == (target_date or None),
+            PipelineRun.started_at >= cutoff,
+        )
+        .order_by(PipelineRun.id.desc())
+        .first()
+    )
+    if in_flight is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Run #{in_flight.id} is already processing "
+                f"{target_date or 'all events'} ({in_flight.trigger}) — "
+                "watch it on the Pipeline Runs page instead of starting another."
+            ),
+        )
+
     run = PipelineRun(status="running", trigger="manual", target_date=target_date or None)
     db.add(run)
     db.commit()

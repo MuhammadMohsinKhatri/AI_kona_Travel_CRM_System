@@ -135,6 +135,33 @@ def test_financials_bulk_delete_is_date_scoped(db):
     assert db.query(FinancialEntry).count() == 0
 
 
+def test_trigger_run_refuses_concurrent_run_for_same_date(db, monkeypatch):
+    """Re-running a finished date is allowed (writes upsert); two runs over
+    the same date at the same time are refused with 409."""
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes.pipeline import RunRequest, trigger_run
+    from app.config import settings
+
+    # Inline mode → BackgroundTasks records the task without executing it,
+    # and the Celery import path (not installed locally) is never touched.
+    monkeypatch.setattr(settings, "pipeline_run_inline", True)
+
+    db.add(PipelineRun(status="running", trigger="scheduled", target_date="2026-07-08"))
+    db.add(PipelineRun(status="completed", trigger="manual", target_date="2026-07-10"))
+    db.commit()
+
+    # Same date, still running → refused.
+    with pytest.raises(HTTPException) as exc:
+        trigger_run(BackgroundTasks(), body=RunRequest(target_date="2026-07-08"), db=db, _=None)
+    assert exc.value.status_code == 409
+
+    # Different date → allowed.
+    assert trigger_run(BackgroundTasks(), body=RunRequest(target_date="2026-07-09"), db=db, _=None).run_id
+    # Same date as a COMPLETED run → allowed (safe re-run).
+    assert trigger_run(BackgroundTasks(), body=RunRequest(target_date="2026-07-10"), db=db, _=None).run_id
+
+
 def test_deleting_run_does_not_touch_events(db):
     run = PipelineRun(status="completed", trigger="manual")
     db.add(run)

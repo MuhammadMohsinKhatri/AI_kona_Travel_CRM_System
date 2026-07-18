@@ -221,8 +221,20 @@ export interface Page<T> {
   page: number;
   page_size: number;
 }
+export interface DateRunInfo {
+  id: number;
+  status: string;
+  trigger: string;
+  started_at: string | null;
+  finished_at: string | null;
+  events_processed: number;
+  invoices_created: number;
+}
 export interface DashboardStats {
   scope: { from_date: string | null; to_date: string | null; all_time: boolean };
+  /** Single-day view only: the run currently processing this date (if any)
+   *  and the most recent finished run for it. Null when not day-scoped. */
+  date_run: { running: DateRunInfo | null; last: DateRunInfo | null } | null;
   total_events: number;
   needs_review: number;
   errored: number;
