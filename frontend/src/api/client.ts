@@ -286,6 +286,7 @@ export interface EventSummary {
   billing_model: string;
   final_invoice_amount: number;
   status: string;
+  status_reason: string;
   created_at: string;
   updated_at: string;
 }

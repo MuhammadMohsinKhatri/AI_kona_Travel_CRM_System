@@ -38,6 +38,10 @@ class Event(Base):
 
     # Pipeline processing state: pending | processing | processed | error | needs_review
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    # Why the pipeline gate made its call — e.g. "cancelled", "pending (no
+    # equipment, no staff)", "confirmed". Shown under the status badge so a
+    # skipped event explains itself.
+    status_reason: Mapped[str] = mapped_column(String(255), default="")
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Rich payloads

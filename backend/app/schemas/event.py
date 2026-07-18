@@ -18,6 +18,7 @@ class EventSummary(BaseModel):
     billing_model: str
     final_invoice_amount: float
     status: str
+    status_reason: str = ""
     created_at: datetime
     updated_at: datetime
 

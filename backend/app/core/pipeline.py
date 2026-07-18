@@ -132,12 +132,14 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     run.events_skipped += 1
                     skipped += 1
                     note(f"[{crm_id}] skipped — {reason}")
-                    _upsert_event(db, run, raw, cleaned, status="skipped")
+                    _upsert_event(db, run, raw, cleaned, status="skipped",
+                                  status_reason=reason)
                     db.commit()
                     continue
                 note(f"[{crm_id}] accepted — {reason}")
 
-                items.append({"crm_id": crm_id, "raw": raw, "cleaned": cleaned})
+                items.append({"crm_id": crm_id, "raw": raw, "cleaned": cleaned,
+                              "gate_reason": reason})
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
                 run.events_errored += 1
@@ -220,6 +222,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     db, run, item["raw"], item["cleaned"],
                     classification=item["classification"], square=item["square"],
                     calculations=calc, status="processed",
+                    status_reason=item.get("gate_reason", ""),
                 )
                 db.commit()
             except Exception as exc:  # noqa: BLE001
@@ -323,6 +326,7 @@ def _upsert_event(
     square: dict[str, Any] | None = None,
     calculations: dict[str, Any] | None = None,
     status: str = "processed",
+    status_reason: str = "",
 ) -> Event:
     crm_id = str(cleaned.get("EVENT_ID") or raw.get("id") or "")
     event = db.query(Event).filter(Event.crm_event_id == crm_id).one_or_none()
@@ -338,6 +342,7 @@ def _upsert_event(
     event.raw = raw
     event.cleaned = cleaned
     event.status = status
+    event.status_reason = status_reason
     event.run_id = run.id
     event.error = None
 

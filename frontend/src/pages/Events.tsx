@@ -125,7 +125,14 @@ export default function Events() {
                     )}
                   </td>
                   <td>{e.billing_model || <span className="muted">—</span>}</td>
-                  <td><Badge kind={e.status}>{e.status}</Badge></td>
+                  <td>
+                    <Badge kind={e.status}>{e.status}</Badge>
+                    {e.status_reason && (
+                      <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                        {e.status_reason}
+                      </div>
+                    )}
+                  </td>
                   <td className="right">{money(e.final_invoice_amount)}</td>
                   <td className="actions">
                     <DeleteButton

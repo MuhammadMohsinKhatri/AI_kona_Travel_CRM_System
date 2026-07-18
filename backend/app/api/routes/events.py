@@ -121,6 +121,16 @@ def list_events(
         .limit(page_size)
         .all()
     )
+    # Rows stored before status_reason existed have it empty — derive it from
+    # the same gate that made the call, purely for display. The instances are
+    # detached afterwards so the mutation can never be flushed back.
+    from app.core.event_cleaner import is_processable
+
+    legacy = [e for e in items if not e.status_reason and e.cleaned]
+    if legacy:
+        for e in legacy:
+            e.status_reason = is_processable(e.cleaned)[1]
+        db.expunge_all()
     return Page(items=items, total=total, page=page, page_size=page_size)
 
 
