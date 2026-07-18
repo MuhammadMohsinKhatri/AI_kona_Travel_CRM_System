@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, DashboardStats, PipelineRun } from "../api/client";
 import { Loading, StepList, money } from "../components/ui";
@@ -21,6 +21,10 @@ export default function Dashboard() {
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [result, setResult] = useState<PipelineRun | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Set when the user sends a running pipeline to the background — the poll
+  // loop must then stop touching state, or the "done" modal would pop back
+  // up minutes later over whatever they're doing.
+  const dismissed = useRef(false);
   const navigate = useNavigate();
 
   async function load(date = targetDate) {
@@ -39,27 +43,37 @@ export default function Dashboard() {
   }, [targetDate]);
 
   async function runPipeline() {
+    dismissed.current = false;
     setPhase("running");
     setResult(null);
     try {
       const res = await api.runPipeline(targetDate || undefined);
-      // Poll while the run executes in the background — each poll refreshes
-      // the live step list rendered in the modal.
+      // Poll while the run executes in the background worker — each poll
+      // refreshes the live step list rendered in the modal. The modal is only
+      // a viewer: dismissing it leaves the run going on the server.
       let run = await api.run(res.run_id);
       setResult(run);
       let guard = 0;
       while (run.status === "running" && guard < 600) {
+        if (dismissed.current) return;  // sent to background — stop watching
         await new Promise((r) => setTimeout(r, 700));
         run = await api.run(res.run_id);
         setResult(run);
         guard++;
       }
+      if (dismissed.current) return;
       setResult(run);
       setPhase("done");
       await load();
     } catch {
-      setPhase("idle");
+      if (!dismissed.current) setPhase("idle");
     }
+  }
+
+  /** Close the modal while the run keeps executing on the server. */
+  function sendToBackground() {
+    dismissed.current = true;
+    setPhase("idle");
   }
 
   if (!stats) return <Loading />;  // first load only
@@ -172,7 +186,8 @@ export default function Dashboard() {
           result={result}
           targetDate={targetDate}
           onClose={() => setPhase("idle")}
-          onViewRun={() => result && navigate("/runs")}
+          onBackground={sendToBackground}
+          onViewRun={() => { dismissed.current = true; navigate("/runs"); }}
         />
       )}
     </div>
@@ -205,12 +220,14 @@ function RunModal({
   result,
   targetDate,
   onClose,
+  onBackground,
   onViewRun,
 }: {
   phase: RunPhase;
   result: PipelineRun | null;
   targetDate: string;
   onClose: () => void;
+  onBackground: () => void;
   onViewRun: () => void;
 }) {
   return (
@@ -224,6 +241,14 @@ function RunModal({
               {targetDate ? `Processing events for ${targetDate}` : "Processing all events"}
             </p>
             <StepList steps={result?.progress ?? []} />
+            <div className="flex" style={{ justifyContent: "center", gap: 10, marginTop: 14 }}>
+              <button className="btn" onClick={onViewRun}>Watch in Pipeline Runs</button>
+              <button className="btn primary" onClick={onBackground}>Continue in background</button>
+            </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              The pipeline runs on the server — closing this window doesn't stop it.
+              Follow it any time from the Pipeline Runs page.
+            </p>
           </>
         ) : (
           <>
