@@ -255,6 +255,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
 
         dry_run = _settings.pipeline_dry_run
         progress.set("invoice", "running", "dry-run" if dry_run else "")
+        crm_synced = 0
         for i, item in enumerate(list(items), 1):
             progress.counter("invoice", i, len(items))
             try:
@@ -277,13 +278,54 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         note(f"[{item['crm_id']}] invoice draft created "
                              f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
                     run.invoices_created += 1
+
+                # ── CRM FINANCIAL SYNC (n8n "update event2/3") ────────────────
+                # Non-invoice events (selling / hybrid / MG) get their actuals
+                # written back onto the KonaOS event: card amount, tax rate,
+                # tips, giveback. Pure invoice events are excluded — their
+                # Square data is intentionally empty and would zero out real
+                # CRM values. The KonaOS client PUTs read-modify-write, so
+                # everything else on the event is preserved.
+                event_type = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
+                if event_type != "invoice":
+                    sq_bd = (item.get("square") or {}).get("breakdown") or {}
+                    calc = item["calc"]
+                    cls = item["classification"]
+                    net_card = _num(sq_bd.get("net_card"))
+                    card_tax = _num(sq_bd.get("card_tax"))
+                    tips = _num(sq_bd.get("tips_card"))
+                    giveback = _num(calc.get("GIVEBACK_AMOUNT"))
+                    tax_rate = _num(calc.get("TAX_RATE"))
+                    cash = _num(cls.get("CASH_COLLECTED_AMOUNT"))
+                    cash_pre_tax = _r2(cash / (1 + tax_rate)) if (tax_rate and cash) else cash
+                    collected = _r2(net_card + cash_pre_tax)
+                    financials = {
+                        "EVENT_ID": item["crm_id"],
+                        "ccAmount": _r2(net_card + card_tax),
+                        "taxPercent": tax_rate,
+                        "tipAmount": _r2(tips),
+                        "giveback": _r2(giveback),
+                        "givebackPercentage": _r2(giveback / collected * 100) if collected > 0 else 0,
+                    }
+                    if dry_run:
+                        note(f"[{item['crm_id']}] DRY-RUN — would update KonaOS event "
+                             f"(card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
+                             f"giveback ${financials['giveback']})")
+                    else:
+                        crm.update_event(item["crm_id"], financials)
+                        crm_synced += 1
+                        note(f"[{item['crm_id']}] KonaOS event updated — "
+                             f"card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
+                             f"giveback ${financials['giveback']}")
                 db.commit()
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "invoice")
-        progress.set(
-            "invoice", "done",
-            f"{run.invoices_created} drafts" + (" (dry-run)" if dry_run else ""),
-        )
+        invoice_detail = f"{run.invoices_created} drafts"
+        if crm_synced:
+            invoice_detail += f" · {crm_synced} CRM events updated"
+        if dry_run:
+            invoice_detail += " (dry-run)"
+        progress.set("invoice", "done", invoice_detail)
 
         # ── PHASE 7: ALERTS ─────────────────────────────────────────────────
         progress.set("alerts", "running")
