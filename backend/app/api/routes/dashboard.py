@@ -148,7 +148,10 @@ def stats(
         "last_run": {
             "id": last_run.id,
             "status": last_run.status,
+            "trigger": last_run.trigger,
+            "target_date": last_run.target_date,
             "started_at": last_run.started_at.isoformat() if last_run.started_at else None,
+            "finished_at": last_run.finished_at.isoformat() if last_run.finished_at else None,
             "events_processed": last_run.events_processed,
             "invoices_created": last_run.invoices_created,
             "alerts_raised": last_run.alerts_raised,

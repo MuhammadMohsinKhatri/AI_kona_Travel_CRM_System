@@ -253,7 +253,10 @@ export interface DashboardStats {
   last_run: {
     id: number;
     status: string;
+    trigger: string;
+    target_date: string | null;
     started_at: string | null;
+    finished_at: string | null;
     events_processed: number;
     invoices_created: number;
     alerts_raised: number;

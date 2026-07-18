@@ -188,6 +188,18 @@ export default function Dashboard() {
             Hit <em>Run for {targetDate}</em> to process this day, or pick another date
             to see a day that's already been processed.
           </div>
+          {stats.last_run && !runningForDate && (
+            <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+              Latest pipeline activity: run #{stats.last_run.id} ({stats.last_run.trigger}
+              {stats.last_run.target_date ? ` · for ${stats.last_run.target_date}` : " · all dates"})
+              {" "}{stats.last_run.status}
+              {stats.last_run.finished_at &&
+                ` at ${new Date(stats.last_run.finished_at).toLocaleString()}`}
+              {" "}— {stats.last_run.events_processed} events, {stats.last_run.invoices_created} invoices.{" "}
+              <span style={{ cursor: "pointer", textDecoration: "underline" }}
+                onClick={() => navigate("/runs")}>View runs</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -218,13 +230,22 @@ export default function Dashboard() {
           <div className="label">Last run</div>
           <div className="value small">
             {stats.last_run ? (
-              <span style={{ cursor: "pointer" }} onClick={() => navigate("/runs")}>
+              <span style={{ cursor: "pointer" }} onClick={() => navigate("/runs")}
+                title="Open Pipeline Runs">
                 #{stats.last_run.id} · {stats.last_run.status}
               </span>
             ) : (
               "—"
             )}
           </div>
+          {stats.last_run && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              {stats.last_run.trigger} · {stats.last_run.target_date || "all dates"}
+              {stats.last_run.finished_at &&
+                ` · ${new Date(stats.last_run.finished_at).toLocaleString(undefined,
+                  { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}
+            </div>
+          )}
         </div>
       </div>
 
