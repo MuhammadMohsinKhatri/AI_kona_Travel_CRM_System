@@ -124,13 +124,16 @@ tbody tr:last-child td { border-bottom: none; }
    .cell div (padding moves there too, keeping the offsets exact). */
 .sheet th.stick, .sheet td.stick { position: sticky; z-index: 2; padding: 0; }
 .sheet thead th.stick { z-index: 4; }           /* header ∩ frozen column */
-.sheet .stick > .cell { padding: 11px 14px; box-sizing: border-box; overflow: hidden; }
+.sheet .stick > .cell { padding: 11px 10px; box-sizing: border-box; overflow: hidden; }
+/* Widths are deliberately tight — the frozen block is identity only, the
+   data deserves the horizontal room. Long names/models ellipsize and the
+   full text is on hover (title=). left offsets are cumulative widths. */
 .sheet .stick-1 { left: 0; }
-.sheet .stick-1 > .cell { width: 104px; }
-.sheet .stick-2 { left: 104px; }
-.sheet .stick-2 > .cell { width: 260px; }
-.sheet .stick-3 { left: 364px; }
-.sheet .stick-3 > .cell { width: 170px; }
+.sheet .stick-1 > .cell { width: 94px; }
+.sheet .stick-2 { left: 94px; }
+.sheet .stick-2 > .cell { width: 218px; }
+.sheet .stick-3 { left: 312px; }
+.sheet .stick-3 > .cell { width: 148px; }
 /* Shadow marks where the frozen block ends — only while scrolled right. */
 .sheet .stick-3::before {
   content: ""; position: absolute; top: 0; right: -6px; bottom: 0; width: 6px;
@@ -149,7 +152,7 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tfoot td.stick { z-index: 5; }
 /* Totals label spans the three frozen columns — pin the whole block. */
 .sheet tfoot td.stick-span { left: 0; }
-.sheet tfoot td.stick-span > .cell { width: 534px; }  /* 104 + 260 + 170 */
+.sheet tfoot td.stick-span > .cell { width: 460px; }  /* 94 + 218 + 148 */
 /* Numbers align on the decimal — makes columns scannable at a glance. */
 .sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
 
