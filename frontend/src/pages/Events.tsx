@@ -60,18 +60,21 @@ export default function Events() {
             </option>
           ))}
         </select>
+        <label className="muted" htmlFor="ev-date-from" style={{ fontSize: 12 }}>From</label>
         <input
+          id="ev-date-from"
           className="input"
           type="date"
-          title="From date"
+          title="Show events on or after this date"
           value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)}
         />
-        <span className="muted">–</span>
+        <label className="muted" htmlFor="ev-date-to" style={{ fontSize: 12 }}>To</label>
         <input
+          id="ev-date-to"
           className="input"
           type="date"
-          title="To date"
+          title="Show events on or before this date"
           value={dateTo}
           onChange={(e) => setDateTo(e.target.value)}
         />

@@ -119,12 +119,13 @@ export default function Financials() {
           <option value="">All months</option>
           {months.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <span className="muted" style={{ fontSize: 12 }}>or custom range</span>
-        <input className="input" type="date" value={fromDate} style={{ width: 150 }}
-          onChange={(e) => pickRange({ from: e.target.value })} title="From date (inclusive)" />
-        <span className="muted">→</span>
-        <input className="input" type="date" value={toDate} style={{ width: 150 }}
-          onChange={(e) => pickRange({ to: e.target.value })} title="To date (inclusive)" />
+        <span className="muted" style={{ fontSize: 12 }}>or custom range:</span>
+        <label className="muted" htmlFor="fin-date-from" style={{ fontSize: 12 }}>From</label>
+        <input id="fin-date-from" className="input" type="date" value={fromDate} style={{ width: 150 }}
+          onChange={(e) => pickRange({ from: e.target.value })} title="Rows on or after this date (inclusive)" />
+        <label className="muted" htmlFor="fin-date-to" style={{ fontSize: 12 }}>To</label>
+        <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 150 }}
+          onChange={(e) => pickRange({ to: e.target.value })} title="Rows on or before this date (inclusive)" />
         <select className="select" value={brand} onChange={(e) => setBrand(e.target.value)}>
           <option value="">All brands</option>
           {(data?.brands ?? []).map((b) => <option key={b} value={b}>{b}</option>)}
