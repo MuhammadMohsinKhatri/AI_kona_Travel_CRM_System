@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import { PipelineStep } from "../api/client";
 
 export function Badge({ kind, children }: { kind: string; children: ReactNode }) {
   const map: Record<string, string> = {
@@ -31,6 +32,36 @@ export function money(v: number | null | undefined): string {
 
 export function Loading() {
   return <div className="loading">Loading…</div>;
+}
+
+/** Live phase list for a pipeline run — shared by the Dashboard's run modal
+ *  and the Runs page, so a run's progress can be re-attached to from /runs
+ *  after the modal is closed or the page refreshed. */
+export function StepList({ steps }: { steps: PipelineStep[] }) {
+  if (!steps.length) {
+    return <p className="muted">Starting…</p>;
+  }
+  return (
+    <div className="step-list">
+      {steps.map((s) => (
+        <div key={s.key} className={`step-row ${s.status}`}>
+          <span className="icon">
+            {s.status === "done" ? (
+              "✓"
+            ) : s.status === "error" ? (
+              "✕"
+            ) : s.status === "running" ? (
+              <span className="spinner sm" />
+            ) : (
+              "○"
+            )}
+          </span>
+          <span className="lbl">{s.label}</span>
+          <span className="dtl">{s.detail}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function Empty({ text }: { text: string }) {
