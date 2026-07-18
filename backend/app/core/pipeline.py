@@ -192,10 +192,27 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
 
         # ── PHASE 4: SQUARE RECONCILIATION ──────────────────────────────────
         progress.set("square", "running")
+        sq_skipped = 0
         for i, item in enumerate(list(items), 1):
             progress.counter("square", i, len(items))
             try:
                 equip = map_equipment(item["classification"])
+                # Pure invoice events are host-billed — guests never pay via
+                # Square, so attributing card sales to them is wrong (n8n
+                # routed invoice events around the Square search entirely).
+                # Selling, hybrid, and minimum-guarantee events still reconcile.
+                event_type = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
+                if event_type == "invoice":
+                    item["square"] = {
+                        "brand": item["cleaned"].get("BRAND", ""),
+                        "device_id": equip.get("device_id"),
+                        "order_count": 0, "total_collected": 0.0,
+                        "payment_ids": [], "breakdown": {},
+                        "equipment": equip,
+                        "note": "skipped — invoice event (host-billed, no Square attribution)",
+                    }
+                    sq_skipped += 1
+                    continue
                 start_iso, end_iso = _event_window_utc(item["classification"], item["cleaned"])
                 sq = square.search_orders(
                     brand=item["cleaned"].get("BRAND", ""),
@@ -208,7 +225,10 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 item["square"] = sq
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "square")
-        progress.set("square", "done", f"{len(items)} reconciled")
+        sq_detail = f"{len(items) - sq_skipped} reconciled"
+        if sq_skipped:
+            sq_detail += f", {sq_skipped} invoice events skipped"
+        progress.set("square", "done", sq_detail)
 
         # ── PHASE 5: CALCULATE ──────────────────────────────────────────────
         progress.set("calculate", "running")
@@ -518,12 +538,29 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     entry.check_invoice = invoice_total if payment_method == "CHECK" else 0.0
     entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
     entry.taxable = taxable
-    entry.event_sales_collected = _r2(cash_collected + entry.square_net_card)
-    entry.sales_tax = sales_tax
-    entry.sales_dollars = _num(calc.get("SALES_AMOUNT")) or subtotal
     entry.giveback_amount = _num(calc.get("GIVEBACK_AMOUNT"))
-    entry.net_event_sales = _r2(subtotal - _num(calc.get("GIVEBACK_AMOUNT")))
     entry.location_fee = _num(cls.get("LOCATION_FEE"))
+    # Derived sales columns — formulas match the legacy monthly sheet:
+    #   Event Sales Collected (O) = net card + cash pre-tax
+    #   Sales Tax Amount (P)      = card tax + cash tax
+    #   Sales $ (Q)               = net card + card tax + tips + cash collected
+    #   Net Event Sales (S)       = Event Sales Collected − giveback
+    # Invoice events have no at-event sales — those columns fall back to the
+    # billing calculation (subtotal / calc tax), mirroring the n8n formatter.
+    is_invoice_type = str(cls.get("EVENT_TYPE", "")).strip().lower() == "invoice"
+    if is_invoice_type:
+        entry.event_sales_collected = 0.0
+        entry.sales_tax = sales_tax
+        entry.sales_dollars = subtotal
+        entry.net_event_sales = 0.0
+    else:
+        entry.event_sales_collected = _r2(entry.square_net_card + entry.cash_pre_tax)
+        entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
+        entry.sales_dollars = _r2(
+            entry.square_net_card + entry.square_card_tax
+            + entry.square_tips_card + cash_collected
+        )
+        entry.net_event_sales = _r2(entry.event_sales_collected - entry.giveback_amount)
     # workflow
     entry.paid = str(cls.get("PAID_STATUS") or "").upper() in ("TRUE", "PAID", "YES", "1")
     # staff

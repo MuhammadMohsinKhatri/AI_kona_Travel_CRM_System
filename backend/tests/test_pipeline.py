@@ -60,6 +60,22 @@ def test_full_pipeline_runs_end_to_end():
         )
         assert lincoln_entry.invoice_total == lincoln.final_invoice_amount
         assert lincoln_entry.month == lincoln.event_date[:7]
-        assert lincoln_entry.square_sales >= 0
+        # Invoice events are host-billed — Square reconciliation is skipped,
+        # so no card sales may be attributed to them.
+        assert lincoln_entry.square_sales == 0
+        assert lincoln_entry.square_gross_sales == 0
+        assert lincoln_entry.square_orders == 0
+        assert lincoln_entry.event_sales_collected == 0
+        assert lincoln_entry.net_event_sales == 0
+
+        # Selling events: derived columns follow the legacy sheet formulas.
+        popup = db.query(Event).filter(Event.crm_event_id == "EVT-1003").one()
+        pe = db.query(FinancialEntry).filter(FinancialEntry.event_id == popup.id).one()
+        assert pe.event_sales_collected == round(pe.square_net_card + pe.cash_pre_tax, 2)
+        assert pe.sales_tax == round(pe.square_card_tax + pe.cash_tax, 2)
+        assert pe.sales_dollars == round(
+            pe.square_net_card + pe.square_card_tax + pe.square_tips_card + pe.cash_collected, 2
+        )
+        assert pe.net_event_sales == round(pe.event_sales_collected - pe.giveback_amount, 2)
     finally:
         db.close()
