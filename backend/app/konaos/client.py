@@ -37,6 +37,23 @@ STAFF_ROLE_IDS = {
 SESSION_TTL = 30 * 60
 
 
+def _js_safe(value):
+    """Recursively replace NaN/±Infinity with None, like JSON.stringify does.
+
+    Python's json.dumps emits literal ``NaN`` — INVALID JSON that KonaOS
+    rejects with main.invalidJsonError. These sneak in when an event fetched
+    from KonaOS carries NaN numerics (json.loads happily parses them) and the
+    read-modify-write update PUTs the whole structure back.
+    """
+    if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(value, dict):
+        return {k: _js_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_js_safe(v) for v in value]
+    return value
+
+
 class KonaosClient:
     """Client for interacting with the KonaOS API with automatic session management."""
     
@@ -329,7 +346,7 @@ class KonaosClient:
         if isinstance(payload, str):
             return payload
         # Compact JSON output; same string is used for hash and outgoing bytes.
-        return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        return json.dumps(_js_safe(payload), separators=(",", ":"), ensure_ascii=False)
 
     def _build_body_hash(self, method: str, body_string: str) -> str:
         """Build Base64(SHA256(body)) for non-empty request bodies."""
@@ -1214,7 +1231,14 @@ class KonaosClient:
         
         # Update any additional fields from kwargs
         update_payload.update(kwargs)
-        
+
+        # KonaOS rejects the PUT with events.clientBusinessNameRequired when
+        # businessName is empty — some events are stored without one. Fall
+        # back to the event's name so a financial-fields update can't fail
+        # on an unrelated required field.
+        if not update_payload.get("businessName"):
+            update_payload["businessName"] = update_payload.get("name") or "Kona Ice Event"
+
         # Ensure arrays are lists (not None)
         array_fields = ["eventTemplatesDtoList", "eventAssetsList", "eventStaffList", 
                        "itemsDtoList", "tags", "eventBannerFiles"]

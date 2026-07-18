@@ -268,16 +268,20 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         _store_local_invoice(db, item["event"], payload, status="dry_run")
                         note(f"[{item['crm_id']}] DRY-RUN — would create draft "
                              f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
+                        run.invoices_created += 1
                     else:
-                        _replace_draft(db, crm, item["event"], payload, item["cleaned"])
-                        crm.update_event(item["crm_id"], {
-                            "EVENT_ID": item["crm_id"],
-                            "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
-                            "invoiceStatus": "draft",
-                        })
-                        note(f"[{item['crm_id']}] invoice draft created "
-                             f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
-                    run.invoices_created += 1
+                        outcome = _replace_draft(db, crm, item["event"], payload, item["cleaned"])
+                        if outcome == "created":
+                            crm.update_event(item["crm_id"], {
+                                "EVENT_ID": item["crm_id"],
+                                "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
+                                "invoiceStatus": "draft",
+                            })
+                            note(f"[{item['crm_id']}] invoice draft created "
+                                 f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
+                            run.invoices_created += 1
+                        else:
+                            note(f"[{item['crm_id']}] invoice {outcome}")
 
                 # ── CRM FINANCIAL SYNC (n8n "update event2/3") ────────────────
                 # Non-invoice events (selling / hybrid / MG) get their actuals
@@ -450,21 +454,39 @@ def _store_local_invoice(
 
 def _replace_draft(
     db: Session, crm, event: Event, payload: dict[str, Any], cleaned: dict[str, Any]
-) -> None:
-    """Delete any prior draft for this event, then create a fresh one."""
+) -> str:
+    """Replace this event's DRAFT invoice with a fresh one.
+
+    Returns "created", or "skipped — …" when the event already has an invoice
+    in any non-draft state. Sent/paid/partially-paid invoices must never be
+    deleted or recreated (KonaOS refuses the delete with a 400 anyway, which
+    used to error the whole event) — and unknown statuses are treated as
+    protected too, mirroring the n8n fail-safe: only an explicit draft is
+    safe to replace.
+    """
     existing = crm.list_invoices()
     event_code = payload.get("invoiceNumber")
-    for inv in existing:
-        if inv.get("eventId") == event.crm_event_id or inv.get("invoiceNumber") == event_code:
-            inv_id = inv.get("invoiceId") or inv.get("id")
-            if inv_id:
-                crm.delete_invoice(str(inv_id))
+    matches = [
+        inv for inv in existing
+        if inv.get("eventId") == event.crm_event_id or inv.get("invoiceNumber") == event_code
+    ]
+
+    for inv in matches:
+        status = str(inv.get("invoiceStatus") or inv.get("status") or "").strip().lower()
+        if status != "draft":
+            return f"skipped — existing invoice is '{status or 'unknown'}' (protected, not replaced)"
+
+    for inv in matches:  # all drafts at this point
+        inv_id = inv.get("invoiceId") or inv.get("id")
+        if inv_id:
+            crm.delete_invoice(str(inv_id))
 
     resp = crm.create_invoice(payload)
     _store_local_invoice(
         db, event, payload, status="draft",
         crm_invoice_id=str(resp.get("invoiceId") or resp.get("id") or ""),
     )
+    return "created"
 
 
 def _save_alerts(db: Session, event: Event, alerts: list[dict[str, str]]) -> None:

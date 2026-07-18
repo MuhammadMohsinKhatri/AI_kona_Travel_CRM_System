@@ -162,6 +162,66 @@ def test_trigger_run_refuses_concurrent_run_for_same_date(db, monkeypatch):
     assert trigger_run(BackgroundTasks(), body=RunRequest(target_date="2026-07-10"), db=db, _=None).run_id
 
 
+class _FakeCRM:
+    """Records invoice calls — enough to exercise _replace_draft's routing."""
+
+    def __init__(self, invoices):
+        self.invoices = invoices
+        self.deleted: list[str] = []
+        self.created: list[dict] = []
+
+    def list_invoices(self):
+        return self.invoices
+
+    def delete_invoice(self, inv_id):
+        self.deleted.append(inv_id)
+
+    def create_invoice(self, payload):
+        self.created.append(payload)
+        return {"invoiceId": "NEW-1"}
+
+
+def test_replace_draft_protects_non_draft_invoices(db):
+    """Paid/sent/unknown-status invoices are never deleted or recreated —
+    only an explicit draft is replaced (KonaOS 400s on deleting paid ones,
+    which used to error the whole event)."""
+    from app.core.pipeline import _replace_draft
+
+    e = Event(crm_event_id="INV-EVT-1", event_name="T", status="processed")
+    db.add(e)
+    db.commit()
+    payload = {"invoiceNumber": "K123", "grandTotal": 100.0}
+
+    # Paid invoice → skipped, nothing deleted, nothing created.
+    crm = _FakeCRM([{"eventId": "INV-EVT-1", "invoiceId": "OLD-1", "invoiceStatus": "Paid"}])
+    out = _replace_draft(db, crm, e, payload, {})
+    assert out.startswith("skipped")
+    assert crm.deleted == [] and crm.created == []
+
+    # Unknown status → fail-safe skip.
+    crm = _FakeCRM([{"eventId": "INV-EVT-1", "invoiceId": "OLD-2", "invoiceStatus": "weird"}])
+    assert _replace_draft(db, crm, e, payload, {}).startswith("skipped")
+    assert crm.deleted == []
+
+    # Draft → replaced: old deleted, new created.
+    crm = _FakeCRM([{"eventId": "INV-EVT-1", "invoiceId": "OLD-3", "invoiceStatus": "draft"}])
+    assert _replace_draft(db, crm, e, payload, {}) == "created"
+    assert crm.deleted == ["OLD-3"] and len(crm.created) == 1
+
+
+def test_konaos_json_body_never_contains_nan():
+    """json.dumps emits literal NaN (invalid JSON, KonaOS rejects it) — the
+    serializer must null them out like JSON.stringify does."""
+    pytest.importorskip("httpx")
+    from app.konaos.client import _js_safe
+    import json as _json
+
+    body = {"a": float("nan"), "b": [1.0, float("inf")], "c": {"d": float("-inf"), "ok": 2}}
+    s = _json.dumps(_js_safe(body), separators=(",", ":"))
+    assert "NaN" not in s and "Infinity" not in s
+    assert s == '{"a":null,"b":[1.0,null],"c":{"d":null,"ok":2}}'
+
+
 def test_deleting_run_does_not_touch_events(db):
     run = PipelineRun(status="completed", trigger="manual")
     db.add(run)
