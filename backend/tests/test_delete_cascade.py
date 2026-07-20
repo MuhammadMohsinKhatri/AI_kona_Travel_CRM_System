@@ -232,3 +232,43 @@ def test_deleting_run_does_not_touch_events(db):
     db.delete(run)
     db.commit()
     assert db.query(Event).count() == 1  # run_id is a plain column, no FK
+
+
+def test_update_event_strips_readonly_invoice_status():
+    """invoiceStatus is read-only on the KonaOS event PUT: the GET returns it
+    (derived from the invoice) but the PUT DTO rejects ANY value — even null —
+    with main.invalidJsonError. The read-modify-write must drop it, whether it
+    arrives echoed from the GET or passed explicitly by a caller."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.konaos.client import KonaosClient
+
+    async def scenario():
+        kc = KonaosClient()
+        kc.session_key = "test"
+        fetched = {"id": "E1", "name": "Ev", "businessName": "",
+                   "invoiceStatus": None, "eventStaffList": None, "clientId": None}
+        sent = {}
+
+        async def fake_request(method, endpoint, **kw):
+            class R:
+                status_code = 200
+                text = "{}"
+                def json(self):
+                    return fetched if method == "GET" else {"general": []}
+                def raise_for_status(self):
+                    pass
+            if method != "GET":
+                sent.update(kw.get("json") or {})
+            return R()
+
+        with patch.object(kc, "_make_request", side_effect=fake_request):
+            await kc.update_event("E1", invoiceAmount=275.0, invoiceStatus="draft")
+        await kc.close()
+        return sent
+
+    sent = asyncio.run(scenario())
+    assert "invoiceStatus" not in sent
+    assert sent["invoiceAmount"] == 275.0
+    assert sent["businessName"] == "Ev"  # required-field fallback still applies

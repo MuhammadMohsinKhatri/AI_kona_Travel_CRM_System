@@ -1232,6 +1232,14 @@ class KonaosClient:
         # Update any additional fields from kwargs
         update_payload.update(kwargs)
 
+        # invoiceStatus is READ-ONLY on the event: the GET returns it (derived
+        # from the invoice), but the PUT DTO has no such field, and KonaOS
+        # rejects ANY value for it — even null — with main.invalidJsonError.
+        # The read-modify-write echoed the GET's null back, failing every
+        # event update. Verified against production: the identical full body
+        # returns success.updateEvent the moment this key is dropped.
+        update_payload.pop("invoiceStatus", None)
+
         # KonaOS rejects the PUT with events.clientBusinessNameRequired when
         # businessName is empty — some events are stored without one. Fall
         # back to the event's name so a financial-fields update can't fail

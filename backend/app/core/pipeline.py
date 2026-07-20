@@ -272,14 +272,24 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     else:
                         outcome = _replace_draft(db, crm, item["event"], payload, item["cleaned"])
                         if outcome == "created":
-                            crm.update_event(item["crm_id"], {
-                                "EVENT_ID": item["crm_id"],
-                                "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
-                                "invoiceStatus": "draft",
-                            })
                             note(f"[{item['crm_id']}] invoice draft created "
                                  f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
                             run.invoices_created += 1
+                            # Reflect the amount onto the event — best-effort:
+                            # the draft already exists in KonaOS, so a sync
+                            # failure must not mark this event as errored
+                            # (that's how created drafts got reported as
+                            # failures and re-runs found "surprise" invoices).
+                            # invoiceStatus is deliberately NOT sent — it's
+                            # read-only on the event PUT (see client.update_event).
+                            try:
+                                crm.update_event(item["crm_id"], {
+                                    "EVENT_ID": item["crm_id"],
+                                    "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
+                                })
+                            except Exception as sync_exc:  # noqa: BLE001
+                                note(f"[{item['crm_id']}] WARNING — draft created but "
+                                     f"event sync failed: {sync_exc}")
                         else:
                             note(f"[{item['crm_id']}] invoice {outcome}")
 
