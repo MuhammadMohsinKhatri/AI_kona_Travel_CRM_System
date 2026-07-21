@@ -627,7 +627,14 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     entry.cash_tax = _r2(cash_collected - cash_collected / (1 + tax_rate)) if (taxable and cash_collected) else 0.0
     entry.cash_pre_tax = _r2(cash_collected - entry.cash_tax) if cash_collected else 0.0
     # billing
-    entry.check_invoice = invoice_total if payment_method == "CHECK" else 0.0
+    # Check / Invoice = the invoiced total for host-billed events (invoice or
+    # hybrid), regardless of how the client ultimately pays — confirmed against
+    # the legacy sheet, which populates this column for CHECK, CASH, and
+    # CREDIT_CARD invoice/hybrid rows alike. Was previously gated on
+    # payment_method == "CHECK", which zeroed it out for e.g. a credit-card
+    # invoice event even though the client was in fact billed that amount.
+    event_type_lower = str(cls.get("EVENT_TYPE", "")).strip().lower()
+    entry.check_invoice = invoice_total if event_type_lower in ("invoice", "hybrid") else 0.0
     entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
     entry.taxable = taxable
     entry.giveback_amount = _num(calc.get("GIVEBACK_AMOUNT"))
@@ -641,7 +648,7 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     # Collected AND Net Event Sales both equal the Check / Invoice amount (the
     # billed total). Other billed events with no at-event sale fall back to the
     # invoiced sale (subtotal) rather than sitting at 0.
-    is_invoice_type = str(cls.get("EVENT_TYPE", "")).strip().lower() == "invoice"
+    is_invoice_type = event_type_lower == "invoice"
     if is_invoice_type:
         billed = entry.check_invoice or invoice_total
         entry.event_sales_collected = billed

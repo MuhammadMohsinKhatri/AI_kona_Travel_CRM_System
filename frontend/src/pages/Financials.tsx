@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
 import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "../components/ui";
 
@@ -8,37 +8,62 @@ import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "..
  *
  *  Filtering: pick a month for the classic monthly view, or set a custom
  *  from/to date range (setting one clears the other). Brand / event type /
- *  paid / search narrow further. The CSV export honours every active filter. */
+ *  paid / search narrow further. The CSV export honours every active filter.
+ *
+ *  Filters live in the URL (not component state) so they survive navigating
+ *  to an event and back — "← Financials" returns to the exact same filtered
+ *  view instead of resetting. */
 export default function Financials() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [months, setMonths] = useState<string[]>([]);
-  const [month, setMonth] = useState<string>("");
-  const [fromDate, setFromDate] = useState<string>("");
-  const [toDate, setToDate] = useState<string>("");
-  const [brand, setBrand] = useState<string>("");
-  const [eventType, setEventType] = useState<string>("");
-  const [paid, setPaid] = useState<string>("");        // "" | "true" | "false"
-  const [search, setSearch] = useState<string>("");
-  const [debounced, setDebounced] = useState<string>("");
+  const month = searchParams.get("month") || "";
+  const fromDate = searchParams.get("from_date") || "";
+  const toDate = searchParams.get("to_date") || "";
+  const brand = searchParams.get("brand") || "";
+  const eventType = searchParams.get("event_type") || "";
+  const paid = searchParams.get("paid") || "";          // "" | "true" | "false"
+  const urlSearch = searchParams.get("search") || "";
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const [debounced, setDebounced] = useState(urlSearch);
   const [data, setData] = useState<FinancialsResponse | null>(null);
   const [error, setError] = useState<string>("");
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string>("");
   const [importSource, setImportSource] = useState<"kona" | "tom">("kona");
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /** Merge a patch into the URL's query params (undefined/"" removes a key).
+   *  `replace: true` so filter tweaks don't spam browser history. */
+  function updateParams(patch: Record<string, string | undefined>) {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v); else next.delete(k);
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   useEffect(() => {
     api.financialMonths().then((ms) => {
       setMonths(ms);
-      if (ms.length && !month) setMonth(ms[0]);
+      // Only default to the most recent month on a completely fresh visit —
+      // never override filters already present in the URL (e.g. restored
+      // from "← Financials" after viewing an event).
+      const hasAnyDateFilter = month || fromDate || toDate;
+      if (ms.length && !hasAnyDateFilter) updateParams({ month: ms[0] });
     }).catch(() => { /* surfaced by the list fetch below */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounce the search box so we don't refetch per keystroke.
+  // Debounce the search box so we don't refetch (or touch the URL) per keystroke.
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(search), 300);
+    const t = setTimeout(() => setDebounced(searchInput), 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [searchInput]);
+  useEffect(() => {
+    updateParams({ search: debounced || undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
 
   const params = useMemo(() => {
     const p: Record<string, string> = {};
@@ -67,20 +92,23 @@ export default function Financials() {
 
   /** Month shortcut and custom range are alternatives — using one clears the other. */
   function pickMonth(m: string) {
-    setMonth(m);
-    if (m) { setFromDate(""); setToDate(""); }
+    updateParams({ month: m || undefined, from_date: undefined, to_date: undefined });
   }
+  /** Picking "From" defaults "To" to the same day (a single-day range) —
+   *  editing "To" afterward widens it; editing "To" alone never touches "From". */
   function pickRange(patch: { from?: string; to?: string }) {
-    if (patch.from !== undefined) setFromDate(patch.from);
-    if (patch.to !== undefined) setToDate(patch.to);
-    if (patch.from || patch.to) setMonth("");
+    if (patch.from !== undefined) {
+      updateParams({ from_date: patch.from || undefined, to_date: patch.from || undefined, month: undefined });
+    } else if (patch.to !== undefined) {
+      updateParams({ to_date: patch.to || undefined, month: undefined });
+    }
   }
   function clearFilters() {
-    setMonth(""); setFromDate(""); setToDate("");
-    setBrand(""); setEventType(""); setPaid(""); setSearch("");
+    setSearchParams(new URLSearchParams(), { replace: true });
+    setSearchInput("");
   }
   const hasFilters =
-    !!(month || fromDate || toDate || brand || eventType || paid || search);
+    !!(month || fromDate || toDate || brand || eventType || paid || searchInput);
 
   /** Column total across the loaded rows (the list isn't paginated, so the
    *  rows in hand are the whole filtered set). */
@@ -187,21 +215,21 @@ export default function Financials() {
         <label className="muted" htmlFor="fin-date-to" style={{ fontSize: 12 }}>To</label>
         <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 150 }}
           onChange={(e) => pickRange({ to: e.target.value })} title="Rows on or before this date (inclusive)" />
-        <select className="select" value={brand} onChange={(e) => setBrand(e.target.value)}>
+        <select className="select" value={brand} onChange={(e) => updateParams({ brand: e.target.value || undefined })}>
           <option value="">All brands</option>
           {(data?.brands ?? []).map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
-        <select className="select" value={eventType} onChange={(e) => setEventType(e.target.value)}>
+        <select className="select" value={eventType} onChange={(e) => updateParams({ event_type: e.target.value || undefined })}>
           <option value="">All types</option>
           {(data?.event_types ?? []).map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <select className="select" value={paid} onChange={(e) => setPaid(e.target.value)}>
+        <select className="select" value={paid} onChange={(e) => updateParams({ paid: e.target.value || undefined })}>
           <option value="">Paid + unpaid</option>
           <option value="true">Paid only</option>
           <option value="false">Unpaid only</option>
         </select>
-        <input className="input" placeholder="Search event / code…" value={search}
-          style={{ width: 190 }} onChange={(e) => setSearch(e.target.value)} />
+        <input className="input" placeholder="Search event / code…" value={searchInput}
+          style={{ width: 190 }} onChange={(e) => setSearchInput(e.target.value)} />
         {hasFilters && (
           <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear</button>
         )}
@@ -282,7 +310,7 @@ export default function Financials() {
               </thead>
               <tbody>
                 {data.items.map((r) => (
-                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: "/financials", label: "Financials" } })}>
+                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: location.pathname + location.search, label: "Financials" } })}>
                     <td className="stick stick-1"><div className="cell" style={{ fontWeight: 700 }}>{r.event_date || "—"}</div></td>
                     <td className="stick stick-2" title={r.event_name}>
                       <div className="cell">
