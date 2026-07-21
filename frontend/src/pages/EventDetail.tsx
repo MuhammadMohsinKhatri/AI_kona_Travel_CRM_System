@@ -21,6 +21,7 @@ export default function EventDetail() {
 
   const calc = ev.calculations || {};
   const cls = ev.classification || {};
+  const cl = (ev.cleaned || {}) as any;
   const sq = (ev.square || {}) as any;
   const bd = sq.breakdown || {};
   const equip = sq.equipment || {};
@@ -39,7 +40,7 @@ export default function EventDetail() {
         <div>
           <h1 className="page-title">{ev.event_name || "(unnamed event)"}</h1>
           <p className="page-sub">
-            {ev.event_code || ev.crm_event_id} · {ev.brand} · {ev.event_date || "no date"}
+            {ev.event_code || ev.crm_event_id} · {ev.brand} · <strong>{ev.event_date || "no date"}</strong>
           </p>
         </div>
         <div className="flex">
@@ -60,6 +61,8 @@ export default function EventDetail() {
           <div className="kv">
             <div className="k">Event type</div><div className="v">{ev.event_type || "—"}</div>
             <div className="k">Billing model</div><div className="v">{ev.billing_model || "—"}</div>
+            <div className="k">Event start</div><div className="v">{fmtDateTime(cl.EVENT_STARTED)}</div>
+            <div className="k">Event end</div><div className="v">{fmtDateTime(cl.EVENT_ENDED)}</div>
             <div className="k">Taxable</div><div className="v">{String(cls.TAXABLE ?? "—")}</div>
             <div className="k">Payment method</div><div className="v">{String(cls.PAYMENT_METHOD ?? "—")}</div>
             <div className="k">Units served</div><div className="v">{String(cls.UNITS_SERVED_TOTAL ?? "—")}</div>
@@ -67,6 +70,7 @@ export default function EventDetail() {
             <div className="k">Square device</div><div className="v">{deviceLabel}</div>
           </div>
           {cls.NOTE ? <ReasoningNotes note={String(cls.NOTE)} /> : null}
+          <SourceNotes cleaned={cl} />
         </div>
 
         {isSelling ? (
@@ -193,6 +197,67 @@ function ReasoningNotes({ note }: { note: string }) {
       display: "flex", flexDirection: "column", gap: 4 }}>
       {lines.map((s, i) => <li key={i}>{s}</li>)}
     </ul>
+  );
+}
+
+/** Format a KonaOS wall-clock ISO string ("2026-07-17T10:00:00.000") without
+ *  going through Date() — the string is already America/New_York local time and
+ *  has no tz suffix, so Date() would shift it by the viewer's offset. */
+function fmtDateTime(iso?: string): string {
+  if (!iso) return "—";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return String(iso);
+  const [, y, mo, d, hh, mm] = m;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  let h = Number(hh);
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${months[Number(mo) - 1]} ${Number(d)}, ${y} · ${h}:${mm} ${ampm}`;
+}
+
+/** Strip CRM note HTML down to readable text (no DOM insertion — avoids any
+ *  side effects from setting innerHTML). */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** The raw CRM notes the classifier reasoned over — shown so the calculated
+ *  values (rate, minimum, servings, tax) can be traced back to their source. */
+function SourceNotes({ cleaned }: { cleaned: Record<string, unknown> }) {
+  const items: [string, string][] = [
+    ["Admin notes", String(cleaned.ADMIN_NOTES ?? "").trim()],
+    ["Driver notes", String(cleaned.DRIVER_NOTES ?? "").trim()],
+    ["Event notes", htmlToText(String(cleaned.EVENT_NOTES_HTML ?? ""))],
+    ["Location notes", String(cleaned.LOCATION_NOTES ?? "").trim()],
+  ];
+  const present = items.filter(([, v]) => v);
+  if (!present.length) return null;
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+      <div className="section-title" style={{ marginTop: 0, fontSize: 13 }}>
+        Source notes (from CRM)
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {present.map(([label, text]) => (
+          <div key={label}>
+            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".03em", marginBottom: 2 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{text}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

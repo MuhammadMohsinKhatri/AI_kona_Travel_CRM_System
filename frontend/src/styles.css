@@ -187,6 +187,17 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tbody td { font-size: 13px; }
 .sheet .muted { color: var(--text-dim); }
 
+/* Compact rows so ~10 fit in the viewport before scrolling (default cell
+   padding is 11px top/bottom, which made each 2-line row ~130px tall). */
+.sheet th, .sheet td { padding-top: 6px; padding-bottom: 6px; }
+.sheet .stick > .cell { padding-top: 6px; padding-bottom: 6px; }
+/* The reasoning column is clamped to 2 lines (full text on hover) so a long
+   note can't balloon the row height. */
+.sheet td .clamp2 {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; white-space: normal; line-height: 1.35;
+}
+
 /* Per-row delete button */
 .icon-btn { padding: 4px 9px; font-size: 13px; line-height: 1.4; }
 .btn.danger { background: var(--crit); border-color: var(--crit); color: #fff; font-weight: 600; }

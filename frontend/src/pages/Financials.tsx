@@ -275,7 +275,7 @@ export default function Financials() {
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: "/financials", label: "Financials" } })}>
-                    <td className="stick stick-1"><div className="cell">{r.event_date || "—"}</div></td>
+                    <td className="stick stick-1"><div className="cell" style={{ fontWeight: 700 }}>{r.event_date || "—"}</div></td>
                     <td className="stick stick-2" title={r.event_name}>
                       <div className="cell">
                         <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -324,9 +324,11 @@ export default function Financials() {
                     {/* Classifier reasoning — full text on hover (it's long). */}
                     <td
                       title={r.note || ""}
-                      style={{ whiteSpace: "normal", minWidth: 240, maxWidth: 320, fontSize: 12 }}
+                      style={{ minWidth: 240, maxWidth: 320, fontSize: 12 }}
                     >
-                      {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
+                      <div className="clamp2">
+                        {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
+                      </div>
                     </td>
                     <td className="actions">
                       <DeleteButton
