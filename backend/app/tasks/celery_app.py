@@ -27,19 +27,23 @@ celery.conf.update(
 )
 
 celery.conf.beat_schedule = {
-    # 23:30 America/New_York, scoped to THAT day's events — by late evening the
-    # day's events have finished and drivers have filed their actuals.
-    # target_date is the "today" sentinel, resolved to a real date at run time
-    # (a literal here would freeze to whenever the worker booted). Scoping the
-    # run matters: with no date the pipeline sweeps the last 30 days and pays
-    # for an AI call on ~300 events it already processed the night before.
-    "nightly-pipeline": {
-        "task": "app.tasks.pipeline_tasks.run_pipeline_task",
-        "schedule": crontab(hour=23, minute=30),
-        "kwargs": {"trigger": "scheduled", "target_date": "today"},
-    },
+    # PAUSED 2026-07-21: client-reported production incident — the KonaOS
+    # event-update PUT was wiping equipment/staff assignments on every
+    # non-invoice event it touched (see app/konaos/client.py update_event's
+    # eventAssetsList/eventStaffList mapping fix). Nightly auto-runs are
+    # disabled until the invoice-duplication issue (_replace_draft matching
+    # against the live KonaOS invoice list) is also confirmed fixed against
+    # real API data. Manual runs via the Dashboard are unaffected — re-enable
+    # by uncommenting once both are verified safe in production.
+    #
+    # "nightly-pipeline": {
+    #     "task": "app.tasks.pipeline_tasks.run_pipeline_task",
+    #     "schedule": crontab(hour=23, minute=30),
+    #     "kwargs": {"trigger": "scheduled", "target_date": "today"},
+    # },
     # KonaOS session keys rotate ~every 15-30 days; check before the nightly
     # run so a dead key is refreshed/notified rather than failing the pipeline.
+    # Left running — it only refreshes the session key, no event/invoice writes.
     "konaos-session-maintenance": {
         "task": "app.tasks.konaos_tasks.maintain_konaos_session",
         "schedule": crontab(hour=23, minute=0),  # 30 min before the pipeline

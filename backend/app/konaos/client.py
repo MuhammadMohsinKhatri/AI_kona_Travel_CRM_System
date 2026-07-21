@@ -1247,8 +1247,24 @@ class KonaosClient:
         if not update_payload.get("businessName"):
             update_payload["businessName"] = update_payload.get("name") or "Kona Ice Event"
 
+        # CRITICAL: the GET and PUT DTOs use DIFFERENT field names for
+        # equipment/staff assignment — reads return eventAssetsDtoList /
+        # eventStaffsDtoList, but the update endpoint expects eventAssetsList /
+        # eventStaffList (confirmed against the KonaOS API contract). Since
+        # update_payload started as a copy of the GET response, those
+        # write-shaped keys are always absent here — without this mapping the
+        # "ensure arrays are lists" defaulting below fills them with [], which
+        # KonaOS reads as "unassign everything," silently clearing the event's
+        # equipment/staff on every single update_event call. Map the real data
+        # across first; an explicit kwargs override (a deliberate reassignment)
+        # is left untouched since update_payload already reflects it by now.
+        if update_payload.get("eventAssetsList") is None:
+            update_payload["eventAssetsList"] = existing_event.get("eventAssetsDtoList") or []
+        if update_payload.get("eventStaffList") is None:
+            update_payload["eventStaffList"] = existing_event.get("eventStaffsDtoList") or []
+
         # Ensure arrays are lists (not None)
-        array_fields = ["eventTemplatesDtoList", "eventAssetsList", "eventStaffList", 
+        array_fields = ["eventTemplatesDtoList", "eventAssetsList", "eventStaffList",
                        "itemsDtoList", "tags", "eventBannerFiles"]
         for field in array_fields:
             if update_payload.get(field) is None:

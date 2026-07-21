@@ -35,6 +35,11 @@ def test_new_york_date_differs_from_utc_at_the_scheduled_hour():
     assert moment_utc.astimezone(NY).strftime("%Y-%m-%d") == "2026-07-17"  # what we want
 
 
+@pytest.mark.skip(
+    reason="nightly-pipeline is paused (2026-07-21 incident: the KonaOS event-"
+    "update PUT was wiping equipment/staff on every non-invoice event). "
+    "Re-enable this test alongside celery_app.py once the schedule is restored."
+)
 def test_nightly_is_scheduled_for_2330_ny_and_scoped_to_today():
     entry = celery.conf.beat_schedule["nightly-pipeline"]
     assert entry["kwargs"]["target_date"] == "today", "nightly must be date-scoped"
@@ -43,6 +48,10 @@ def test_nightly_is_scheduled_for_2330_ny_and_scoped_to_today():
     assert 23 in entry["schedule"].hour and 30 in entry["schedule"].minute
 
 
+@pytest.mark.skip(
+    reason="nightly-pipeline is paused (2026-07-21 incident) — nothing to "
+    "compare the session-check schedule against. Re-enable alongside the test above."
+)
 def test_session_check_runs_before_the_pipeline():
     session = celery.conf.beat_schedule["konaos-session-maintenance"]["schedule"]
     pipeline = celery.conf.beat_schedule["nightly-pipeline"]["schedule"]
