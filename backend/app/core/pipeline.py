@@ -637,14 +637,15 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     #   Sales Tax Amount (P)      = card tax + cash tax
     #   Sales $ (Q)               = net card + card tax + tips + cash collected
     #   Net Event Sales (S)       = Event Sales Collected − giveback
-    # Invoice events have no at-event sales — those columns fall back to the
-    # billing calculation (subtotal / calc tax), mirroring the n8n formatter.
+    # Billed events (invoice, or a host-billed event with no at-event card/cash
+    # sale) have no at-truck collection, so Event Sales Collected / Net Event
+    # Sales fall back to the invoiced sale (subtotal) instead of sitting at 0.
     is_invoice_type = str(cls.get("EVENT_TYPE", "")).strip().lower() == "invoice"
     if is_invoice_type:
-        entry.event_sales_collected = 0.0
+        entry.event_sales_collected = subtotal
         entry.sales_tax = sales_tax
         entry.sales_dollars = subtotal
-        entry.net_event_sales = 0.0
+        entry.net_event_sales = _r2(subtotal - entry.giveback_amount)
     else:
         entry.event_sales_collected = _r2(entry.square_net_card + entry.cash_pre_tax)
         entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
@@ -652,6 +653,9 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
             entry.square_net_card + entry.square_card_tax
             + entry.square_tips_card + cash_collected
         )
+        # No at-event sale but there is an invoiced amount → use the invoiced sale.
+        if entry.event_sales_collected == 0 and subtotal:
+            entry.event_sales_collected = subtotal
         entry.net_event_sales = _r2(entry.event_sales_collected - entry.giveback_amount)
     # workflow
     entry.paid = str(cls.get("PAID_STATUS") or "").upper() in ("TRUE", "PAID", "YES", "1")
