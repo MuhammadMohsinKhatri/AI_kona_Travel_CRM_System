@@ -374,10 +374,16 @@ def import_sheet(
         for header, attr in SHEET_COLUMNS:
             if header in row:  # AI_* headers aren't in the sheet — skip them
                 setattr(entry, attr, _coerce(attr, row[header]))
-        # Billed events (invoice / host-billed) have no at-event sale, so the
-        # sheet leaves these two at 0. Match the pipeline rule: fall back to the
-        # invoiced sale so Event Sales - Collected / Net Event Sales aren't 0.
-        if not entry.event_sales_collected and entry.subtotal:
+        # Billed events have no at-event sale, so the sheet leaves these two at
+        # 0 — match the pipeline rule (see _upsert_financial_entry):
+        #   invoice type → both = the Check / Invoice (billed) amount
+        #   other billed → fall back to the invoiced sale (subtotal)
+        etype = (entry.event_type or "").strip().lower()
+        if etype == "invoice":
+            billed = entry.check_invoice or entry.subtotal
+            entry.event_sales_collected = billed
+            entry.net_event_sales = billed
+        elif not entry.event_sales_collected and entry.subtotal:
             entry.event_sales_collected = entry.subtotal
             entry.net_event_sales = round(entry.subtotal - (entry.giveback_amount or 0.0), 2)
         # The sheet has no brand column — stamp it so rows group under the brand.

@@ -637,15 +637,17 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     #   Sales Tax Amount (P)      = card tax + cash tax
     #   Sales $ (Q)               = net card + card tax + tips + cash collected
     #   Net Event Sales (S)       = Event Sales Collected − giveback
-    # Billed events (invoice, or a host-billed event with no at-event card/cash
-    # sale) have no at-truck collection, so Event Sales Collected / Net Event
-    # Sales fall back to the invoiced sale (subtotal) instead of sitting at 0.
+    # Invoice events are host-billed with no at-truck collection: Event Sales
+    # Collected AND Net Event Sales both equal the Check / Invoice amount (the
+    # billed total). Other billed events with no at-event sale fall back to the
+    # invoiced sale (subtotal) rather than sitting at 0.
     is_invoice_type = str(cls.get("EVENT_TYPE", "")).strip().lower() == "invoice"
     if is_invoice_type:
-        entry.event_sales_collected = subtotal
+        billed = entry.check_invoice or invoice_total
+        entry.event_sales_collected = billed
         entry.sales_tax = sales_tax
         entry.sales_dollars = subtotal
-        entry.net_event_sales = _r2(subtotal - entry.giveback_amount)
+        entry.net_event_sales = billed
     else:
         entry.event_sales_collected = _r2(entry.square_net_card + entry.cash_pre_tax)
         entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)

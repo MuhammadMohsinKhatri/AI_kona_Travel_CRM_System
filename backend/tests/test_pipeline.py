@@ -76,13 +76,12 @@ def test_full_pipeline_runs_end_to_end():
         assert lincoln_entry.square_sales == 0
         assert lincoln_entry.square_gross_sales == 0
         assert lincoln_entry.square_orders == 0
-        # Invoice (host-billed) events have no at-event sale, so Event Sales
-        # Collected / Net Event Sales fall back to the invoiced sale (subtotal).
-        assert lincoln_entry.subtotal > 0
-        assert lincoln_entry.event_sales_collected == lincoln_entry.subtotal
-        assert lincoln_entry.net_event_sales == round(
-            lincoln_entry.subtotal - lincoln_entry.giveback_amount, 2
-        )
+        # Invoice (host-billed) events: Event Sales Collected and Net Event
+        # Sales both equal the Check / Invoice (billed) amount.
+        billed = lincoln_entry.check_invoice or lincoln_entry.invoice_total
+        assert billed > 0
+        assert lincoln_entry.event_sales_collected == billed
+        assert lincoln_entry.net_event_sales == billed
 
         # Selling events: derived columns follow the legacy sheet formulas.
         popup = db.query(Event).filter(Event.crm_event_id == "EVT-1003").one()
