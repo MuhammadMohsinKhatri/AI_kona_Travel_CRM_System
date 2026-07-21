@@ -109,8 +109,11 @@ export const api = {
     request<{ deleted: number }>("/api/financials?" + new URLSearchParams(params), {
       method: "DELETE",
     }),
-  importFinancialsSheet: () =>
-    request<SheetImportResult>("/api/financials/import-sheet", { method: "POST" }),
+  importFinancialsSheet: (sheet: "kona" | "tom" = "kona") =>
+    request<SheetImportResult>(
+      "/api/financials/import-sheet?" + new URLSearchParams({ sheet }),
+      { method: "POST" }
+    ),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {
@@ -193,6 +196,9 @@ export interface FinancialRow {
   updated_at: string | null;
 }
 export interface SheetImportResult {
+  sheet: string;
+  label: string;
+  brand: string;
   created: number;
   updated: number;
   skipped_protected: number;

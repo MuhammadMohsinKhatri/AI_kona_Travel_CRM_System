@@ -23,6 +23,7 @@ export default function Financials() {
   const [error, setError] = useState<string>("");
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string>("");
+  const [importSource, setImportSource] = useState<"kona" | "tom">("kona");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -91,8 +92,9 @@ export default function Financials() {
    *  pipeline-generated row. */
   async function importSheet() {
     if (importing) return;
+    const brandLabel = importSource === "tom" ? "Travelin' Tom" : "Kona Ice";
     if (!window.confirm(
-      "Import the legacy financial Google Sheet into the ledger?\n\n" +
+      `Import the ${brandLabel} financial Google Sheet into the ledger?\n\n` +
       "• Events not yet in the system get a placeholder record.\n" +
       "• Rows the pipeline already produced are left untouched.\n" +
       "• Safe to run repeatedly — it refreshes rows it previously imported."
@@ -100,9 +102,9 @@ export default function Financials() {
     setImporting(true);
     setImportMsg("");
     try {
-      const r = await api.importFinancialsSheet();
+      const r = await api.importFinancialsSheet(importSource);
       setImportMsg(
-        `Imported from the sheet — ${r.created} new, ${r.updated} refreshed, ` +
+        `Imported ${r.label} — ${r.created} new, ${r.updated} refreshed, ` +
         `${r.skipped_protected} left untouched (pipeline-owned), ` +
         `${r.placeholders_created} placeholder event(s) created.`
       );
@@ -142,8 +144,14 @@ export default function Financials() {
           </p>
         </div>
         <div className="flex" style={{ gap: 8 }}>
+          <select className="select" value={importSource}
+            onChange={(e) => setImportSource(e.target.value as "kona" | "tom")}
+            disabled={importing} title="Which brand's Google Sheet to import">
+            <option value="kona">Kona Ice</option>
+            <option value="tom">Travelin' Tom</option>
+          </select>
           <button className="btn" onClick={importSheet} disabled={importing}
-            title="Import the legacy financial Google Sheet into the ledger (repeatable; won't overwrite pipeline rows)">
+            title="Import the selected brand's financial Google Sheet into the ledger (repeatable; won't overwrite pipeline rows)">
             {importing ? "⏳ Importing…" : "⬆ Import from Google Sheet"}
           </button>
           <button className="btn" onClick={downloadCsv} disabled={!data || data.total === 0}>

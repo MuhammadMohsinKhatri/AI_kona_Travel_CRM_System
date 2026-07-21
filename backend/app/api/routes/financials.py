@@ -51,6 +51,15 @@ SHEET_COLUMNS: list[tuple[str, str]] = [
 _H_EVENT_ID, _H_EVENT, _H_DATE, _H_TYPE = "EVENT ID", "EVENT", "DATE", "EVENT TYPE"
 _BOOL_TRUE = {"YES", "TRUE", "1", "PAID", "Y", "T"}
 
+# Importable legacy Google Sheets, one per brand. The sheets carry no brand
+# column, so the importer stamps `brand` from here (which also groups the rows
+# under the right brand filter). `url_attr` names the settings field holding
+# the CSV export URL.
+IMPORT_SHEETS: dict[str, dict[str, str]] = {
+    "kona": {"label": "Kona Ice", "brand": "Kona Ice", "url_attr": "financials_sheet_csv_url"},
+    "tom": {"label": "Travelin Tom", "brand": "Travelin Tom", "url_attr": "financials_sheet_tom_csv_url"},
+}
+
 
 def _coerce(attr: str, raw: str):
     """Coerce a raw sheet cell to the FinancialEntry column's Python type.
@@ -285,24 +294,34 @@ def export_csv(
 def import_sheet(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
+    sheet: str = Query("kona", description="Which brand sheet to import: 'kona' or 'tom'"),
     url: Optional[str] = Query(None, description="Override the sheet CSV export URL"),
 ) -> dict:
-    """Import the legacy financial Google Sheet into the Postgres ledger.
+    """Import a legacy financial Google Sheet into the Postgres ledger.
 
-    Repeatable and idempotent (keyed by the sheet's ``EVENT ID`` = crm_event_id):
+    One sheet per brand (``sheet=kona`` | ``sheet=tom``). Repeatable and
+    idempotent (keyed by the sheet's ``EVENT ID`` = crm_event_id):
 
       * A sheet row whose event isn't in the DB gets a lightweight placeholder
-        event (date / name / type from the sheet) so the ledger FK is satisfied.
-        A later pipeline run for that event reuses the placeholder — no dupes.
+        event (date / name / type / brand from the sheet) so the ledger FK is
+        satisfied. A later pipeline run reuses the placeholder — no dupes.
       * A pipeline-owned ledger row (``source != "sheet"``) is NEVER overwritten
         — the sheet only fills events the pipeline hasn't produced.
       * Rows this importer created (``source == "sheet"``) are refreshed on
         re-import, so you can keep re-pulling the sheet during the transition.
 
+    The sheet has no brand column, so the brand is stamped from IMPORT_SHEETS.
     The sheet already carries the final computed columns, so this is a direct
     column-map via SHEET_COLUMNS — no billing re-computation.
     """
-    sheet_url = url or settings.financials_sheet_csv_url
+    cfg = IMPORT_SHEETS.get(sheet)
+    if cfg is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown sheet '{sheet}'. Valid: {', '.join(IMPORT_SHEETS)}",
+        )
+    brand = cfg["brand"]
+    sheet_url = url or getattr(settings, cfg["url_attr"])
     try:
         resp = httpx.get(sheet_url, follow_redirects=True, timeout=30.0)
         resp.raise_for_status()
@@ -329,8 +348,9 @@ def import_sheet(
                 event_name=(row.get(_H_EVENT) or "").strip(),
                 event_date=((row.get(_H_DATE) or "").strip() or None),
                 event_type=(row.get(_H_TYPE) or "").strip(),
+                brand=brand,
                 status="imported",
-                status_reason="Placeholder created from Google Sheet import",
+                status_reason=f"Placeholder created from {cfg['label']} Google Sheet import",
             )
             db.add(event)
             db.flush()  # assign event.id for the FK below
@@ -354,12 +374,17 @@ def import_sheet(
         for header, attr in SHEET_COLUMNS:
             if header in row:  # AI_* headers aren't in the sheet — skip them
                 setattr(entry, attr, _coerce(attr, row[header]))
+        # The sheet has no brand column — stamp it so rows group under the brand.
+        entry.brand = brand
         entry.source = "sheet"
         entry.run_id = None
         entry.month = ((row.get(_H_DATE) or "").strip()[:7]) or None
 
     db.commit()
     return {
+        "sheet": sheet,
+        "label": cfg["label"],
+        "brand": brand,
         "created": created,
         "updated": updated,
         "skipped_protected": skipped_protected,

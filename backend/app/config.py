@@ -68,13 +68,17 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    # Legacy financial Google Sheet — CSV export URL used by the one-click
-    # importer on the Financials page. The sheet is published for CSV export,
-    # so no auth is needed. Override via FINANCIALS_SHEET_CSV_URL to point at a
+    # Legacy financial Google Sheets — CSV export URLs used by the one-click
+    # importer on the Financials page (one per brand). The sheets are published
+    # for CSV export, so no auth is needed. Override via env to point at a
     # different sheet/tab (…/export?format=csv&gid=<tab-gid>).
-    financials_sheet_csv_url: str = (
+    financials_sheet_csv_url: str = (  # Kona Ice
         "https://docs.google.com/spreadsheets/d/"
         "1tuLWnWQTHErp50ITvhkOMdBRZ4xDlruISPjMIZ_W-Z0/export?format=csv&gid=1031520435"
+    )
+    financials_sheet_tom_csv_url: str = (  # Travelin Tom
+        "https://docs.google.com/spreadsheets/d/"
+        "1ntLyVH37MQypG7nLpnd6JTsaCI4UP1VbN3vfXVzzZhs/export?format=csv"
     )
 
     @property
