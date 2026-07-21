@@ -70,7 +70,7 @@ export default function EventDetail() {
             <div className="k">Square device</div><div className="v">{deviceLabel}</div>
           </div>
           {cls.NOTE ? <ReasoningNotes note={String(cls.NOTE)} /> : null}
-          <SubtotalBreakdown invoices={ev.invoices} calc={calc} />
+          <SubtotalBreakdown billingModel={ev.billing_model} cls={cls} calc={calc} />
           <SourceNotes cleaned={cl} />
         </div>
 
@@ -232,23 +232,94 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-/** Shows how the Subtotal is built up, line by line, from the invoice draft's
- *  items (the authoritative per-model breakdown). The CC processing fee is
- *  excluded — it's added after the subtotal, not part of it. Renders nothing
- *  for events with no invoice draft (selling / MG settle via Square). */
+interface SubtotalLine {
+  label: string;
+  qty?: number;
+  rate?: number;
+  amount: number;
+}
+
+/** Shows how the Subtotal is built up, line by line — derived directly from
+ *  the classification inputs + calculation outputs (calculate_invoice's
+ *  per-model formulas in billing.py), so it renders for every processed
+ *  event regardless of whether an invoice draft exists (selling/MG events
+ *  never get one; some invoice events may lack one for other reasons). A
+ *  residual "Adjustment" line absorbs any rounding/edge-case gap so the
+ *  bullets always foot exactly to the displayed Subtotal. */
 function SubtotalBreakdown({
-  invoices,
+  billingModel,
+  cls,
   calc,
 }: {
-  invoices: { payload: Record<string, unknown> }[];
+  billingModel: string;
+  cls: Record<string, unknown>;
   calc: Record<string, unknown>;
 }) {
-  const inv = invoices?.[0];
-  const all = (inv?.payload?.clientInvoiceItems as any[]) || [];
-  const items = all.filter((it) => String(it.name) !== "Credit Card Processing Fee");
+  const n = (v: unknown) => Number(v) || 0;
+  const model = (billingModel || "").toUpperCase();
+  const subtotal = n(calc.SUBTOTAL);
+  const locationFee = n(cls.LOCATION_FEE);
+  const addonAmount = n(calc.ADDON_AMOUNT);
+  const unitsTotal = n(cls.UNITS_SERVED_TOTAL);
+  const unitsIncluded = n(cls.UNITS_INCLUDED_IN_BASE);
+  const rate = n(cls.RATE_PER_SERVING);
+
+  const items: SubtotalLine[] = [];
+
+  if (model === "INVOICE_PER_SERVING" || model === "INVOICE_BASE_FEE_PLUS_SERVINGS") {
+    if (model === "INVOICE_BASE_FEE_PLUS_SERVINGS" && n(cls.BASE_AMOUNT)) {
+      items.push({ label: "Base Fee", amount: n(cls.BASE_AMOUNT) });
+    }
+    if (unitsTotal) items.push({ label: "Kona Ice Servings", qty: unitsTotal, rate, amount: n(calc.UNIT_REVENUE) });
+  } else if (model === "INVOICE_FIXED_PACKAGE") {
+    if (n(cls.BASE_AMOUNT)) items.push({ label: `Base Package (covers ${unitsIncluded || "—"} servings)`, amount: n(cls.BASE_AMOUNT) });
+    if (n(calc.OVERAGE_UNITS) > 0) {
+      items.push({ label: "Additional Servings (Overage)", qty: n(calc.OVERAGE_UNITS), rate, amount: n(calc.OVERAGE_REVENUE) });
+    }
+  } else if (model === "INVOICE_HOURLY") {
+    if (n(cls.TOTAL_EVENT_HOURS)) {
+      items.push({ label: "Event Time", qty: n(cls.TOTAL_EVENT_HOURS), rate: n(cls.HOURLY_RATE), amount: n(calc.HOURLY_REVENUE) });
+    }
+    if (n(calc.OVERAGE_UNITS) > 0) {
+      const label = unitsIncluded > 0 ? "Additional Servings (Overage)" : "Kona Ice Servings";
+      items.push({ label, qty: n(calc.OVERAGE_UNITS), rate, amount: n(calc.OVERAGE_REVENUE) });
+    }
+  } else if (model === "SELLING_OPEN" || model === "SELLING_WITH_GIVEBACK") {
+    if (unitsTotal) items.push({ label: "Event Sales", qty: unitsTotal, rate, amount: n(calc.SALES_AMOUNT) });
+    if (n(calc.GIVEBACK_AMOUNT) > 0) {
+      const pct = n(cls.GIVEBACK_PERCENTAGE);
+      items.push({ label: `Giveback${pct ? ` (${(pct * 100).toFixed(0)}%)` : ""}`, amount: -n(calc.GIVEBACK_AMOUNT) });
+    }
+  } else if (model === "MIN_GUARANTEE_HOURLY") {
+    items.push({ label: "Minimum Guarantee", qty: n(cls.TOTAL_EVENT_HOURS), rate: n(cls.MINIMUM_AMOUNT_PER_HOUR), amount: n(calc.MINIMUM_REQUIRED) });
+  } else if (model === "MIN_GUARANTEE_FLAT" || model === "HYBRID_SELLING_PLUS_MIN_GUARANTEE") {
+    items.push({ label: "Minimum Guarantee", amount: n(calc.MINIMUM_REQUIRED) });
+  } else if (model === "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA") {
+    if (n(cls.BASE_AMOUNT)) items.push({ label: `Host Package (covers ${unitsIncluded || "—"} servings)`, amount: n(cls.BASE_AMOUNT) });
+    if (n(calc.OVERAGE_UNITS) > 0) {
+      items.push({ label: "Guest Extra Servings", qty: n(calc.OVERAGE_UNITS), rate, amount: n(calc.OVERAGE_REVENUE) });
+    }
+  } else if (model === "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT") {
+    if (unitsTotal) {
+      items.push({ label: "Host Subsidy", qty: unitsTotal, rate: n(cls.HOST_SUBSIDY_PER_SERVING), amount: n(calc.HOST_AMOUNT) });
+      items.push({ label: "Guest Payment", qty: unitsTotal, rate: n(cls.GUEST_RATE_PER_SERVING), amount: n(calc.GUEST_AMOUNT) });
+    }
+  } else if (n(cls.BASE_AMOUNT)) {
+    items.push({ label: "Event Services", amount: n(cls.BASE_AMOUNT) });
+  }
+
+  if (locationFee) items.push({ label: "Location / Destination Fee", amount: locationFee });
+  if (addonAmount) items.push({ label: String(calc.ADDON_LABEL || "Add-on"), amount: addonAmount });
+
   if (!items.length) return null;
-  const subtotal =
-    Number(calc?.SUBTOTAL) || items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
+
+  // Safety net: reconcile any gap between the itemized lines and the actual
+  // Subtotal (e.g. a billing-model edge case not itemized above) so the
+  // bullets never silently disagree with the number shown in the calc card.
+  const itemSum = items.reduce((a, it) => a + it.amount, 0);
+  const residual = Math.round((subtotal - itemSum) * 100) / 100;
+  if (Math.abs(residual) >= 0.01) items.push({ label: "Adjustment", amount: residual });
+
   return (
     <div style={{ marginTop: 12 }}>
       <div className="section-title" style={{ marginTop: 0, fontSize: 13 }}>
@@ -258,12 +329,12 @@ function SubtotalBreakdown({
         flexDirection: "column", gap: 4 }}>
         {items.map((it, i) => (
           <li key={i}>
-            {it.name}
-            {Number(it.quantity) !== 1 ? (
-              <span className="muted"> — {it.quantity} × {money(Number(it.price))}</span>
+            {it.label}
+            {it.qty !== undefined && it.rate !== undefined ? (
+              <span className="muted"> — {it.qty} × {money(it.rate)}</span>
             ) : null}
             {" = "}
-            <strong>{money(Number(it.amount))}</strong>
+            <strong>{it.amount < 0 ? `-${money(-it.amount)}` : money(it.amount)}</strong>
           </li>
         ))}
       </ul>

@@ -106,6 +106,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     subtotal = 0.0
     sales_amount = 0.0
     unit_revenue = 0.0
+    hourly_revenue = 0.0
     overage_units = 0.0
     overage_revenue = 0.0
     minimum_required = 0.0
@@ -128,7 +129,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         subtotal = base_amount + overage_revenue + location_fee
 
     elif billing_model == "INVOICE_HOURLY":
-        hourly_revenue = total_hours * hourly_rate
+        hourly_revenue = total_hours * hourly_rate  # hoisted var, set only here
         # When the hourly rate includes a serving allowance ("$295/hr, each hour
         # includes up to 60 Konas, $4 each additional"), only servings ABOVE
         # UNITS_INCLUDED_IN_BASE are billed per serving. With no allowance
@@ -241,6 +242,8 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         "CARD_COLLECTED_CALC": card_collected_calc,
         # ── BREAKDOWN ──
         "SUBTOTAL": _r2(subtotal),
+        "UNIT_REVENUE": _r2(unit_revenue),
+        "HOURLY_REVENUE": _r2(hourly_revenue),
         "OVERAGE_UNITS": overage_units,
         "OVERAGE_REVENUE": _r2(overage_revenue),
         "SALES_AMOUNT": _r2(sales_amount),
