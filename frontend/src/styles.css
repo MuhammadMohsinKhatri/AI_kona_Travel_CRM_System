@@ -102,7 +102,9 @@ tbody tr:last-child td { border-bottom: none; }
    Frozen header + frozen identity columns (DATE / EVENT / EVENT TYPE), so a
    value 20 columns to the right still tells you which event it belongs to.
    Scrolls in both axes inside its own viewport, like a spreadsheet. */
-.table-wrap.sheet { max-height: calc(100vh - 300px); overflow: auto; }
+/* Taller scroll viewport so at least ~10 rows are visible before scrolling
+   (was 100vh-300px, which showed only a handful on shorter laptops). */
+.table-wrap.sheet { max-height: calc(100vh - 210px); overflow: auto; }
 
 /* Cell backgrounds must be opaque — sticky cells slide over other cells.
    Setting the background on every td lets zebra/hover cover sticky ones too. */

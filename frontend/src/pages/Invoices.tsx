@@ -55,7 +55,7 @@ export default function Invoices() {
             </thead>
             <tbody>
               {data.items.map((inv) => (
-                <tr key={inv.id} onClick={() => navigate(`/events/${inv.event_id}`)}>
+                <tr key={inv.id} onClick={() => navigate(`/events/${inv.event_id}`, { state: { from: "/invoices", label: "Invoices" } })}>
                   <td>
                     <div style={{ fontWeight: 600 }}>{inv.title}</div>
                     <div className="muted" style={{ fontSize: 12 }}>{inv.invoice_number}</div>

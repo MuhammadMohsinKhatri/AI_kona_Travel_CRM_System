@@ -599,6 +599,9 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     total_hours = _num(cls.get("TOTAL_EVENT_HOURS"))
 
     entry.run_id = run.id
+    # A pipeline run always owns the row — this reclaims any row a Google Sheet
+    # import had created for the same event, and protects it from future imports.
+    entry.source = "pipeline"
     entry.month = (cleaned.get("DATE") or "")[:7] or None
     # identity
     entry.event_date = cleaned.get("DATE")

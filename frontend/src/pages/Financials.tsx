@@ -21,6 +21,8 @@ export default function Financials() {
   const [debounced, setDebounced] = useState<string>("");
   const [data, setData] = useState<FinancialsResponse | null>(null);
   const [error, setError] = useState<string>("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string>("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -84,6 +86,36 @@ export default function Financials() {
   const sum = (key: keyof FinancialRow): number =>
     (data?.items ?? []).reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
 
+  /** Pull the legacy Google Sheet into the ledger. Repeatable & idempotent:
+   *  creates placeholder events for unknown rows and never overwrites a
+   *  pipeline-generated row. */
+  async function importSheet() {
+    if (importing) return;
+    if (!window.confirm(
+      "Import the legacy financial Google Sheet into the ledger?\n\n" +
+      "• Events not yet in the system get a placeholder record.\n" +
+      "• Rows the pipeline already produced are left untouched.\n" +
+      "• Safe to run repeatedly — it refreshes rows it previously imported."
+    )) return;
+    setImporting(true);
+    setImportMsg("");
+    try {
+      const r = await api.importFinancialsSheet();
+      setImportMsg(
+        `Imported from the sheet — ${r.created} new, ${r.updated} refreshed, ` +
+        `${r.skipped_protected} left untouched (pipeline-owned), ` +
+        `${r.placeholders_created} placeholder event(s) created.`
+      );
+      // New months / rows may have appeared — refresh both.
+      api.financialMonths().then(setMonths).catch(() => {});
+      await reload();
+    } catch (e: any) {
+      setImportMsg(`Import failed: ${e?.message || "unknown error"}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function downloadCsv() {
     const qs = new URLSearchParams(params);
     const res = await fetch("/api/financials/export.csv?" + qs, {
@@ -109,10 +141,31 @@ export default function Financials() {
             key ones are shown here, the full set is in the CSV export.
           </p>
         </div>
-        <button className="btn" onClick={downloadCsv} disabled={!data || data.total === 0}>
-          ⬇ Download CSV (all 46 columns)
-        </button>
+        <div className="flex" style={{ gap: 8 }}>
+          <button className="btn" onClick={importSheet} disabled={importing}
+            title="Import the legacy financial Google Sheet into the ledger (repeatable; won't overwrite pipeline rows)">
+            {importing ? "⏳ Importing…" : "⬆ Import from Google Sheet"}
+          </button>
+          <button className="btn" onClick={downloadCsv} disabled={!data || data.total === 0}>
+            ⬇ Download CSV (all 46 columns)
+          </button>
+        </div>
       </div>
+
+      {importMsg && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 12,
+            borderColor: importMsg.startsWith("Import failed") ? "var(--crit)" : "var(--brand)",
+          }}
+        >
+          <div className="flex between">
+            <span>{importMsg}</span>
+            <button className="icon-btn" onClick={() => setImportMsg("")} title="Dismiss">✕</button>
+          </div>
+        </div>
+      )}
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <select className="select" value={month} onChange={(e) => pickMonth(e.target.value)} title="Month shortcut">
@@ -221,7 +274,7 @@ export default function Financials() {
               </thead>
               <tbody>
                 {data.items.map((r) => (
-                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`)}>
+                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: "/financials", label: "Financials" } })}>
                     <td className="stick stick-1"><div className="cell">{r.event_date || "—"}</div></td>
                     <td className="stick stick-2" title={r.event_name}>
                       <div className="cell">

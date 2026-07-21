@@ -4,14 +4,16 @@ import csv
 import io
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db.base import get_db
-from app.models import FinancialEntry, User
+from app.models import Event, FinancialEntry, User
 
 router = APIRouter(prefix="/api/financials", tags=["financials"])
 
@@ -43,6 +45,33 @@ SHEET_COLUMNS: list[tuple[str, str]] = [
     ("AI_MODEL", "ai_model"), ("AI_PROMPT_TOKENS", "ai_prompt_tokens"),
     ("AI_COMPLETION_TOKENS", "ai_completion_tokens"), ("AI_COST_USD", "ai_cost_usd"),
 ]
+
+
+# Header labels the importer resolves without going through SHEET_COLUMNS.
+_H_EVENT_ID, _H_EVENT, _H_DATE, _H_TYPE = "EVENT ID", "EVENT", "DATE", "EVENT TYPE"
+_BOOL_TRUE = {"YES", "TRUE", "1", "PAID", "Y", "T"}
+
+
+def _coerce(attr: str, raw: str):
+    """Coerce a raw sheet cell to the FinancialEntry column's Python type.
+
+    The sheet stores money as bare numbers and flags as YES/NO/TRUE/FALSE, so
+    we lean on the SQLAlchemy column type rather than a per-field table.
+    """
+    col = FinancialEntry.__table__.columns.get(attr)
+    val = (raw or "").strip()
+    pytype = col.type.python_type if col is not None else str
+    if pytype is bool:
+        return val.upper() in _BOOL_TRUE
+    if pytype in (int, float):
+        if not val:
+            return 0 if pytype is int else 0.0
+        try:
+            n = float(val.replace(",", "").replace("$", ""))
+            return int(n) if pytype is int else n
+        except ValueError:
+            return 0 if pytype is int else 0.0
+    return val
 
 
 def _filtered(
@@ -250,3 +279,91 @@ def export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@router.post("/import-sheet")
+def import_sheet(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    url: Optional[str] = Query(None, description="Override the sheet CSV export URL"),
+) -> dict:
+    """Import the legacy financial Google Sheet into the Postgres ledger.
+
+    Repeatable and idempotent (keyed by the sheet's ``EVENT ID`` = crm_event_id):
+
+      * A sheet row whose event isn't in the DB gets a lightweight placeholder
+        event (date / name / type from the sheet) so the ledger FK is satisfied.
+        A later pipeline run for that event reuses the placeholder — no dupes.
+      * A pipeline-owned ledger row (``source != "sheet"``) is NEVER overwritten
+        — the sheet only fills events the pipeline hasn't produced.
+      * Rows this importer created (``source == "sheet"``) are refreshed on
+        re-import, so you can keep re-pulling the sheet during the transition.
+
+    The sheet already carries the final computed columns, so this is a direct
+    column-map via SHEET_COLUMNS — no billing re-computation.
+    """
+    sheet_url = url or settings.financials_sheet_csv_url
+    try:
+        resp = httpx.get(sheet_url, follow_redirects=True, timeout=30.0)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Couldn't fetch the Google Sheet: {exc}"
+        )
+
+    reader = csv.DictReader(io.StringIO(resp.text))
+    created = updated = skipped_protected = placeholders = skipped_blank = 0
+    for raw_row in reader:
+        # Sheet headers carry embedded newlines ("Sales $\n") — normalise the
+        # keys so they line up with SHEET_COLUMNS' clean labels.
+        row = {(k or "").strip(): v for k, v in raw_row.items()}
+        crm_id = (row.get(_H_EVENT_ID) or "").strip()
+        if not crm_id:
+            skipped_blank += 1
+            continue
+
+        event = db.query(Event).filter(Event.crm_event_id == crm_id).first()
+        if event is None:
+            event = Event(
+                crm_event_id=crm_id,
+                event_name=(row.get(_H_EVENT) or "").strip(),
+                event_date=((row.get(_H_DATE) or "").strip() or None),
+                event_type=(row.get(_H_TYPE) or "").strip(),
+                status="imported",
+                status_reason="Placeholder created from Google Sheet import",
+            )
+            db.add(event)
+            db.flush()  # assign event.id for the FK below
+            placeholders += 1
+
+        entry = (
+            db.query(FinancialEntry)
+            .filter(FinancialEntry.event_id == event.id)
+            .one_or_none()
+        )
+        if entry is not None and entry.source != "sheet":
+            skipped_protected += 1  # pipeline owns this row — leave it alone
+            continue
+        if entry is None:
+            entry = FinancialEntry(event_id=event.id, source="sheet")
+            db.add(entry)
+            created += 1
+        else:
+            updated += 1
+
+        for header, attr in SHEET_COLUMNS:
+            if header in row:  # AI_* headers aren't in the sheet — skip them
+                setattr(entry, attr, _coerce(attr, row[header]))
+        entry.source = "sheet"
+        entry.run_id = None
+        entry.month = ((row.get(_H_DATE) or "").strip()[:7]) or None
+
+    db.commit()
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped_protected": skipped_protected,
+        "placeholders_created": placeholders,
+        "skipped_blank": skipped_blank,
+        "source_url": sheet_url,
+    }

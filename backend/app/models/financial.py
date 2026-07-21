@@ -24,6 +24,11 @@ class FinancialEntry(Base):
         ForeignKey("events.id", ondelete="CASCADE"), unique=True, index=True
     )
     run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Provenance: "pipeline" (computed by a run) or "sheet" (imported from the
+    # legacy Google Sheet). The sheet importer only ever creates/refreshes
+    # source="sheet" rows and never overwrites a pipeline-owned row; once the
+    # pipeline processes an event its row flips back to "pipeline".
+    source: Mapped[str] = mapped_column(String(16), default="pipeline", index=True)
     month: Mapped[Optional[str]] = mapped_column(String(8), index=True)  # YYYY-MM
 
     # 1-4 Identity

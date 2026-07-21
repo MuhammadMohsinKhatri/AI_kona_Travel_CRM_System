@@ -109,6 +109,8 @@ export const api = {
     request<{ deleted: number }>("/api/financials?" + new URLSearchParams(params), {
       method: "DELETE",
     }),
+  importFinancialsSheet: () =>
+    request<SheetImportResult>("/api/financials/import-sheet", { method: "POST" }),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {
@@ -189,6 +191,14 @@ export interface FinancialRow {
   ai_completion_tokens: number;
   ai_cost_usd: number;
   updated_at: string | null;
+}
+export interface SheetImportResult {
+  created: number;
+  updated: number;
+  skipped_protected: number;
+  placeholders_created: number;
+  skipped_blank: number;
+  source_url: string;
 }
 export interface FinancialsResponse {
   items: FinancialRow[];

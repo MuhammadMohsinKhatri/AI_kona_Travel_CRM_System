@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { api, EventDetail as Detail } from "../api/client";
 import { Badge, Loading, money } from "../components/ui";
 
 export default function EventDetail() {
   const { id } = useParams();
+  const location = useLocation();
+  // The list page that opened this detail passes where to return to; on a
+  // direct load / refresh there's no state, so fall back to Events.
+  const from = (location.state as { from?: string; label?: string } | null) ?? {};
+  const backTo = from.from ?? "/events";
+  const backLabel = from.label ?? "Events";
   const [ev, setEv] = useState<Detail | null>(null);
 
   useEffect(() => {
@@ -28,7 +34,7 @@ export default function EventDetail() {
 
   return (
     <>
-      <p className="muted"><Link to="/events">← Events</Link></p>
+      <p className="muted"><Link to={backTo}>← {backLabel}</Link></p>
       <div className="topbar">
         <div>
           <h1 className="page-title">{ev.event_name || "(unnamed event)"}</h1>

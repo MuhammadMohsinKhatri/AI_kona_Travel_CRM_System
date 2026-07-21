@@ -111,7 +111,7 @@ export default function Events() {
             </thead>
             <tbody>
               {data.items.map((e) => (
-                <tr key={e.id} onClick={() => navigate(`/events/${e.id}`)}>
+                <tr key={e.id} onClick={() => navigate(`/events/${e.id}`, { state: { from: "/events", label: "Events" } })}>
                   <td>
                     <div style={{ fontWeight: 600 }}>{e.event_name || "(unnamed)"}</div>
                     <div className="muted" style={{ fontSize: 12 }}>{e.event_code || e.crm_event_id}</div>
