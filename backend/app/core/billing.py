@@ -129,8 +129,13 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
 
     elif billing_model == "INVOICE_HOURLY":
         hourly_revenue = total_hours * hourly_rate
-        unit_revenue = units_total * rate_per_serving
-        subtotal = hourly_revenue + unit_revenue + location_fee
+        # When the hourly rate includes a serving allowance ("$295/hr, each hour
+        # includes up to 60 Konas, $4 each additional"), only servings ABOVE
+        # UNITS_INCLUDED_IN_BASE are billed per serving. With no allowance
+        # (units_included = 0) every served unit is billed, as before.
+        overage_units = max(0.0, units_total - units_included)
+        overage_revenue = overage_units * rate_per_serving
+        subtotal = hourly_revenue + overage_revenue + location_fee
 
     elif billing_model == "SELLING_OPEN":
         sales_amount = units_total * rate_per_serving

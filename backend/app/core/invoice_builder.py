@@ -130,9 +130,12 @@ def build_invoice_payload(
         hourly_rate = _num(e.get("HOURLY_RATE"))
         if total_hours > 0 and hourly_rate > 0:
             add_item("Event Time", hourly_rate, total_hours, round(total_hours * hourly_rate, 2), True)
-        units = _num(e.get("UNITS_SERVED_TOTAL"))
-        if units > 0 and rate_per_serving > 0:
-            add_item("Kona Ice Servings", rate_per_serving, units, round(units * rate_per_serving, 2), True)
+        # Only the overage above the hourly serving allowance is billed. With no
+        # allowance (units_included = 0) OVERAGE_UNITS == UNITS_SERVED_TOTAL.
+        units_included = _num(e.get("UNITS_INCLUDED_IN_BASE"))
+        if overage_units > 0 and rate_per_serving > 0:
+            label = "Additional Servings (Overage)" if units_included > 0 else "Kona Ice Servings"
+            add_item(label, rate_per_serving, overage_units, overage_revenue, True)
 
     elif billing_model == "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA":
         if base_amount > 0:

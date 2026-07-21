@@ -121,6 +121,10 @@ INVOICE_HOURLY
 Client pays by time.
 Extract: TOTAL_EVENT_HOURS, HOURLY_RATE
 Also extract UNITS_SERVED_TOTAL and RATE_PER_SERVING if stated.
+When the hourly rate includes a per-hour serving allowance ("$295/hour, each hour includes up to 60 12oz Konas, additional Konas $4 each"), also extract UNITS_INCLUDED_IN_BASE = the allowance per hour × TOTAL_EVENT_HOURS (e.g. 60/hour × 2 hours = 120). Only servings beyond UNITS_INCLUDED_IN_BASE are billed at RATE_PER_SERVING (the overage).
+  "$295/hr, includes 60 Konas/hr, $4 each additional", 1-hour event, 100 served
+    → HOURLY_RATE: 295, TOTAL_EVENT_HOURS: 1, UNITS_INCLUDED_IN_BASE: 60, RATE_PER_SERVING: 4, UNITS_SERVED_TOTAL: 100
+    → billed: 1×295 + (100−60)×4 = 455
 
 #### Selling models
 

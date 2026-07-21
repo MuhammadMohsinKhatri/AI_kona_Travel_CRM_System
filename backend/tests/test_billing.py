@@ -39,6 +39,31 @@ def test_fixed_package_overage_only_when_exceeded():
     assert calc["SUBTOTAL"] == 170.0
 
 
+def test_hourly_bills_overage_above_included_allowance():
+    # $295/hr, 1 hour, includes 60 Konas, $4 each additional; 100 served.
+    # 1×295 + (100−60)×4 = 295 + 160 = 455.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_HOURLY",
+        "TOTAL_EVENT_HOURS": 1, "HOURLY_RATE": 295,
+        "UNITS_INCLUDED_IN_BASE": 60, "UNITS_SERVED_TOTAL": 100,
+        "RATE_PER_SERVING": 4, "TAXABLE": "YES",
+    })
+    assert calc["OVERAGE_UNITS"] == 40
+    assert calc["OVERAGE_REVENUE"] == 160.0
+    assert calc["SUBTOTAL"] == 455.0
+
+
+def test_hourly_no_allowance_bills_every_serving():
+    # No included allowance (units_included = 0) → every served unit billed,
+    # preserving the prior behavior: 2×150 + 50×4 = 300 + 200 = 500.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_HOURLY",
+        "TOTAL_EVENT_HOURS": 2, "HOURLY_RATE": 150,
+        "UNITS_SERVED_TOTAL": 50, "RATE_PER_SERVING": 4, "TAXABLE": "NO",
+    })
+    assert calc["SUBTOTAL"] == 500.0
+
+
 def test_mg_flat_bills_floor_regardless_of_servings():
     calc = calculate_invoice({
         "BILLING_MODEL": "MIN_GUARANTEE_FLAT",
