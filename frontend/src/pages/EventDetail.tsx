@@ -70,6 +70,7 @@ export default function EventDetail() {
             <div className="k">Square device</div><div className="v">{deviceLabel}</div>
           </div>
           {cls.NOTE ? <ReasoningNotes note={String(cls.NOTE)} /> : null}
+          <SubtotalBreakdown invoices={ev.invoices} calc={calc} />
           <SourceNotes cleaned={cl} />
         </div>
 
@@ -229,6 +230,48 @@ function htmlToText(html: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/** Shows how the Subtotal is built up, line by line, from the invoice draft's
+ *  items (the authoritative per-model breakdown). The CC processing fee is
+ *  excluded — it's added after the subtotal, not part of it. Renders nothing
+ *  for events with no invoice draft (selling / MG settle via Square). */
+function SubtotalBreakdown({
+  invoices,
+  calc,
+}: {
+  invoices: { payload: Record<string, unknown> }[];
+  calc: Record<string, unknown>;
+}) {
+  const inv = invoices?.[0];
+  const all = (inv?.payload?.clientInvoiceItems as any[]) || [];
+  const items = all.filter((it) => String(it.name) !== "Credit Card Processing Fee");
+  if (!items.length) return null;
+  const subtotal =
+    Number(calc?.SUBTOTAL) || items.reduce((a, it) => a + (Number(it.amount) || 0), 0);
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="section-title" style={{ marginTop: 0, fontSize: 13 }}>
+        How the subtotal is calculated
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex",
+        flexDirection: "column", gap: 4 }}>
+        {items.map((it, i) => (
+          <li key={i}>
+            {it.name}
+            {Number(it.quantity) !== 1 ? (
+              <span className="muted"> — {it.quantity} × {money(Number(it.price))}</span>
+            ) : null}
+            {" = "}
+            <strong>{money(Number(it.amount))}</strong>
+          </li>
+        ))}
+      </ul>
+      <div style={{ fontSize: 13, marginTop: 6, paddingLeft: 18, fontWeight: 700 }}>
+        = Subtotal {money(subtotal)}
+      </div>
+    </div>
+  );
 }
 
 /** The raw CRM notes the classifier reasoned over — shown so the calculated
