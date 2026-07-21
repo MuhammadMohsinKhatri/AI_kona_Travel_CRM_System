@@ -645,7 +645,10 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     if is_invoice_type:
         billed = entry.check_invoice or invoice_total
         entry.event_sales_collected = billed
-        entry.sales_tax = sales_tax
+        # Sales Tax Amount = at-event card + cash tax only (0 for a pure invoice
+        # event); the invoice's own tax is already inside `billed`, so it must
+        # not be double-counted here.
+        entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
         entry.sales_dollars = subtotal
         entry.net_event_sales = billed
     else:

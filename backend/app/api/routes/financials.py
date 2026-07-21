@@ -386,6 +386,10 @@ def import_sheet(
         elif not entry.event_sales_collected and entry.subtotal:
             entry.event_sales_collected = entry.subtotal
             entry.net_event_sales = round(entry.subtotal - (entry.giveback_amount or 0.0), 2)
+        # Sales Tax Amount = at-event card + cash tax only. The legacy sheet put
+        # the invoice's own tax in this column for invoice rows; override it so
+        # the column consistently means at-event tax (0 for a pure invoice).
+        entry.sales_tax = round((entry.square_card_tax or 0.0) + (entry.cash_tax or 0.0), 2)
         # The sheet has no brand column — stamp it so rows group under the brand.
         entry.brand = brand
         entry.source = "sheet"
