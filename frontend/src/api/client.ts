@@ -70,10 +70,16 @@ export const api = {
     }>("/health"),
   stats: (params: Record<string, string> = {}) =>
     request<DashboardStats>("/api/dashboard/stats?" + new URLSearchParams(params)),
-  runPipeline: (targetDate?: string) =>
+  runPipeline: (
+    opts: { targetDate?: string; eventTypes?: string[]; eventIds?: string[] } = {}
+  ) =>
     request<RunTriggerResponse>("/api/pipeline/run", {
       method: "POST",
-      body: JSON.stringify({ target_date: targetDate || null }),
+      body: JSON.stringify({
+        target_date: opts.targetDate || null,
+        event_types: opts.eventTypes?.length ? opts.eventTypes : null,
+        event_ids: opts.eventIds?.length ? opts.eventIds : null,
+      }),
     }),
   runs: () => request<Page<PipelineRun>>("/api/pipeline/runs"),
   run: (id: number) => request<PipelineRun>(`/api/pipeline/runs/${id}`),
@@ -329,6 +335,8 @@ export interface PipelineRun {
   status: string;
   trigger: string;
   target_date: string | null;
+  filter_event_types?: string[] | null;
+  filter_event_ids?: string[] | null;
   progress: PipelineStep[];
   events_fetched: number;
   events_processed: number;

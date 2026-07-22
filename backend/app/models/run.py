@@ -22,6 +22,15 @@ class PipelineRun(Base):
     trigger: Mapped[str] = mapped_column(String(32), default="manual")  # manual | scheduled
     # Optional YYYY-MM-DD filter: process only events on this date. Null = all events.
     target_date: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Optional scope filters, layered on target_date:
+    #  • filter_event_types — only fully process events whose classified
+    #    EVENT_TYPE is in this list (e.g. ["selling", "hybrid"]); others are
+    #    skipped. Type is known only after classification, so filtering happens
+    #    post-classify.
+    #  • filter_event_ids — run these specific CRM event ids only (fetched
+    #    directly, date-independent); when set, target_date is ignored.
+    filter_event_types: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    filter_event_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     events_fetched: Mapped[int] = mapped_column(Integer, default=0)
     events_processed: Mapped[int] = mapped_column(Integer, default=0)

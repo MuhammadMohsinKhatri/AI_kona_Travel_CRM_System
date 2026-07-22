@@ -75,7 +75,22 @@ export default function Runs() {
                 <tr key={r.id} onClick={() => setSelected(r)}>
                   <td>{r.id}</td>
                   <td>{r.trigger}</td>
-                  <td>{r.target_date || <span className="muted">all</span>}</td>
+                  <td>
+                    {r.filter_event_ids?.length ? (
+                      <span title={r.filter_event_ids.join(", ")}>
+                        {r.filter_event_ids.length} event{r.filter_event_ids.length > 1 ? "s" : ""}
+                      </span>
+                    ) : (
+                      <>
+                        {r.target_date || <span className="muted">all</span>}
+                        {r.filter_event_types?.length ? (
+                          <div className="muted" style={{ fontSize: 11.5 }}>
+                            {r.filter_event_types.join(", ")}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
                   <td><Badge kind={r.status}>{r.status}</Badge></td>
                   <td className="right">{r.events_fetched}</td>
                   <td className="right">{r.events_processed}</td>

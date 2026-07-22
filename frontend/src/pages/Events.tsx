@@ -11,7 +11,20 @@ export default function Events() {
   const [q, setQ] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [running, setRunning] = useState<number | null>(null);
   const navigate = useNavigate();
+
+  async function runEvent(e: EventSummary) {
+    setRunning(e.id);
+    try {
+      const res = await api.runPipeline({ eventIds: [e.crm_event_id] });
+      navigate("/runs", { state: { justRan: res.run_id } });
+    } catch (err: any) {
+      alert(err?.message || "Couldn't start the run for this event.");
+    } finally {
+      setRunning(null);
+    }
+  }
 
   function filterParams(): Record<string, string> {
     const params: Record<string, string> = {};
@@ -149,6 +162,15 @@ export default function Events() {
                   </td>
                   <td className="right">{money(e.final_invoice_amount)}</td>
                   <td className="actions">
+                    <button
+                      className="btn"
+                      style={{ marginRight: 6 }}
+                      disabled={running !== null}
+                      title="Run the pipeline for just this event (fetches it fresh from KonaOS)"
+                      onClick={(ev) => { ev.stopPropagation(); runEvent(e); }}
+                    >
+                      {running === e.id ? <span className="spinner sm" /> : "▶ Run"}
+                    </button>
                     <DeleteButton
                       title="Delete this event and its invoice, alerts and ledger row"
                       onDelete={async () => { await api.deleteEvent(e.id); await reload(); }}

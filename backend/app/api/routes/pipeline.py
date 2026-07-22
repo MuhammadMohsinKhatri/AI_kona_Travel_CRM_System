@@ -21,6 +21,11 @@ router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 class RunRequest(BaseModel):
     # Optional YYYY-MM-DD; when set, only events on that date are processed.
     target_date: Optional[str] = None
+    # Optional: only fully process events whose classified EVENT_TYPE is in this
+    # list (e.g. ["selling", "hybrid", "minimum guarantee", "invoice"]).
+    event_types: Optional[list[str]] = None
+    # Optional: run these specific CRM event ids only (date-independent).
+    event_ids: Optional[list[str]] = None
 
 
 def _execute_run(run_id: int) -> None:
@@ -42,42 +47,57 @@ def trigger_run(
     _: User = Depends(get_current_user),
 ) -> RunTriggerResponse:
     target_date = body.target_date if body else None
+    event_types = [t for t in (body.event_types or []) if t] if body else []
+    event_ids = [i for i in (body.event_ids or []) if i] if body else []
 
     # One run per date at a time. RE-running a completed date is fine — every
     # write is an upsert, so it just refreshes the same rows. But two runs
     # processing the same events CONCURRENTLY race each other (duplicate
     # invoice drafts, interleaved ledger writes), so that is refused. A run
     # stuck in "running" for over 2 hours is treated as dead (worker restart
-    # mid-run) and doesn't block new runs.
+    # mid-run) and doesn't block new runs. Specific-event runs (event_ids) are
+    # exempt — they're small, targeted, and shouldn't be blocked by a date run.
     from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
-    in_flight = (
-        db.query(PipelineRun)
-        .filter(
-            PipelineRun.status == "running",
-            PipelineRun.target_date == (target_date or None),
-            PipelineRun.started_at >= cutoff,
+    if not event_ids:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+        in_flight = (
+            db.query(PipelineRun)
+            .filter(
+                PipelineRun.status == "running",
+                PipelineRun.target_date == (target_date or None),
+                PipelineRun.started_at >= cutoff,
+            )
+            .order_by(PipelineRun.id.desc())
+            .first()
         )
-        .order_by(PipelineRun.id.desc())
-        .first()
-    )
-    if in_flight is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Run #{in_flight.id} is already processing "
-                f"{target_date or 'all events'} ({in_flight.trigger}) — "
-                "watch it on the Pipeline Runs page instead of starting another."
-            ),
-        )
+        if in_flight is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Run #{in_flight.id} is already processing "
+                    f"{target_date or 'all events'} ({in_flight.trigger}) — "
+                    "watch it on the Pipeline Runs page instead of starting another."
+                ),
+            )
 
-    run = PipelineRun(status="running", trigger="manual", target_date=target_date or None)
+    run = PipelineRun(
+        status="running", trigger="manual", target_date=target_date or None,
+        filter_event_types=event_types or None,
+        filter_event_ids=event_ids or None,
+    )
     db.add(run)
     db.commit()
     db.refresh(run)
 
-    scope = f" for {target_date}" if target_date else ""
+    if event_ids:
+        scope = f" for {len(event_ids)} selected event(s)"
+    elif target_date:
+        scope = f" for {target_date}"
+        if event_types:
+            scope += f" ({', '.join(event_types)} only)"
+    else:
+        scope = ""
 
     if settings.pipeline_run_inline:
         # Non-blocking: run in a background task so the client can poll

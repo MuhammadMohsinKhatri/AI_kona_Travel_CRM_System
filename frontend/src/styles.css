@@ -276,6 +276,14 @@ pre.json {
 .run-ev:first-child { border-top: none; }
 .run-ev:hover { background: var(--surface); }
 .run-ev-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.type-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.chip {
+  font-size: 13px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-dim); cursor: pointer;
+}
+.chip:hover { border-color: var(--brand); }
+.chip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 500; }
 .muted { color: var(--text-dim); }
 .right { text-align: right; }
 .flex { display: flex; gap: 10px; align-items: center; }
