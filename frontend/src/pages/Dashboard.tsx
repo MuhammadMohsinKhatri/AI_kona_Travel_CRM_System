@@ -189,16 +189,42 @@ export default function Dashboard() {
           </button>
         </div>
       ) : stats.date_run?.last ? (
-        <p className="muted" style={{ marginTop: -6, marginBottom: 16, fontSize: 13 }}>
-          ✓ {targetDate} was last processed{" "}
-          {stats.date_run.last.finished_at
-            ? `at ${new Date(stats.date_run.last.finished_at).toLocaleString()}`
-            : "earlier"}{" "}
-          by run #{stats.date_run.last.id} ({stats.date_run.last.trigger},{" "}
-          {stats.date_run.last.events_processed} events
-          {stats.date_run.last.status === "failed" ? ", FAILED" : ""}). Re-running is safe —
-          it refreshes the same rows with the latest CRM and Square data.
-        </p>
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            borderColor: stats.date_run.last.status === "failed" ? "var(--crit)" : undefined,
+          }}
+        >
+          {/* Persists on the page (not tied to the run modal) until the next
+              run for this date replaces it — so the outcome stays visible
+              after you close or never open the modal. */}
+          <div className="flex between">
+            <strong style={stats.date_run.last.status === "failed" ? { color: "var(--crit)" } : undefined}>
+              {stats.date_run.last.status === "failed" ? "Last run FAILED" : "Last run"} · #{stats.date_run.last.id}
+            </strong>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {stats.date_run.last.trigger}
+              {stats.date_run.last.finished_at &&
+                ` · ${new Date(stats.date_run.last.finished_at).toLocaleString()}`}
+            </span>
+          </div>
+          {stats.date_run.last.error && (
+            <p style={{ color: "var(--crit)", fontSize: 13 }}>{stats.date_run.last.error}</p>
+          )}
+          <div className="result-grid" style={{ marginTop: 8 }}>
+            <Cell n={stats.date_run.last.events_processed} l="Processed" />
+            <Cell n={stats.date_run.last.invoices_created} l="Invoices" />
+            <Cell n={stats.date_run.last.alerts_raised} l="Alerts" />
+            <Cell n={stats.date_run.last.events_fetched} l="Fetched" />
+            <Cell n={stats.date_run.last.events_skipped} l="Skipped" />
+            <Cell n={stats.date_run.last.events_errored} l="Errored" />
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+            Re-running {targetDate} is safe — it refreshes the same rows with the latest CRM and
+            Square data.
+          </p>
+        </div>
       ) : null}
 
       {targetDate && stats.total_events === 0 && (

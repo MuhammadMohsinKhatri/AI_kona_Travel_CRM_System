@@ -102,8 +102,13 @@ def stats(
             "trigger": r.trigger,
             "started_at": r.started_at.isoformat() if r.started_at else None,
             "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "events_fetched": r.events_fetched,
             "events_processed": r.events_processed,
+            "events_skipped": r.events_skipped,
+            "events_errored": r.events_errored,
             "invoices_created": r.invoices_created,
+            "alerts_raised": r.alerts_raised,
+            "error": r.error,
         }
 
     date_run = None

@@ -272,8 +272,13 @@ export interface DateRunInfo {
   trigger: string;
   started_at: string | null;
   finished_at: string | null;
+  events_fetched: number;
   events_processed: number;
+  events_skipped: number;
+  events_errored: number;
   invoices_created: number;
+  alerts_raised: number;
+  error: string | null;
 }
 export interface DashboardStats {
   scope: { from_date: string | null; to_date: string | null; all_time: boolean };
