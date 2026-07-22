@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
-import { PipelineStep } from "../api/client";
+import { useNavigate } from "react-router-dom";
+import { api, EventSummary, PipelineStep } from "../api/client";
 
 export function Badge({ kind, children }: { kind: string; children: ReactNode }) {
   const map: Record<string, string> = {
@@ -138,6 +139,145 @@ export function StepList({ steps }: { steps: PipelineStep[] }) {
 
 export function Empty({ text }: { text: string }) {
   return <div className="loading">{text}</div>;
+}
+
+/** Plain-language summary of what happened to every event a run touched —
+ *  grouped into Errored / Skipped / Processed so anyone can read, at a glance,
+ *  which events failed and why, which were skipped and why, and which went
+ *  through (with their event type + billing model). Shared by the Pipeline
+ *  Runs page and the Dashboard's last-run panel so both read identically.
+ *  `from`/`fromLabel` set where the "← back" breadcrumb returns to. */
+export function RunEventBreakdown({
+  runId,
+  from = "/runs",
+  fromLabel = "Pipeline Runs",
+  compact = false,
+}: {
+  runId: number;
+  from?: string;
+  fromLabel?: string;
+  compact?: boolean;
+}) {
+  const [events, setEvents] = useState<EventSummary[] | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setEvents(null);
+    api
+      .events({ run_id: String(runId), page_size: "200" })
+      .then((p) => setEvents(p.items))
+      .catch(() => setEvents([]));
+  }, [runId]);
+
+  if (events === null) return <div style={{ marginTop: 12 }}><Loading /></div>;
+  if (events.length === 0)
+    return (
+      <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
+        No events are attributed to this run — either nothing was fetched, or a later
+        run re-processed the same events and now owns them. Re-run this date to re-link them.
+      </p>
+    );
+
+  const errored = events.filter((e) => e.status === "error");
+  const skipped = events.filter((e) => e.status === "skipped");
+  const processed = events.filter((e) => e.status === "processed" || e.status === "needs_review");
+
+  const open = (e: EventSummary) =>
+    navigate(`/events/${e.id}`, { state: { from, label: fromLabel } });
+
+  const typeTag = (e: EventSummary) =>
+    e.event_type ? (
+      <span className="badge blue" style={{ textTransform: "capitalize" }}>{e.event_type}</span>
+    ) : null;
+
+  return (
+    <div style={{ marginTop: compact ? 4 : 16 }}>
+      {!compact && (
+        <div className="section-title" style={{ marginTop: 0 }}>
+          Summary — what happened to each event ({events.length})
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, margin: "4px 0 14px", fontSize: 14 }}>
+        <span><strong style={{ color: "var(--ok)" }}>{processed.length}</strong> processed</span>
+        <span><strong style={{ color: "var(--warn)" }}>{skipped.length}</strong> skipped</span>
+        <span><strong style={{ color: "var(--crit)" }}>{errored.length}</strong> errored</span>
+      </div>
+
+      {errored.length > 0 && (
+        <GroupSection color="var(--crit)" title={`Errored (${errored.length})`}
+          hint="Something failed for these events — the reason is shown in red.">
+          {errored.map((e) => (
+            <div key={e.id} className="run-ev" onClick={() => open(e)}>
+              <div className="run-ev-head">
+                <span style={{ fontWeight: 600 }}>{e.event_name || "(unnamed)"}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{e.event_code || e.crm_event_id}</span>
+                {typeTag(e)}
+                {e.billing_model && <span className="muted" style={{ fontSize: 12 }}>{e.billing_model}</span>}
+              </div>
+              <div style={{ color: "var(--crit)", fontSize: 13, marginTop: 3 }}>
+                {e.error || "Errored (no detail recorded)."}
+              </div>
+            </div>
+          ))}
+        </GroupSection>
+      )}
+
+      {skipped.length > 0 && (
+        <GroupSection color="var(--warn)" title={`Skipped (${skipped.length})`}
+          hint="Filtered out before processing — never invoiced or synced.">
+          {skipped.map((e) => (
+            <div key={e.id} className="run-ev" onClick={() => open(e)}>
+              <div className="run-ev-head">
+                <span style={{ fontWeight: 600 }}>{e.event_name || "(unnamed)"}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{e.event_code || e.crm_event_id}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 13, marginTop: 3 }}>
+                Reason: {e.status_reason || "—"}
+              </div>
+            </div>
+          ))}
+        </GroupSection>
+      )}
+
+      {processed.length > 0 && (
+        <GroupSection color="var(--ok)" title={`Processed (${processed.length})`}
+          hint="Went all the way through. Event type + billing model shown.">
+          {processed.map((e) => (
+            <div key={e.id} className="run-ev" onClick={() => open(e)}>
+              <div className="run-ev-head">
+                <span style={{ fontWeight: 600 }}>{e.event_name || "(unnamed)"}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{e.event_code || e.crm_event_id}</span>
+                {typeTag(e)}
+                {e.billing_model && <span className="muted" style={{ fontSize: 12 }}>{e.billing_model}</span>}
+                {e.status === "needs_review" && <Badge kind="needs_review">needs review</Badge>}
+                <span style={{ marginLeft: "auto", fontWeight: 600 }}>{money(e.final_invoice_amount)}</span>
+              </div>
+            </div>
+          ))}
+        </GroupSection>
+      )}
+    </div>
+  );
+}
+
+/** A titled group of event rows with a colored left accent. */
+function GroupSection({
+  color, title, hint, children,
+}: {
+  color: string; title: string; hint: string; children: ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+        <strong style={{ color }}>{title}</strong>
+        <span className="muted" style={{ fontSize: 12 }}>{hint}</span>
+      </div>
+      <div style={{ borderLeft: `3px solid ${color}`, background: "var(--surface-2)", padding: "2px 0" }}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /** Per-row delete. Two-step: the first click arms it, the second confirms —

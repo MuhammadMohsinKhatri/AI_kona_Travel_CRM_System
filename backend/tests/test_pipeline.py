@@ -32,6 +32,74 @@ def test_selling_events_default_to_card_payment():
     assert norm({"EVENT_TYPE": "invoice", "PAYMENT_METHOD": "CHECK"})["PAYMENT_METHOD"] == "CHECK"
 
 
+def test_error_summary_is_human_readable():
+    """The CRM Activity error row must say what was being attempted and why it
+    failed, in plain language — not just echo the raw exception."""
+    from app.core.pipeline import _error_summary
+
+    s = _error_summary("invoice", RuntimeError(
+        'KonaOS API error 500: {"messageCode":"main.internalServerError"}'))
+    assert "syncing financials" in s.lower()
+    assert "500" in s
+
+    s2 = _error_summary("square", RuntimeError("connection timed out"))
+    assert "Square reconciliation" in s2
+    assert "timeout" in s2.lower()
+
+
+def test_crm_write_failure_is_recorded_on_crm_activity():
+    """When a KonaOS write fails mid-run, the event is marked errored AND an
+    `error` row lands on the CRM Activity trail with a readable reason — so a
+    failure is visible there, not only in the raw run log."""
+    from unittest.mock import patch
+
+    from app.integrations.mocks import MockCRMClient
+    from app.models import CrmAuditEntry
+
+    orig = MockCRMClient.update_event
+
+    def boom(self, event_id, payload):
+        # EVT-1003 is a selling event → hits the financial sync → make it 500.
+        if event_id == "EVT-1003":
+            raise RuntimeError(
+                'KonaOS API error 500: {"messageCode":"main.internalServerError"}')
+        return orig(self, event_id, payload)
+
+    db = SessionLocal()
+    try:
+        run = PipelineRun(status="running", trigger="test")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        with patch.object(MockCRMClient, "update_event", boom):
+            run_pipeline(db, run)
+
+        ev = db.query(Event).filter(Event.crm_event_id == "EVT-1003").one()
+        assert ev.status == "error"
+        assert ev.error and "500" in ev.error
+
+        audit = (
+            db.query(CrmAuditEntry)
+            .filter(CrmAuditEntry.crm_event_id == "EVT-1003",
+                    CrmAuditEntry.action == "error")
+            .all()
+        )
+        assert len(audit) == 1
+        assert "Failed while" in audit[0].summary
+        assert "500" in audit[0].summary or "internal server" in audit[0].summary.lower()
+        assert audit[0].detail.get("phase") == "invoice"
+
+        # The raw run log ends with a human-readable roll-up that names the
+        # errored event under an ERRORED section.
+        log_text = "\n".join(run.log or [])
+        assert "RUN SUMMARY" in log_text
+        assert "ERRORED" in log_text and "EVT-1003" in log_text
+        assert "PROCESSED" in log_text
+    finally:
+        db.close()
+
+
 def test_full_pipeline_runs_end_to_end():
     db = SessionLocal()
     try:

@@ -90,6 +90,7 @@ def _filtered_events(
     q: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    run_id: Optional[int] = None,
 ):
     """One filter builder shared by list + bulk delete, so 'delete filtered'
     removes exactly the rows the list shows. event_date is a YYYY-MM-DD
@@ -101,6 +102,8 @@ def _filtered_events(
         query = query.filter(Event.brand == brand)
     if billing_model:
         query = query.filter(Event.billing_model == billing_model)
+    if run_id is not None:
+        query = query.filter(Event.run_id == run_id)
     if date_from:
         query = query.filter(Event.event_date >= date_from)
     if date_to:
@@ -126,8 +129,9 @@ def list_events(
     q: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    run_id: Optional[int] = Query(None, description="Only events from this pipeline run"),
 ) -> Page[EventSummary]:
-    query = _filtered_events(db, status, brand, billing_model, q, date_from, date_to)
+    query = _filtered_events(db, status, brand, billing_model, q, date_from, date_to, run_id)
     total = query.with_entities(func.count(Event.id)).scalar() or 0
     items = (
         query.order_by(Event.event_date.desc().nullslast(), Event.id.desc())
@@ -186,6 +190,7 @@ def delete_events_bulk(
     q: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    run_id: Optional[int] = None,
 ) -> dict[str, int]:
     """Bulk-delete every event matching the given filters (same params as the
     list endpoint), cascading to invoices, alerts and ledger rows. KonaOS is
@@ -194,12 +199,12 @@ def delete_events_bulk(
     At least one filter is required: an unfiltered DELETE wiping the whole
     table should never happen by accident.
     """
-    if not any([status, brand, billing_model, q, date_from, date_to]):
+    if not any([status, brand, billing_model, q, date_from, date_to, run_id]):
         raise HTTPException(
             status_code=400,
             detail="Refusing to delete all events — provide at least one filter",
         )
-    events = _filtered_events(db, status, brand, billing_model, q, date_from, date_to).all()
+    events = _filtered_events(db, status, brand, billing_model, q, date_from, date_to, run_id).all()
     # ORM-level deletes so relationship cascades run (a bulk query.delete()
     # would bypass them and orphan invoices/alerts/ledger rows on SQLite).
     for event in events:

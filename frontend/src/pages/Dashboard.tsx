@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, DashboardStats, PipelineRun } from "../api/client";
-import { Loading, StepList, money } from "../components/ui";
+import { Loading, RunEventBreakdown, StepList, money } from "../components/ui";
 
 type RunPhase = "idle" | "running" | "done";
 
@@ -248,6 +248,17 @@ export default function Dashboard() {
             <Cell n={stats.date_run.last.events_skipped} l="Skipped" />
             <Cell n={stats.date_run.last.events_errored} l="Errored" />
           </div>
+
+          {/* Full per-event summary for this run — which errored and why, which
+              were skipped and why, which processed (with type + billing model).
+              Same component the Pipeline Runs page uses. */}
+          <RunEventBreakdown
+            runId={stats.date_run.last.id}
+            from="/"
+            fromLabel="Dashboard"
+            compact
+          />
+
           <p className="muted" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
             Re-running {targetDate} is safe — it refreshes the same rows with the latest CRM and
             Square data.

@@ -94,7 +94,14 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         db.rollback()
         run.events_errored += 1
         note(f"[{item['crm_id']}] ERROR in {phase}: {exc}")
-        _mark_event_error(db, run, item["crm_id"], f"{phase}: {exc}")
+        event = _mark_event_error(db, run, item["crm_id"], f"{phase}: {exc}")
+        # Also record the failure on the CRM Activity trail, so an errored
+        # event is visible there alongside the successful writes — not only in
+        # the raw run log. This is the row a "why didn't this sync?" question
+        # gets answered from.
+        _audit(db, event, "error", _error_summary(phase, exc),
+               detail={"phase": phase, "error": str(exc)}, run_id=run.id)
+        db.commit()
         items.remove(item)
 
     try:
@@ -144,7 +151,10 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 db.rollback()
                 run.events_errored += 1
                 note(f"[{crm_id}] ERROR in clean: {exc}")
-                _mark_event_error(db, run, crm_id, f"clean: {exc}")
+                event = _mark_event_error(db, run, crm_id, f"clean: {exc}")
+                _audit(db, event, "error", _error_summary("clean", exc),
+                       detail={"phase": "clean", "error": str(exc)}, run_id=run.id)
+                db.commit()
         detail = f"{len(items)} to process"
         if skipped:
             detail += f", {skipped} skipped"
@@ -402,6 +412,13 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 drop_errored(items, item, exc, "report")
         progress.set("report", "done", f"{run.events_processed} ledger rows")
 
+        # A human-readable roll-up appended to the run log itself, so the raw
+        # log is self-contained: which events errored (and why), which were
+        # skipped (and why), which processed (with type + billing model). The
+        # Runs page and Dashboard render the same breakdown visually; this is
+        # the text version for anyone reading the log directly.
+        _append_run_summary(db, run, note)
+
         run.status = "completed"
         run.finished_at = datetime.now(timezone.utc)
         note("Run completed")
@@ -591,7 +608,71 @@ def _save_alerts(db: Session, event: Event, alerts: list[dict[str, str]]) -> Non
     db.flush()
 
 
-def _mark_event_error(db: Session, run: PipelineRun, crm_id: str, error: str) -> None:
+# Human-readable phase names for the CRM Activity error summary — the raw
+# phase keys ("invoice", "square") don't tell a non-engineer what was being
+# attempted when it failed.
+_PHASE_LABELS = {
+    "clean": "cleaning & filtering the event",
+    "classify": "AI classification",
+    "square": "Square reconciliation",
+    "calculate": "invoice calculation",
+    "invoice": "creating the invoice / syncing financials to KonaOS",
+    "alerts": "checking alerts",
+    "report": "updating the ledger",
+}
+
+
+def _error_summary(phase: str, exc: Exception) -> str:
+    """A plain-language one-liner for the CRM Activity error row."""
+    what = _PHASE_LABELS.get(phase, phase)
+    text = str(exc)
+    if "500" in text or "internalServerError" in text:
+        reason = "KonaOS returned HTTP 500 (internal server error on their side)"
+    elif "400" in text or "invalidJson" in text:
+        reason = "KonaOS rejected the request (HTTP 400 — invalid data)"
+    elif "401" in text or "403" in text:
+        reason = "KonaOS authentication failed (session expired?)"
+    elif "timeout" in text.lower() or "timed out" in text.lower():
+        reason = "KonaOS did not respond in time (timeout)"
+    else:
+        reason = text[:200]
+    return f"Failed while {what} — {reason}"
+
+
+def _append_run_summary(db: Session, run: PipelineRun, note: Callable[[str], None]) -> None:
+    """Append a plain-language per-event roll-up to the run log."""
+    events = db.query(Event).filter(Event.run_id == run.id).all()
+    errored = [e for e in events if e.status == "error"]
+    skipped = [e for e in events if e.status == "skipped"]
+    processed = [e for e in events if e.status in ("processed", "needs_review")]
+
+    def _who(e: Event) -> str:
+        return e.event_name or e.event_code or e.crm_event_id or "?"
+
+    def _kind(e: Event) -> str:
+        t = e.event_type or "?"
+        m = e.billing_model or "?"
+        return f"{t} / {m}"
+
+    note("──────── RUN SUMMARY ────────")
+    note(f"{len(processed)} processed · {len(skipped)} skipped · {len(errored)} errored")
+    if errored:
+        note(f"ERRORED ({len(errored)}):")
+        for e in errored:
+            note(f"  ✕ {_who(e)} [{_kind(e)}] — {e.error or 'error'}")
+    if skipped:
+        note(f"SKIPPED ({len(skipped)}):")
+        for e in skipped:
+            note(f"  – {_who(e)} — {e.status_reason or 'skipped'}")
+    if processed:
+        note(f"PROCESSED ({len(processed)}):")
+        for e in processed:
+            amt = e.final_invoice_amount or 0.0
+            note(f"  ✓ {_who(e)} [{_kind(e)}] — invoice ${amt:,.2f}")
+    note("─────────────────────────────")
+
+
+def _mark_event_error(db: Session, run: PipelineRun, crm_id: str, error: str) -> Event:
     event = db.query(Event).filter(Event.crm_event_id == crm_id).one_or_none()
     if event is None:
         event = Event(crm_event_id=crm_id, run_id=run.id)
@@ -599,6 +680,7 @@ def _mark_event_error(db: Session, run: PipelineRun, crm_id: str, error: str) ->
     event.status = "error"
     event.error = error
     db.commit()
+    return event
 
 
 def _num(v: Any) -> float:
