@@ -392,7 +392,12 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     financials = {
                         "EVENT_ID": item["crm_id"],
                         "ccAmount": _r2(net_card + card_tax),
-                        "taxPercent": tax_rate,
+                        # KonaOS's Sales Tax field is a PERCENTAGE input (the %
+                        # icon in its UI): 6 means 6%, not 0.06. tax_rate is a
+                        # fraction (0.06), so send it ×100 — same convention as
+                        # givebackPercentage below. Sending the raw 0.06 made
+                        # KonaOS show "0.06%".
+                        "taxPercent": _r2(tax_rate * 100),
                         "tipAmount": _r2(tips),
                         "giveback": _r2(giveback),
                         "givebackPercentage": _r2(giveback / collected * 100) if collected > 0 else 0,

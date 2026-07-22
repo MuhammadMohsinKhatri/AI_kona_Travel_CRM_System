@@ -52,7 +52,13 @@ const AUDIT_VALUE_LABELS: Record<string, string> = {
 
 function formatAuditValue(field: string, value: unknown): string {
   if (typeof value === "number") {
-    if (field === "taxPercent") return (value * 100).toFixed(0) + "%";
+    // taxPercent is now sent as a percentage (6 = 6%). Older audit rows stored
+    // it as a fraction (0.06); treat a sub-1 value as a fraction so both render
+    // "6%" correctly.
+    if (field === "taxPercent") {
+      const pct = value < 1 ? value * 100 : value;
+      return pct.toFixed(0) + "%";
+    }
     if (field === "givebackPercentage") return value.toFixed(1) + "%";
     return money(value);
   }

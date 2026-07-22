@@ -130,6 +130,39 @@ def test_run_scoped_to_specific_event_ids():
         db.close()
 
 
+def test_financial_sync_sends_tax_as_percentage_not_fraction():
+    """KonaOS's Sales Tax field is a percentage input (6 = 6%), so taxPercent
+    must be sent as tax_rate*100, NOT the raw 0.06 fraction (which displayed as
+    0.06%). Consistent with givebackPercentage, which is already ×100."""
+    from unittest.mock import patch
+
+    from app.integrations.mocks import MockCRMClient
+
+    captured: dict[str, dict] = {}
+    orig = MockCRMClient.update_event
+
+    def capture(self, event_id, payload):
+        captured[event_id] = payload
+        return orig(self, event_id, payload)
+
+    db = SessionLocal()
+    try:
+        # EVT-1003 is a taxable (no "tax exempt" note) selling event.
+        run = PipelineRun(status="running", trigger="test", filter_event_ids=["EVT-1003"])
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        with patch.object(MockCRMClient, "update_event", capture):
+            run_pipeline(db, run)
+
+        assert "EVT-1003" in captured, "financial sync should have written to KonaOS"
+        tax = captured["EVT-1003"]["taxPercent"]
+        assert tax == 6.0, f"expected 6 (percent), got {tax}"
+        assert tax != 0.06  # never the raw fraction
+    finally:
+        db.close()
+
+
 def test_run_filtered_by_event_type():
     """A type-filtered run classifies the whole date but only fully processes
     the selected EVENT_TYPE(s); the rest are marked skipped with a reason."""
