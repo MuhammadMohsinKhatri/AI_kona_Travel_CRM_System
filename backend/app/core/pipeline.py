@@ -397,20 +397,24 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         "giveback": _r2(giveback),
                         "givebackPercentage": _r2(giveback / collected * 100) if collected > 0 else 0,
                     }
+                    tax_pct_str = f"{tax_rate * 100:.0f}%"
                     if dry_run:
                         note(f"[{item['crm_id']}] DRY-RUN — would update KonaOS event "
-                             f"(card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
+                             f"(card ${financials['ccAmount']}, tax {tax_pct_str}, "
+                             f"tips ${financials['tipAmount']}, "
                              f"giveback ${financials['giveback']})")
                     else:
                         sync_result = crm.update_event(item["crm_id"], financials)
                         crm_synced += 1
                         note(f"[{item['crm_id']}] KonaOS event updated — "
-                             f"card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
+                             f"card ${financials['ccAmount']}, tax {tax_pct_str}, "
+                             f"tips ${financials['tipAmount']}, "
                              f"giveback ${financials['giveback']}{_equip_suffix(sync_result)}")
                         _audit(
                             db, item["event"], "event_updated",
                             f"Synced financial actuals — card ${financials['ccAmount']}, "
-                            f"tips ${financials['tipAmount']}, giveback ${financials['giveback']}"
+                            f"tax {tax_pct_str}, tips ${financials['tipAmount']}, "
+                            f"giveback ${financials['giveback']}"
                             + _equip_suffix(sync_result),
                             detail={
                                 "fields_updated": sorted(k for k in financials if k != "EVENT_ID"),
