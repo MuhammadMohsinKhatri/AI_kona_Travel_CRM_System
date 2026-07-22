@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, EventSummary, Page } from "../api/client";
 import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "../components/ui";
 
@@ -7,12 +7,36 @@ const STATUSES = ["", "processed", "needs_review", "error", "skipped"];
 
 export default function Events() {
   const [data, setData] = useState<Page<EventSummary> | null>(null);
-  const [status, setStatus] = useState("");
-  const [q, setQ] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Filters live in the URL (like CRM Activity / Financials), so opening an
+  // event and clicking "← Events" returns to the exact same filtered view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const status = searchParams.get("status") || "";
+  const dateFrom = searchParams.get("date_from") || "";
+  const dateTo = searchParams.get("date_to") || "";
+  const urlQ = searchParams.get("q") || "";
+  const [qInput, setQInput] = useState(urlQ);
+  const [debouncedQ, setDebouncedQ] = useState(urlQ);
   const [running, setRunning] = useState<number | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  function updateParams(patch: Record<string, string | undefined>) {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v); else next.delete(k);
+    }
+    setSearchParams(next, { replace: true });
+  }
+
+  // Debounce the search box into the URL.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(qInput), 300);
+    return () => clearTimeout(t);
+  }, [qInput]);
+  useEffect(() => {
+    updateParams({ q: debouncedQ || undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ]);
 
   async function runEvent(e: EventSummary) {
     setRunning(e.id);
@@ -29,7 +53,7 @@ export default function Events() {
   function filterParams(): Record<string, string> {
     const params: Record<string, string> = {};
     if (status) params.status = status;
-    if (q) params.q = q;
+    if (debouncedQ.trim()) params.q = debouncedQ.trim();
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
     return params;
@@ -41,12 +65,11 @@ export default function Events() {
 
   useEffect(() => {
     setData(null);
-    const t = setTimeout(reload, q ? 300 : 0);
-    return () => clearTimeout(t);
+    reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, q, dateFrom, dateTo]);
+  }, [status, debouncedQ, dateFrom, dateTo]);
 
-  const hasFilters = Boolean(status || q || dateFrom || dateTo);
+  const hasFilters = Boolean(status || qInput || dateFrom || dateTo);
 
   return (
     <>
@@ -63,10 +86,11 @@ export default function Events() {
           className="input"
           style={{ maxWidth: 280 }}
           placeholder="Search name / code / id…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
         />
-        <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select className="select" value={status}
+          onChange={(e) => updateParams({ status: e.target.value || undefined })}>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
               {s ? s.replace("_", " ") : "All statuses"}
@@ -78,9 +102,11 @@ export default function Events() {
           id="ev-date-from"
           className="input"
           type="date"
-          title="Show events on or after this date"
+          title="Show events on or after this date — also fills 'To' with the same day (edit 'To' to widen the range)"
           value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
+          // Picking a From date auto-sets To to the same day (one click = a
+          // single-day view); the user can then widen it by editing To.
+          onChange={(e) => updateParams({ date_from: e.target.value || undefined, date_to: e.target.value || undefined })}
         />
         <label className="muted" htmlFor="ev-date-to" style={{ fontSize: 12 }}>To</label>
         <input
@@ -89,8 +115,14 @@ export default function Events() {
           type="date"
           title="Show events on or before this date"
           value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
+          onChange={(e) => updateParams({ date_to: e.target.value || undefined })}
         />
+        {hasFilters && (
+          <button className="btn" title="Clear all filters"
+            onClick={() => { setSearchParams(new URLSearchParams(), { replace: true }); setQInput(""); }}>
+            ✕ Clear
+          </button>
+        )}
         {data && <span className="muted">{data.total} events</span>}
         {hasFilters && data && data.total > 0 && (
           <BulkDeleteButton
@@ -124,7 +156,7 @@ export default function Events() {
             </thead>
             <tbody>
               {data.items.map((e) => (
-                <tr key={e.id} onClick={() => navigate(`/events/${e.id}`, { state: { from: "/events", label: "Events" } })}>
+                <tr key={e.id} onClick={() => navigate(`/events/${e.id}`, { state: { from: location.pathname + location.search, label: "Events" } })}>
                   <td>
                     <div style={{ fontWeight: 600 }}>{e.event_name || "(unnamed)"}</div>
                     <div className="muted" style={{ fontSize: 12 }}>{e.event_code || e.crm_event_id}</div>
