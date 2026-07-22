@@ -1269,7 +1269,30 @@ class KonaosClient:
         for field in array_fields:
             if update_payload.get(field) is None:
                 update_payload[field] = []
-        
+
+        # SAFETY NET (2026-07-21 incident): this must never be able to send an
+        # empty equipment/staff list for an event that actually has some
+        # assigned, unless the caller explicitly asked to change it. The
+        # mapping above should make this unreachable — if it ever fires, a
+        # later edit broke the mapping and this stops the wipe cold instead of
+        # silently unassigning a real truck/kiosk/staff member in production.
+        existing_equipment_count = len(existing_event.get("eventAssetsDtoList") or [])
+        existing_staff_count = len(existing_event.get("eventStaffsDtoList") or [])
+        new_equipment_count = len(update_payload.get("eventAssetsList") or [])
+        new_staff_count = len(update_payload.get("eventStaffList") or [])
+        if new_equipment_count == 0 and existing_equipment_count > 0 and "eventAssetsList" not in kwargs:
+            raise RuntimeError(
+                f"update_event({event_id}): refusing to send an empty eventAssetsList — "
+                f"the live event has {existing_equipment_count} asset(s) assigned. "
+                "This would silently unassign all equipment; aborting the PUT."
+            )
+        if new_staff_count == 0 and existing_staff_count > 0 and "eventStaffList" not in kwargs:
+            raise RuntimeError(
+                f"update_event({event_id}): refusing to send an empty eventStaffList — "
+                f"the live event has {existing_staff_count} staff member(s) assigned. "
+                "This would silently unassign all staff; aborting the PUT."
+            )
+
         # Ensure string fields are strings (not None) - common required fields
         string_fields_defaults = {
             "clientId": "",
@@ -1293,8 +1316,16 @@ class KonaosClient:
                 response=response
             )
         response.raise_for_status()
-        return response.json()
-    
+        result = response.json()
+        # Diagnostic counts so callers can log confirmation that nothing was
+        # silently emptied — prefixed with "_" per this codebase's convention
+        # for internal fields riding alongside a real API response.
+        if isinstance(result, dict):
+            result["_equipment_preserved"] = new_equipment_count
+            result["_staff_preserved"] = new_staff_count
+            result["_fields_updated"] = sorted(kwargs.keys())
+        return result
+
     async def delete_event(
         self,
         event_id: str,

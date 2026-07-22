@@ -9,7 +9,7 @@ from the remaining phases without failing the run.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -270,7 +270,9 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                              f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
                         run.invoices_created += 1
                     else:
-                        outcome = _replace_draft(db, crm, item["event"], payload, item["cleaned"])
+                        outcome = _replace_draft(
+                            db, crm, item["event"], payload, item["cleaned"], note=note
+                        )
                         if outcome == "created":
                             note(f"[{item['crm_id']}] invoice draft created "
                                  f"${item['calc'].get('FINAL_INVOICE_AMOUNT')}")
@@ -283,10 +285,12 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                             # invoiceStatus is deliberately NOT sent — it's
                             # read-only on the event PUT (see client.update_event).
                             try:
-                                crm.update_event(item["crm_id"], {
+                                sync_result = crm.update_event(item["crm_id"], {
                                     "EVENT_ID": item["crm_id"],
                                     "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
                                 })
+                                note(f"[{item['crm_id']}] invoice amount synced to KonaOS "
+                                     f"event{_equip_suffix(sync_result)}")
                             except Exception as sync_exc:  # noqa: BLE001
                                 note(f"[{item['crm_id']}] WARNING — draft created but "
                                      f"event sync failed: {sync_exc}")
@@ -326,11 +330,11 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                              f"(card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
                              f"giveback ${financials['giveback']})")
                     else:
-                        crm.update_event(item["crm_id"], financials)
+                        sync_result = crm.update_event(item["crm_id"], financials)
                         crm_synced += 1
                         note(f"[{item['crm_id']}] KonaOS event updated — "
                              f"card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
-                             f"giveback ${financials['giveback']}")
+                             f"giveback ${financials['giveback']}{_equip_suffix(sync_result)}")
                 db.commit()
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "invoice")
@@ -463,7 +467,8 @@ def _store_local_invoice(
 
 
 def _replace_draft(
-    db: Session, crm, event: Event, payload: dict[str, Any], cleaned: dict[str, Any]
+    db: Session, crm, event: Event, payload: dict[str, Any], cleaned: dict[str, Any],
+    note: Callable[[str], None] = lambda msg: None,
 ) -> str:
     """Replace this event's DRAFT invoice with a fresh one.
 
@@ -473,28 +478,45 @@ def _replace_draft(
     used to error the whole event) — and unknown statuses are treated as
     protected too, mirroring the n8n fail-safe: only an explicit draft is
     safe to replace.
+
+    Every decision is written to the run log via ``note`` (which invoices
+    matched, their status, which draft(s) got deleted, the new invoice's
+    KonaOS id) so a run can be audited after the fact — this is what a client
+    dispute over "where did my invoice go" gets checked against.
     """
+    eid = event.crm_event_id
     existing = crm.list_invoices()
     event_code = payload.get("invoiceNumber")
     matches = [
         inv for inv in existing
-        if inv.get("eventId") == event.crm_event_id or inv.get("invoiceNumber") == event_code
+        if inv.get("eventId") == eid or inv.get("invoiceNumber") == event_code
     ]
+    note(f"[{eid}] invoice check — {len(existing)} invoice(s) in the live KonaOS "
+         f"list, {len(matches)} matching this event (by eventId or invoiceNumber "
+         f"'{event_code}')")
 
     for inv in matches:
         status = str(inv.get("invoiceStatus") or inv.get("status") or "").strip().lower()
+        inv_ref = inv.get("invoiceNumber") or inv.get("invoiceId") or inv.get("id") or "?"
         if status != "draft":
+            note(f"[{eid}] existing invoice {inv_ref} is '{status or 'unknown'}' "
+                 "— PROTECTED, not deleted or replaced")
             return f"skipped — existing invoice is '{status or 'unknown'}' (protected, not replaced)"
 
     for inv in matches:  # all drafts at this point
         inv_id = inv.get("invoiceId") or inv.get("id")
+        inv_ref = inv.get("invoiceNumber") or inv_id or "?"
         if inv_id:
+            note(f"[{eid}] deleting existing DRAFT invoice {inv_ref} (KonaOS id {inv_id})")
             crm.delete_invoice(str(inv_id))
 
     resp = crm.create_invoice(payload)
+    new_id = str(resp.get("invoiceId") or resp.get("id") or "")
+    note(f"[{eid}] created invoice {payload.get('invoiceNumber')} "
+         f"(KonaOS id {new_id or 'unknown'}) — ${payload.get('grandTotal')}")
     _store_local_invoice(
         db, event, payload, status="draft",
-        crm_invoice_id=str(resp.get("invoiceId") or resp.get("id") or ""),
+        crm_invoice_id=new_id,
     )
     return "created"
 
@@ -526,6 +548,21 @@ def _num(v: Any) -> float:
 
 def _r2(v: float) -> float:
     return round(v + 0.0, 2)
+
+
+def _equip_suffix(update_event_result: Any) -> str:
+    """Render the equipment/staff-preserved counts KonaosClient.update_event
+    stamps on its response (see _equipment_preserved/_staff_preserved), so
+    every run log line confirming a CRM write also confirms nothing on the
+    event was silently emptied. Blank for a client (e.g. mocks/tests) that
+    doesn't report these — never fabricate a count."""
+    if not isinstance(update_event_result, dict):
+        return ""
+    equip = update_event_result.get("_equipment_preserved")
+    staff = update_event_result.get("_staff_preserved")
+    if equip is None and staff is None:
+        return ""
+    return f" · equipment preserved: {equip}, staff preserved: {staff}"
 
 
 def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
