@@ -426,16 +426,19 @@ The only valid path to TAXABLE: NO:
   Raw note text contains one of the Group B patterns listed above.
   Nothing else qualifies.
 
-⚠️ SELLING EXEMPTION — SCOPE IS STRICTLY LIMITED:
-TAXABLE: NO without Group B applies ONLY to SELLING_OPEN and SELLING_WITH_GIVEBACK.
-It NEVER applies to any reclassified event, even if notes say "EVENT TYPE Selling".
-The resolved BILLING_MODEL determines tax — never the declared label.
+⚠️ NO SELLING EXEMPTION (updated 2026-07-22):
+Selling events are NOT auto-exempt. EVERY billing model — selling included —
+defaults to TAXABLE: YES, TAX_RATE_sales: 0.06, and is TAXABLE: NO ONLY when
+the notes contain explicit Group B (tax-exempt) language. The resolved
+BILLING_MODEL never grants tax exemption on its own.
 
+  SELLING_OPEN + no Group B → TAXABLE: YES, TAX_RATE_sales: 0.06
+  SELLING_OPEN + "tax exempt" in notes → TAXABLE: NO
+  SELLING_WITH_GIVEBACK + no Group B → TAXABLE: YES, TAX_RATE_sales: 0.06
   MIN_GUARANTEE_HOURLY + no Group B → TAXABLE: YES
   MIN_GUARANTEE_HOURLY + "tax exempt" in notes → TAXABLE: NO
-  SELLING_OPEN → TAXABLE: NO (no check needed)
 
-Never write "tax logic is skipped" for non-selling events.
+Never write "tax logic is skipped" for any event — tax applies to selling too.
 
 ---
 
