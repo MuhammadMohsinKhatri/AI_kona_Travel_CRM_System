@@ -100,6 +100,8 @@ export const api = {
     request<Alert>(`/api/alerts/${id}/resolve`, { method: "POST" }),
   deleteAlert: (id: number) =>
     request<void>(`/api/alerts/${id}`, { method: "DELETE" }),
+  crmAudit: (params: Record<string, string> = {}) =>
+    request<CrmAuditResponse>("/api/crm-audit?" + new URLSearchParams(params)),
   financialMonths: () => request<string[]>("/api/financials/months"),
   financials: (params: Record<string, string> = {}) =>
     request<FinancialsResponse>("/api/financials?" + new URLSearchParams(params)),
@@ -194,6 +196,25 @@ export interface FinancialRow {
   ai_completion_tokens: number;
   ai_cost_usd: number;
   updated_at: string | null;
+}
+export interface CrmAuditEntry {
+  id: number;
+  event_id: number | null;
+  crm_event_id: string;
+  event_name: string;
+  run_id: number | null;
+  // event_updated | invoice_created | invoice_deleted | invoice_skipped
+  action: string;
+  summary: string;
+  detail: Record<string, unknown>;
+  created_at: string | null;
+}
+export interface CrmAuditResponse {
+  items: CrmAuditEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  actions: string[];
 }
 export interface SheetImportResult {
   sheet: string;

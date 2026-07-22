@@ -271,7 +271,8 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         run.invoices_created += 1
                     else:
                         outcome = _replace_draft(
-                            db, crm, item["event"], payload, item["cleaned"], note=note
+                            db, crm, item["event"], payload, item["cleaned"],
+                            note=note, run_id=run.id,
                         )
                         if outcome == "created":
                             note(f"[{item['crm_id']}] invoice draft created "
@@ -291,6 +292,16 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                                 })
                                 note(f"[{item['crm_id']}] invoice amount synced to KonaOS "
                                      f"event{_equip_suffix(sync_result)}")
+                                _audit(
+                                    db, item["event"], "event_updated",
+                                    "Synced invoice amount to KonaOS event"
+                                    + _equip_suffix(sync_result),
+                                    detail={
+                                        "fields_updated": ["invoiceAmount"],
+                                        **_preserved_detail(sync_result),
+                                    },
+                                    run_id=run.id,
+                                )
                             except Exception as sync_exc:  # noqa: BLE001
                                 note(f"[{item['crm_id']}] WARNING — draft created but "
                                      f"event sync failed: {sync_exc}")
@@ -335,6 +346,17 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         note(f"[{item['crm_id']}] KonaOS event updated — "
                              f"card ${financials['ccAmount']}, tips ${financials['tipAmount']}, "
                              f"giveback ${financials['giveback']}{_equip_suffix(sync_result)}")
+                        _audit(
+                            db, item["event"], "event_updated",
+                            f"Synced financial actuals — card ${financials['ccAmount']}, "
+                            f"tips ${financials['tipAmount']}, giveback ${financials['giveback']}"
+                            + _equip_suffix(sync_result),
+                            detail={
+                                "fields_updated": sorted(k for k in financials if k != "EVENT_ID"),
+                                **_preserved_detail(sync_result),
+                            },
+                            run_id=run.id,
+                        )
                 db.commit()
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "invoice")
@@ -466,9 +488,26 @@ def _store_local_invoice(
     return invoice
 
 
+def _audit(
+    db: Session, event: Event, action: str, summary: str,
+    detail: dict[str, Any] | None = None, run_id: Optional[int] = None,
+) -> None:
+    """Persist one row of the structured CRM-write audit trail (see
+    CrmAuditEntry) — the browsable/filterable record behind the "CRM
+    Activity" page and each event's own activity history, as opposed to the
+    per-run text log which is what ``note`` writes."""
+    from app.models import CrmAuditEntry
+
+    db.add(CrmAuditEntry(
+        event_id=event.id, crm_event_id=event.crm_event_id,
+        event_name=event.event_name, run_id=run_id,
+        action=action, summary=summary, detail=detail or {},
+    ))
+
+
 def _replace_draft(
     db: Session, crm, event: Event, payload: dict[str, Any], cleaned: dict[str, Any],
-    note: Callable[[str], None] = lambda msg: None,
+    note: Callable[[str], None] = lambda msg: None, run_id: Optional[int] = None,
 ) -> str:
     """Replace this event's DRAFT invoice with a fresh one.
 
@@ -481,8 +520,10 @@ def _replace_draft(
 
     Every decision is written to the run log via ``note`` (which invoices
     matched, their status, which draft(s) got deleted, the new invoice's
-    KonaOS id) so a run can be audited after the fact — this is what a client
-    dispute over "where did my invoice go" gets checked against.
+    KonaOS id) AND to the structured CrmAuditEntry table via ``_audit``, so a
+    run can be audited after the fact from either the raw log or the
+    filterable CRM Activity page — this is what a client dispute over "where
+    did my invoice go" gets checked against.
     """
     eid = event.crm_event_id
     existing = crm.list_invoices()
@@ -501,6 +542,12 @@ def _replace_draft(
         if status != "draft":
             note(f"[{eid}] existing invoice {inv_ref} is '{status or 'unknown'}' "
                  "— PROTECTED, not deleted or replaced")
+            _audit(
+                db, event, "invoice_skipped",
+                f"Existing invoice {inv_ref} is '{status or 'unknown'}' — protected, not replaced",
+                detail={"invoice_ref": inv_ref, "status": status or "unknown"},
+                run_id=run_id,
+            )
             return f"skipped — existing invoice is '{status or 'unknown'}' (protected, not replaced)"
 
     for inv in matches:  # all drafts at this point
@@ -509,11 +556,24 @@ def _replace_draft(
         if inv_id:
             note(f"[{eid}] deleting existing DRAFT invoice {inv_ref} (KonaOS id {inv_id})")
             crm.delete_invoice(str(inv_id))
+            _audit(
+                db, event, "invoice_deleted", f"Deleted draft invoice {inv_ref}",
+                detail={"invoice_ref": inv_ref, "invoice_id": str(inv_id)}, run_id=run_id,
+            )
 
     resp = crm.create_invoice(payload)
     new_id = str(resp.get("invoiceId") or resp.get("id") or "")
     note(f"[{eid}] created invoice {payload.get('invoiceNumber')} "
          f"(KonaOS id {new_id or 'unknown'}) — ${payload.get('grandTotal')}")
+    _audit(
+        db, event, "invoice_created",
+        f"Created invoice {payload.get('invoiceNumber')} — ${payload.get('grandTotal')}",
+        detail={
+            "invoice_number": payload.get("invoiceNumber"), "invoice_id": new_id,
+            "grand_total": payload.get("grandTotal"),
+        },
+        run_id=run_id,
+    )
     _store_local_invoice(
         db, event, payload, status="draft",
         crm_invoice_id=new_id,
@@ -563,6 +623,21 @@ def _equip_suffix(update_event_result: Any) -> str:
     if equip is None and staff is None:
         return ""
     return f" · equipment preserved: {equip}, staff preserved: {staff}"
+
+
+def _preserved_detail(update_event_result: Any) -> dict[str, Any]:
+    """Structured counterpart to _equip_suffix, for CrmAuditEntry.detail
+    (JSON) rather than a log-line string. Omits the keys entirely when the
+    CRM client doesn't report them, so the UI can distinguish "confirmed
+    preserved" from "unknown" instead of showing a fabricated 0."""
+    if not isinstance(update_event_result, dict):
+        return {}
+    out: dict[str, Any] = {}
+    if update_event_result.get("_equipment_preserved") is not None:
+        out["equipment_preserved"] = update_event_result["_equipment_preserved"]
+    if update_event_result.get("_staff_preserved") is not None:
+        out["staff_preserved"] = update_event_result["_staff_preserved"]
+    return out
 
 
 def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:

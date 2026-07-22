@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { api, EventDetail as Detail } from "../api/client";
+import { api, CrmAuditEntry, EventDetail as Detail } from "../api/client";
 import { Badge, Loading, money } from "../components/ui";
+
+const ACTION_LABELS: Record<string, string> = {
+  invoice_created: "Invoice created",
+  invoice_deleted: "Invoice deleted",
+  invoice_skipped: "Invoice skipped",
+  event_updated: "Event updated",
+};
 
 export default function EventDetail() {
   const { id } = useParams();
@@ -12,10 +19,17 @@ export default function EventDetail() {
   const backTo = from.from ?? "/events";
   const backLabel = from.label ?? "Events";
   const [ev, setEv] = useState<Detail | null>(null);
+  const [audit, setAudit] = useState<CrmAuditEntry[] | null>(null);
 
   useEffect(() => {
     if (id) api.event(Number(id)).then(setEv);
   }, [id]);
+
+  // KonaOS activity history — every write our system has made to this
+  // specific event (see the CRM Activity page for the global feed).
+  useEffect(() => {
+    if (ev) api.crmAudit({ event_id: String(ev.id), page_size: "20" }).then((r) => setAudit(r.items));
+  }, [ev?.id]);
 
   if (!ev) return <Loading />;
 
@@ -171,6 +185,31 @@ export default function EventDetail() {
               <LineItems payload={inv.payload} />
             </div>
           ))}
+        </>
+      )}
+
+      {audit && audit.length > 0 && (
+        <>
+          <div className="section-title">KonaOS activity ({audit.length})</div>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+              Every write our system has made to this event in KonaOS — see{" "}
+              <Link to="/crm-activity">CRM Activity</Link> for the full history across all events.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {audit.map((a) => (
+                <div key={a.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                  <div className="flex between">
+                    <Badge kind={a.action}>{ACTION_LABELS[a.action] || a.action}</Badge>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {a.created_at ? new Date(a.created_at).toLocaleString() : "—"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>{a.summary}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </>
       )}
 

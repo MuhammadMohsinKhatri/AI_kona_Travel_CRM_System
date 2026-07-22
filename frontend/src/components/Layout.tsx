@@ -8,6 +8,7 @@ const links = [
   { to: "/financials", label: "Financials" },
   { to: "/alerts", label: "Alerts" },
   { to: "/runs", label: "Pipeline Runs" },
+  { to: "/crm-activity", label: "CRM Activity" },
   { to: "/api-explorer", label: "API Explorer" },
 ];
 

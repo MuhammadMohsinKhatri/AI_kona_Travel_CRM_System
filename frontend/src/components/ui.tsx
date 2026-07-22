@@ -20,6 +20,11 @@ export function Badge({ kind, children }: { kind: string; children: ReactNode })
     HIGH: "red",
     MEDIUM: "amber",
     LOW: "blue",
+    // CRM audit actions
+    invoice_created: "green",
+    invoice_deleted: "red",
+    invoice_skipped: "amber",
+    event_updated: "blue",
   };
   const cls = map[children as string] ?? map[kind] ?? "gray";
   return <span className={`badge ${cls}`}>{children}</span>;

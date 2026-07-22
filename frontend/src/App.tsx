@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import { Loading } from "./components/ui";
 import Alerts from "./pages/Alerts";
 import ApiExplorer from "./pages/ApiExplorer";
+import CrmAudit from "./pages/CrmAudit";
 import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
 import Events from "./pages/Events";
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/financials" element={<Financials />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/runs" element={<Runs />} />
+        <Route path="/crm-activity" element={<CrmAudit />} />
         <Route path="/api-explorer" element={<ApiExplorer />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
