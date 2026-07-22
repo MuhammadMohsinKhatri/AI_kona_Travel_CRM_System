@@ -18,7 +18,7 @@ from app.core import billing, event_cleaner, invoice_builder, notify, overrides
 from app.core.alerts import check_alerts
 from app.core.equipment import map_equipment
 from app.integrations import factory
-from app.models import Alert, Event, Invoice, PipelineRun
+from app.models import Alert, Event, FinancialEntry, Invoice, PipelineRun
 
 NY = ZoneInfo("America/New_York")
 
@@ -899,8 +899,6 @@ def _normalize_classification(cls: dict[str, Any]) -> dict[str, Any]:
 
 def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any]) -> None:
     """Write/refresh this event's row in the financial ledger (Postgres)."""
-    from app.models import FinancialEntry
-
     cleaned = item["cleaned"]
     calc = item["calc"]
     cls = item["classification"]

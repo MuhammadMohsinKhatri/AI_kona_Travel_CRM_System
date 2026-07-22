@@ -101,21 +101,26 @@ def recompute_cash_chain(entry: FinancialEntry) -> dict[str, float]:
     rate = entry.total_tax_rate or 0.0
     taxable = bool(entry.taxable)
 
+    # Read the Square figures through a NULL guard. Column defaults only apply
+    # on INSERT, so a row that predates a column — or one imported from the
+    # legacy sheet — can carry NULL where the model says 0.0, and arithmetic
+    # on it raises rather than producing a wrong number.
+    def col(name: str) -> float:
+        return float(getattr(entry, name, 0.0) or 0.0)
+
+    net_card, card_tax = col("square_net_card"), col("square_card_tax")
+    tips, giveback = col("square_tips_card"), col("giveback_amount")
+
     entry.cash_collected = _r2(cash)
     entry.cash_tax = _r2(cash - cash / (1 + rate)) if (taxable and rate and cash) else 0.0
     entry.cash_pre_tax = _r2(cash - entry.cash_tax) if cash else 0.0
 
     if str(entry.event_type or "").strip().lower() != "invoice":
-        entry.event_sales_collected = _r2(entry.square_net_card + entry.cash_pre_tax)
-        entry.sales_dollars = _r2(
-            entry.square_net_card
-            + entry.square_card_tax
-            + entry.square_tips_card
-            + cash
-        )
-        entry.net_event_sales = _r2(entry.event_sales_collected - entry.giveback_amount)
-    entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
-    entry.actual_sales = entry.square_net_card or cash
+        entry.event_sales_collected = _r2(net_card + entry.cash_pre_tax)
+        entry.sales_dollars = _r2(net_card + card_tax + tips + cash)
+        entry.net_event_sales = _r2(entry.event_sales_collected - giveback)
+    entry.sales_tax = _r2(card_tax + entry.cash_tax)
+    entry.actual_sales = net_card or cash
 
     return {
         "cash_collected": entry.cash_collected,
@@ -155,5 +160,5 @@ def mg_shortfall(entry: FinancialEntry) -> float:
 
     0.0 means the minimum was met — and therefore no invoice.
     """
-    total_sales = (entry.square_net_card or 0.0) + (entry.cash_pre_tax or 0.0)
-    return _r2(max(0.0, (entry.minimum_required or 0.0) - total_sales))
+    total_sales = float(entry.square_net_card or 0.0) + float(entry.cash_pre_tax or 0.0)
+    return _r2(max(0.0, float(entry.minimum_required or 0.0) - total_sales))
