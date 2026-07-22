@@ -28,7 +28,8 @@ def waive_cc_fee(
     """
     from app.config import settings
     from app.core import billing, invoice_builder
-    from app.core.pipeline import _audit, _preserved_detail, _replace_draft, _store_local_invoice
+    from app.core.pipeline import (_audit, _equip_suffix, _preserved_detail,
+                                    _replace_draft, _store_local_invoice)
     from app.integrations import factory
 
     event = db.get(Event, event_id)
@@ -64,9 +65,14 @@ def waive_cc_fee(
             })
             _audit(
                 db, event, "event_updated",
-                "Synced invoice amount to KonaOS event (CC fee waived)",
+                "Synced invoice amount to KonaOS event (CC fee waived)"
+                + _equip_suffix(sync_result),
                 detail={
                     "fields_updated": ["invoiceAmount", "invoiceStatus"],
+                    "values": {
+                        "invoiceAmount": calc.get("FINAL_INVOICE_AMOUNT"),
+                        "invoiceStatus": "draft",
+                    },
                     **_preserved_detail(sync_result),
                 },
             )

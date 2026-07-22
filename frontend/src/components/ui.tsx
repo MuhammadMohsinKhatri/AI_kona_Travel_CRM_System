@@ -39,6 +39,73 @@ export function Loading() {
   return <div className="loading">Loading…</div>;
 }
 
+const AUDIT_VALUE_LABELS: Record<string, string> = {
+  ccAmount: "Card",
+  taxPercent: "Tax rate",
+  tipAmount: "Tips",
+  giveback: "Giveback",
+  givebackPercentage: "Giveback %",
+  invoiceAmount: "Invoice amount",
+  invoiceStatus: "Invoice status",
+};
+
+function formatAuditValue(field: string, value: unknown): string {
+  if (typeof value === "number") {
+    if (field === "taxPercent") return (value * 100).toFixed(0) + "%";
+    if (field === "givebackPercentage") return value.toFixed(1) + "%";
+    return money(value);
+  }
+  return String(value);
+}
+
+/** Renders a CrmAuditEntry's structured `detail` — the financial values that
+ *  were actually synced to KonaOS (bolded), and confirmation of the
+ *  equipment/staff that were already assigned and left untouched (or a
+ *  clear warning if the event currently has none). Shared by the CRM
+ *  Activity page and the per-event "KonaOS activity" section on EventDetail
+ *  so both read this exactly the same way. Renders nothing for entries with
+ *  no structured detail (e.g. invoice created/deleted/skipped). */
+export function AuditDetail({ detail }: { detail: Record<string, unknown> | null | undefined }) {
+  if (!detail) return null;
+  const values = (detail.values as Record<string, unknown>) || {};
+  const valueEntries = Object.entries(values);
+  const hasEquip = "equipment_names" in detail;
+  const hasStaff = "staff_names" in detail;
+  const equipNames = (detail.equipment_names as string[]) || [];
+  const staffNames = (detail.staff_names as string[]) || [];
+
+  if (!valueEntries.length && !hasEquip && !hasStaff) return null;
+
+  return (
+    <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6 }}>
+      {valueEntries.length > 0 && (
+        <div>
+          {valueEntries.map(([k, v]) => (
+            <span key={k} style={{ marginRight: 12 }}>
+              {AUDIT_VALUE_LABELS[k] || k}: <strong>{formatAuditValue(k, v)}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+      {(hasEquip || hasStaff) && (
+        <div className="muted">
+          {hasEquip && (
+            equipNames.length > 0
+              ? <>Equipment: <strong>{equipNames.join(", ")}</strong></>
+              : <span style={{ color: "var(--warn)" }}>⚠ No equipment currently assigned</span>
+          )}
+          {hasEquip && hasStaff && " · "}
+          {hasStaff && (
+            staffNames.length > 0
+              ? <>Staff: <strong>{staffNames.join(", ")}</strong></>
+              : <span style={{ color: "var(--warn)" }}>⚠ No staff currently assigned</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Live phase list for a pipeline run — shared by the Dashboard's run modal
  *  and the Runs page, so a run's progress can be re-attached to from /runs
  *  after the modal is closed or the page refreshed. */

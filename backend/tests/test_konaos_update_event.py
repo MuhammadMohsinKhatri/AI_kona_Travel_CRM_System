@@ -67,9 +67,13 @@ def test_update_event_never_sends_the_six_always_null_fields_with_real_assignmen
         assert field not in payload, f"{field} must be absent from the request body"
     # Financial kwargs still merge in as before.
     assert payload["ccAmount"] == 100.0
-    # Diagnostic counts reflect what existed pre-write (guaranteed untouched).
+    # Diagnostic counts + names reflect what existed pre-write (guaranteed
+    # untouched) — names so an admin can visually confirm the actual
+    # truck/kiosk/person, not just a number.
     assert result["_equipment_preserved"] == 1
+    assert result["_equipment_names"] == ["KEV1"]
     assert result["_staff_preserved"] == 1
+    assert result["_staff_names"] == ["Jane"]
 
 
 def test_update_event_never_sends_them_when_truly_unassigned_either():
@@ -80,7 +84,9 @@ def test_update_event_never_sends_them_when_truly_unassigned_either():
     for field in DROPPED_FIELDS:
         assert field not in payload
     assert result["_equipment_preserved"] == 0
+    assert result["_equipment_names"] == []
     assert result["_staff_preserved"] == 0
+    assert result["_staff_names"] == []
 
 
 def test_update_event_strips_even_an_explicit_kwargs_override():

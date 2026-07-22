@@ -1316,16 +1316,25 @@ class KonaosClient:
             )
         response.raise_for_status()
         result = response.json()
-        # Diagnostic counts so callers can log confirmation that nothing was
-        # silently emptied — prefixed with "_" per this codebase's convention
-        # for internal fields riding alongside a real API response. These are
-        # the pre-write counts, reported as "preserved" because this endpoint
-        # never touches assignment at all now (the six keys above are always
-        # dropped) — so whatever existed before this call is guaranteed to
-        # still be there after it.
+        # Diagnostic info so callers can show/confirm nothing was silently
+        # emptied — prefixed with "_" per this codebase's convention for
+        # internal fields riding alongside a real API response. This is the
+        # PRE-write equipment/staff, reported as "preserved" because this
+        # endpoint never touches assignment at all now (the six keys above
+        # are always dropped) — so whatever existed before this call is
+        # guaranteed to still be there after it. Names (not just counts) so
+        # an admin can visually confirm the actual truck/kiosk/person, not
+        # just a number.
         if isinstance(result, dict):
-            result["_equipment_preserved"] = len(existing_event.get("eventAssetsDtoList") or [])
-            result["_staff_preserved"] = len(existing_event.get("eventStaffsDtoList") or [])
+            assets = existing_event.get("eventAssetsDtoList") or []
+            staff = existing_event.get("eventStaffsDtoList") or []
+            result["_equipment_preserved"] = len(assets)
+            result["_equipment_names"] = [a.get("assetName") or a.get("assetId") for a in assets]
+            result["_staff_preserved"] = len(staff)
+            result["_staff_names"] = [
+                f"{s.get('firstName', '')} {s.get('lastName', '')}".strip() or s.get("userId")
+                for s in staff
+            ]
             result["_fields_updated"] = sorted(kwargs.keys())
         return result
 

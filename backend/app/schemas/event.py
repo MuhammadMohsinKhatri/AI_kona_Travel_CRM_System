@@ -52,6 +52,12 @@ class InvoiceOut(BaseModel):
     variance_amount: float
     payload: dict[str, Any]
     created_at: datetime
+    # Proxied from the related event (Invoice has no date/name of its own) —
+    # what the Invoices page filters and displays by.
+    event_date: Optional[str] = None
+    event_name: str = ""
+    event_code: Optional[str] = None
+    brand: str = ""
 
     model_config = {"from_attributes": True}
 

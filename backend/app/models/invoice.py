@@ -42,3 +42,23 @@ class Invoice(Base):
     )
 
     event = relationship("Event", back_populates="invoices")
+
+    # Convenience read-only proxies onto the related event — Invoice has no
+    # date/name columns of its own, and the Invoices page filters/displays by
+    # the underlying event's date, not by created_at (when our local record
+    # was last touched).
+    @property
+    def event_date(self) -> Optional[str]:
+        return self.event.event_date if self.event else None
+
+    @property
+    def event_name(self) -> str:
+        return self.event.event_name if self.event else ""
+
+    @property
+    def event_code(self) -> Optional[str]:
+        return self.event.event_code if self.event else None
+
+    @property
+    def brand(self) -> str:
+        return self.event.brand if self.event else ""

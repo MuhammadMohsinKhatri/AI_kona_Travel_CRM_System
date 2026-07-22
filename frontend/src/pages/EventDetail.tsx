@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api, CrmAuditEntry, EventDetail as Detail } from "../api/client";
-import { Badge, Loading, money } from "../components/ui";
+import { AuditDetail, Badge, Loading, money } from "../components/ui";
 
 const ACTION_LABELS: Record<string, string> = {
   invoice_created: "Invoice created",
@@ -206,6 +206,7 @@ export default function EventDetail() {
                     </span>
                   </div>
                   <div style={{ fontSize: 13, marginTop: 4 }}>{a.summary}</div>
+                  <AuditDetail detail={a.detail} />
                 </div>
               ))}
             </div>

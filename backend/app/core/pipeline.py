@@ -298,6 +298,9 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                                     + _equip_suffix(sync_result),
                                     detail={
                                         "fields_updated": ["invoiceAmount"],
+                                        "values": {
+                                            "invoiceAmount": item["calc"].get("FINAL_INVOICE_AMOUNT"),
+                                        },
                                         **_preserved_detail(sync_result),
                                     },
                                     run_id=run.id,
@@ -353,6 +356,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                             + _equip_suffix(sync_result),
                             detail={
                                 "fields_updated": sorted(k for k in financials if k != "EVENT_ID"),
+                                "values": {k: v for k, v in financials.items() if k != "EVENT_ID"},
                                 **_preserved_detail(sync_result),
                             },
                             run_id=run.id,
@@ -609,32 +613,36 @@ def _r2(v: float) -> float:
 
 
 def _equip_suffix(update_event_result: Any) -> str:
-    """Render the equipment/staff-preserved counts KonaosClient.update_event
-    stamps on its response (see _equipment_preserved/_staff_preserved), so
-    every run log line confirming a CRM write also confirms nothing on the
-    event was silently emptied. Blank for a client (e.g. mocks/tests) that
-    doesn't report these — never fabricate a count."""
+    """Render the equipment/staff KonaosClient.update_event confirms are
+    still assigned (see _equipment_names/_staff_names), so every run log
+    line confirming a CRM write also confirms nothing on the event was
+    silently emptied — by name, not just a count. Blank for a client (e.g.
+    mocks/tests) that doesn't report these — never fabricate a value."""
     if not isinstance(update_event_result, dict):
         return ""
-    equip = update_event_result.get("_equipment_preserved")
-    staff = update_event_result.get("_staff_preserved")
+    equip = update_event_result.get("_equipment_names")
+    staff = update_event_result.get("_staff_names")
     if equip is None and staff is None:
         return ""
-    return f" · equipment preserved: {equip}, staff preserved: {staff}"
+    equip_str = ", ".join(equip) if equip else "none assigned"
+    staff_str = ", ".join(staff) if staff else "none assigned"
+    return f" · equipment: {equip_str} · staff: {staff_str}"
 
 
 def _preserved_detail(update_event_result: Any) -> dict[str, Any]:
     """Structured counterpart to _equip_suffix, for CrmAuditEntry.detail
     (JSON) rather than a log-line string. Omits the keys entirely when the
     CRM client doesn't report them, so the UI can distinguish "confirmed
-    preserved" from "unknown" instead of showing a fabricated 0."""
+    preserved" from "unknown" instead of showing a fabricated empty state."""
     if not isinstance(update_event_result, dict):
         return {}
     out: dict[str, Any] = {}
     if update_event_result.get("_equipment_preserved") is not None:
         out["equipment_preserved"] = update_event_result["_equipment_preserved"]
+        out["equipment_names"] = update_event_result.get("_equipment_names") or []
     if update_event_result.get("_staff_preserved") is not None:
         out["staff_preserved"] = update_event_result["_staff_preserved"]
+        out["staff_names"] = update_event_result.get("_staff_names") or []
     return out
 
 

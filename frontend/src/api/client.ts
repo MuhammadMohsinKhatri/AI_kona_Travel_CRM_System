@@ -92,6 +92,7 @@ export const api = {
     request<EventDetail>(`/api/events/${id}/waive-cc-fee`, { method: "POST" }),
   invoices: (params: Record<string, string> = {}) =>
     request<Page<Invoice>>("/api/invoices?" + new URLSearchParams(params)),
+  invoiceMonths: () => request<string[]>("/api/invoices/months"),
   deleteInvoice: (id: number) =>
     request<void>(`/api/invoices/${id}`, { method: "DELETE" }),
   alerts: (params: Record<string, string> = {}) =>
@@ -377,6 +378,10 @@ export interface Invoice {
   variance_amount: number;
   payload: Record<string, unknown>;
   created_at: string;
+  event_date: string | null;
+  event_name: string;
+  event_code: string | null;
+  brand: string;
 }
 export interface EventDetail extends EventSummary {
   error: string | null;

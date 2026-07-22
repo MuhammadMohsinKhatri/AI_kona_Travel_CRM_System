@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CrmAuditResponse } from "../api/client";
-import { Badge, Empty, Loading } from "../components/ui";
+import { AuditDetail, Badge, Empty, Loading } from "../components/ui";
 
 const ACTION_LABELS: Record<string, string> = {
   invoice_created: "Invoice created",
@@ -139,9 +139,10 @@ export default function CrmAudit() {
                   <td><Badge kind={e.action}>{ACTION_LABELS[e.action] || e.action}</Badge></td>
                   <td
                     title={JSON.stringify(e.detail, null, 2)}
-                    style={{ whiteSpace: "normal", minWidth: 280, maxWidth: 420, fontSize: 13 }}
+                    style={{ whiteSpace: "normal", minWidth: 280, maxWidth: 460, fontSize: 13 }}
                   >
                     {e.summary}
+                    <AuditDetail detail={e.detail} />
                   </td>
                 </tr>
               ))}
