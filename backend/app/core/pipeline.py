@@ -509,21 +509,28 @@ def _replace_draft(
     db: Session, crm, event: Event, payload: dict[str, Any], cleaned: dict[str, Any],
     note: Callable[[str], None] = lambda msg: None, run_id: Optional[int] = None,
 ) -> str:
-    """Replace this event's DRAFT invoice with a fresh one.
+    """Create this event's invoice, unless it already has one.
 
-    Returns "created", or "skipped — …" when the event already has an invoice
-    in any non-draft state. Sent/paid/partially-paid invoices must never be
-    deleted or recreated (KonaOS refuses the delete with a 400 anyway, which
-    used to error the whole event) — and unknown statuses are treated as
-    protected too, mirroring the n8n fail-safe: only an explicit draft is
-    safe to replace.
+    MAXIMALLY CONSERVATIVE as of the 2026-07-21 incident: two invoices that
+    KonaOS confirmed as genuinely "sent"/"paid" (00671, 00675) vanished after
+    a pipeline re-run, meaning the previous "only replace a literal 'draft'
+    status" rule was not a reliable enough guard — the exact mechanism is
+    still unconfirmed. Until that's root-caused, ANY invoice matching this
+    event (by eventId or invoiceNumber) — including one whose status parses
+    as "draft" — is left completely untouched: never deleted, never
+    replaced. Only when ZERO invoices match does this create a new one.
+    This intentionally also disables the "waive CC fee → replace the draft"
+    auto-replacement (that route shares this function): a match now always
+    means "skip, flag for manual review" instead of "inspect status and
+    maybe delete." Revisit once the invoice-matching bug is confirmed fixed.
+
+    Returns "created", or "skipped — …" when a match exists.
 
     Every decision is written to the run log via ``note`` (which invoices
-    matched, their status, which draft(s) got deleted, the new invoice's
-    KonaOS id) AND to the structured CrmAuditEntry table via ``_audit``, so a
-    run can be audited after the fact from either the raw log or the
-    filterable CRM Activity page — this is what a client dispute over "where
-    did my invoice go" gets checked against.
+    matched, their status) AND to the structured CrmAuditEntry table via
+    ``_audit``, so a run can be audited after the fact from either the raw
+    log or the filterable CRM Activity page — this is what a client dispute
+    over "where did my invoice go" gets checked against.
     """
     eid = event.crm_event_id
     existing = crm.list_invoices()
@@ -536,30 +543,21 @@ def _replace_draft(
          f"list, {len(matches)} matching this event (by eventId or invoiceNumber "
          f"'{event_code}')")
 
-    for inv in matches:
-        status = str(inv.get("invoiceStatus") or inv.get("status") or "").strip().lower()
-        inv_ref = inv.get("invoiceNumber") or inv.get("invoiceId") or inv.get("id") or "?"
-        if status != "draft":
-            note(f"[{eid}] existing invoice {inv_ref} is '{status or 'unknown'}' "
-                 "— PROTECTED, not deleted or replaced")
-            _audit(
-                db, event, "invoice_skipped",
-                f"Existing invoice {inv_ref} is '{status or 'unknown'}' — protected, not replaced",
-                detail={"invoice_ref": inv_ref, "status": status or "unknown"},
-                run_id=run_id,
-            )
-            return f"skipped — existing invoice is '{status or 'unknown'}' (protected, not replaced)"
-
-    for inv in matches:  # all drafts at this point
-        inv_id = inv.get("invoiceId") or inv.get("id")
-        inv_ref = inv.get("invoiceNumber") or inv_id or "?"
-        if inv_id:
-            note(f"[{eid}] deleting existing DRAFT invoice {inv_ref} (KonaOS id {inv_id})")
-            crm.delete_invoice(str(inv_id))
-            _audit(
-                db, event, "invoice_deleted", f"Deleted draft invoice {inv_ref}",
-                detail={"invoice_ref": inv_ref, "invoice_id": str(inv_id)}, run_id=run_id,
-            )
+    if matches:
+        refs = []
+        for inv in matches:
+            status = str(inv.get("invoiceStatus") or inv.get("status") or "").strip().lower()
+            inv_ref = inv.get("invoiceNumber") or inv.get("invoiceId") or inv.get("id") or "?"
+            refs.append(f"{inv_ref} ({status or 'unknown'})")
+        summary = f"existing invoice(s) {', '.join(refs)} — PROTECTED, not deleted or replaced"
+        note(f"[{eid}] {summary}")
+        _audit(
+            db, event, "invoice_skipped",
+            f"Existing invoice(s) found: {', '.join(refs)} — protected, not replaced "
+            "(conservative hold pending invoice-matching bug fix)",
+            detail={"matches": refs}, run_id=run_id,
+        )
+        return f"skipped — {summary}"
 
     resp = crm.create_invoice(payload)
     new_id = str(resp.get("invoiceId") or resp.get("id") or "")

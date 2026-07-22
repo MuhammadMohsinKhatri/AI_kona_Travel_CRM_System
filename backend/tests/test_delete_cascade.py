@@ -181,10 +181,12 @@ class _FakeCRM:
         return {"invoiceId": "NEW-1"}
 
 
-def test_replace_draft_protects_non_draft_invoices(db):
-    """Paid/sent/unknown-status invoices are never deleted or recreated —
-    only an explicit draft is replaced (KonaOS 400s on deleting paid ones,
-    which used to error the whole event)."""
+def test_replace_draft_protects_any_matching_invoice(db):
+    """MAXIMALLY CONSERVATIVE as of the 2026-07-21 incident: any invoice
+    matching the event — including one whose status parses as 'draft' — is
+    left untouched. Two invoices KonaOS confirmed as genuinely sent/paid
+    vanished after a pipeline re-run, so trusting the parsed status alone is
+    no longer good enough; only a true zero-match event gets a new invoice."""
     from app.core.pipeline import _replace_draft
 
     e = Event(crm_event_id="INV-EVT-1", event_name="T", status="processed")
@@ -203,10 +205,16 @@ def test_replace_draft_protects_non_draft_invoices(db):
     assert _replace_draft(db, crm, e, payload, {}).startswith("skipped")
     assert crm.deleted == []
 
-    # Draft → replaced: old deleted, new created.
+    # Draft status → ALSO skipped now (not replaced) — nothing is ever
+    # deleted by this function until the matching bug is confirmed fixed.
     crm = _FakeCRM([{"eventId": "INV-EVT-1", "invoiceId": "OLD-3", "invoiceStatus": "draft"}])
+    assert _replace_draft(db, crm, e, payload, {}).startswith("skipped")
+    assert crm.deleted == [] and crm.created == []
+
+    # No match at all → the only case that creates a new invoice.
+    crm = _FakeCRM([])
     assert _replace_draft(db, crm, e, payload, {}) == "created"
-    assert crm.deleted == ["OLD-3"] and len(crm.created) == 1
+    assert crm.deleted == [] and len(crm.created) == 1
 
 
 def test_konaos_json_body_never_contains_nan():
