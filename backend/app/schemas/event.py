@@ -19,6 +19,9 @@ class EventSummary(BaseModel):
     final_invoice_amount: float
     status: str
     status_reason: str = ""
+    # Populated for status="error" — the actual failure text, so an errored
+    # event is diagnosable from the list without opening its detail page.
+    error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -63,7 +66,6 @@ class InvoiceOut(BaseModel):
 
 
 class EventDetail(EventSummary):
-    error: Optional[str] = None
     raw: dict[str, Any]
     cleaned: dict[str, Any]
     classification: dict[str, Any]

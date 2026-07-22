@@ -88,11 +88,11 @@ export default function CrmAudit() {
         <label className="muted" htmlFor="audit-date-from" style={{ fontSize: 12 }}>From</label>
         <input id="audit-date-from" className="input" type="date" value={fromDate} style={{ width: 150 }}
           onChange={(e) => updateParams({ from_date: e.target.value || undefined, to_date: e.target.value || undefined })}
-          title="Rows on or after this date (inclusive)" />
+          title="Events dated on or after this date (inclusive) — the event's own date, not when the write happened" />
         <label className="muted" htmlFor="audit-date-to" style={{ fontSize: 12 }}>To</label>
         <input id="audit-date-to" className="input" type="date" value={toDate} style={{ width: 150 }}
           onChange={(e) => updateParams({ to_date: e.target.value || undefined })}
-          title="Rows on or before this date (inclusive)" />
+          title="Events dated on or before this date (inclusive) — the event's own date, not when the write happened" />
         <input className="input" placeholder="Search event / CRM id / summary…" value={searchInput}
           style={{ width: 220 }} onChange={(e) => setSearchInput(e.target.value)} />
         {hasFilters && (
@@ -114,10 +114,11 @@ export default function CrmAudit() {
           <table>
             <thead>
               <tr>
-                <th>Time</th>
+                <th>Event Date</th>
                 <th>Event</th>
                 <th>Action</th>
                 <th>Summary</th>
+                <th>Written</th>
               </tr>
             </thead>
             <tbody>
@@ -129,9 +130,7 @@ export default function CrmAudit() {
                   })}
                   style={{ cursor: e.event_id ? "pointer" : "default" }}
                 >
-                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                    {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
-                  </td>
+                  <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{e.event_date || "—"}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{e.event_name || e.crm_event_id || "—"}</div>
                     <div className="muted" style={{ fontSize: 12 }}>{e.crm_event_id}</div>
@@ -143,6 +142,9 @@ export default function CrmAudit() {
                   >
                     {e.summary}
                     <AuditDetail detail={e.detail} />
+                  </td>
+                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                    {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
                   </td>
                 </tr>
               ))}

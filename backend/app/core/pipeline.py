@@ -504,7 +504,7 @@ def _audit(
 
     db.add(CrmAuditEntry(
         event_id=event.id, crm_event_id=event.crm_event_id,
-        event_name=event.event_name, run_id=run_id,
+        event_name=event.event_name, event_date=event.event_date, run_id=run_id,
         action=action, summary=summary, detail=detail or {},
     ))
 

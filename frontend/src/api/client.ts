@@ -203,6 +203,7 @@ export interface CrmAuditEntry {
   event_id: number | null;
   crm_event_id: string;
   event_name: string;
+  event_date: string | null;
   run_id: number | null;
   // event_updated | invoice_created | invoice_deleted | invoice_skipped
   action: string;
@@ -356,6 +357,7 @@ export interface EventSummary {
   final_invoice_amount: number;
   status: string;
   status_reason: string;
+  error: string | null;
   created_at: string;
   updated_at: string;
 }

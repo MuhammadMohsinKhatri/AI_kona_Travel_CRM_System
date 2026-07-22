@@ -135,6 +135,17 @@ export default function Events() {
                         {e.status_reason}
                       </div>
                     )}
+                    {/* Errored events carry the actual failure text here, not
+                        status_reason (that's only set for skips) — shown
+                        inline so "what broke" doesn't need a click-through. */}
+                    {e.status === "error" && e.error && (
+                      <div
+                        title={e.error}
+                        style={{ fontSize: 11.5, marginTop: 2, color: "var(--crit)", maxWidth: 260 }}
+                      >
+                        {e.error.length > 100 ? e.error.slice(0, 100) + "…" : e.error}
+                      </div>
+                    )}
                   </td>
                   <td className="right">{money(e.final_invoice_amount)}</td>
                   <td className="actions">

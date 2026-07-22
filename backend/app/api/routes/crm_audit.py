@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -23,6 +22,12 @@ def _filtered(
     from_date: Optional[str],
     to_date: Optional[str],
 ):
+    """Date filters are by the EVENT's own date (matching Financials/
+    Invoices/Events) — NOT by created_at (when this audit row was written).
+    A pipeline run often processes events dated days or weeks before the run
+    itself executes, so filtering by created_at would silently show nothing
+    for the date you actually care about. event_date is a plain
+    YYYY-MM-DD string, so lexicographic comparison is correct."""
     q = db.query(CrmAuditEntry)
     if event_id:
         q = q.filter(CrmAuditEntry.event_id == event_id)
@@ -40,17 +45,9 @@ def _filtered(
             )
         )
     if from_date:
-        try:
-            q = q.filter(CrmAuditEntry.created_at >= datetime.fromisoformat(from_date))
-        except ValueError:
-            pass
+        q = q.filter(CrmAuditEntry.event_date >= from_date)
     if to_date:
-        try:
-            # Inclusive of the whole "to" day.
-            end = datetime.fromisoformat(to_date) + timedelta(days=1)
-            q = q.filter(CrmAuditEntry.created_at < end)
-        except ValueError:
-            pass
+        q = q.filter(CrmAuditEntry.event_date <= to_date)
     return q.order_by(CrmAuditEntry.created_at.desc())
 
 
@@ -60,6 +57,7 @@ def _row(e: CrmAuditEntry) -> dict:
         "event_id": e.event_id,
         "crm_event_id": e.crm_event_id,
         "event_name": e.event_name,
+        "event_date": e.event_date,
         "run_id": e.run_id,
         "action": e.action,
         "summary": e.summary,

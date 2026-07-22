@@ -27,6 +27,13 @@ class CrmAuditEntry(Base):
     event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     crm_event_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     event_name: Mapped[str] = mapped_column(String(512), default="")
+    # Denormalized from the event at write time — filtering/display uses
+    # THIS date (matching Financials/Invoices/Events convention: "date" means
+    # the event's own date), not created_at. A run can process an event dated
+    # days or weeks earlier than the moment it actually runs, so the two are
+    # often different — created_at is kept separately as "when did this
+    # write happen," a distinct and equally useful question.
+    event_date: Mapped[Optional[str]] = mapped_column(String(32), index=True)
     run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
     # event_updated | invoice_created | invoice_deleted | invoice_skipped
