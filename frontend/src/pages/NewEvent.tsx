@@ -306,7 +306,7 @@ export default function NewEvent() {
           </p>
         )}
         <p className="muted" style={{ fontSize: 13 }}>
-          It will be picked up by the nightly pipeline, or run it now from the{" "}
+          The nightly automation will pick it up, or you can process it now from the{" "}
           <Link to="/">Dashboard</Link> with {f.date} selected.
         </p>
         <div className="flex">
@@ -337,8 +337,9 @@ export default function NewEvent() {
       <p className="muted"><Link to="/events">← Events</Link></p>
       <h1 className="page-title">New Event</h1>
       <p className="page-sub">
-        Creates the event directly in Kona OS — one entry, no double work. Pick the billing
-        model from the predefined list; the right panel shows the exact notes the AI reads.
+        Books the event straight into KonaOS — enter it once, nowhere else. Choose how it's being
+        charged from the list; the panel on the right shows the notes the system will read when
+        it prices the event.
       </p>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 380px", alignItems: "start", gap: 20 }}>

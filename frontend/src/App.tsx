@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
 import Events from "./pages/Events";
 import Financials from "./pages/Financials";
+import Guide from "./pages/Guide";
 import Invoices from "./pages/Invoices";
 import Login from "./pages/Login";
 import NewEvent from "./pages/NewEvent";
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/runs" element={<Runs />} />
         <Route path="/crm-activity" element={<CrmAudit />} />
         <Route path="/api-explorer" element={<ApiExplorer />} />
+        <Route path="/guide" element={<Guide />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

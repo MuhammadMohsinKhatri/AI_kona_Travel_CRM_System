@@ -76,7 +76,10 @@ export default function Events() {
       <div className="topbar">
         <div>
           <h1 className="page-title">Events</h1>
-          <p className="page-sub">Every event pulled from the CRM and processed by the pipeline.</p>
+          <p className="page-sub">
+            Every booking the system has picked up from KonaOS, and what it worked out for each
+            one. Click a row for the full breakdown.
+          </p>
         </div>
         <button className="btn primary" onClick={() => navigate("/events/new")}>＋ New event</button>
       </div>
@@ -138,7 +141,7 @@ export default function Events() {
       {!data ? (
         <Loading />
       ) : data.items.length === 0 ? (
-        <Empty text="No events. Run the pipeline from the Dashboard." />
+        <Empty text="No events yet. Pick a date on the Dashboard and press Run." />
       ) : (
         <div className="table-wrap">
           <table>
@@ -198,7 +201,7 @@ export default function Events() {
                       className="btn"
                       style={{ marginRight: 6 }}
                       disabled={running !== null}
-                      title="Run the pipeline for just this event (fetches it fresh from KonaOS)"
+                      title="Re-process just this event (pulls a fresh copy from KonaOS)"
                       onClick={(ev) => { ev.stopPropagation(); runEvent(e); }}
                     >
                       {running === e.id ? <span className="spinner sm" /> : "▶ Run"}

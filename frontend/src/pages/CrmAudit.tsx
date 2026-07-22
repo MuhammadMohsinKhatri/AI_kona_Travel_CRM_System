@@ -3,12 +3,14 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CrmAuditResponse } from "../api/client";
 import { AuditDetail, Badge, Empty, Loading } from "../components/ui";
 
+/** Plain-language names for what the automation did. The backend keys stay
+ *  as-is — this is display only. */
 const ACTION_LABELS: Record<string, string> = {
-  invoice_created: "Invoice created",
-  invoice_deleted: "Invoice deleted",
-  invoice_skipped: "Invoice skipped",
-  event_updated: "Event updated",
-  error: "Error",
+  invoice_created: "Created an invoice",
+  invoice_deleted: "Removed an invoice",
+  invoice_skipped: "No invoice needed",
+  event_updated: "Updated the event",
+  error: "Failed",
 };
 
 /** Structured, filterable record of every write our system has made to
@@ -71,56 +73,56 @@ export default function CrmAudit() {
 
   return (
     <>
-      <h1 className="page-title">CRM Activity</h1>
+      <h1 className="page-title">KonaOS Change Log</h1>
       <p className="page-sub">
-        Every write our system has made to KonaOS — event field updates and invoice
-        created/deleted/skipped decisions — plus any <strong>errors</strong> where a write
-        failed and why. This is the audit trail for "what did your system change (or try
-        to change), and when." Filter to <em>Error</em> to see just the failures.
+        Everything the automation has changed in KonaOS — figures written onto an event,
+        invoices created or removed — with the date and time it happened. Anything that
+        <strong> failed</strong> is listed too, with the reason. Use this to answer
+        "did the system change this, and when?"
       </p>
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <select className="select" value={action}
           onChange={(e) => updateParams({ action: e.target.value || undefined })}>
-          <option value="">All actions</option>
+          <option value="">Everything</option>
           {(data?.actions ?? []).map((a) => (
             <option key={a} value={a}>{ACTION_LABELS[a] || a}</option>
           ))}
         </select>
-        <label className="muted" htmlFor="audit-date-from" style={{ fontSize: 12 }}>From</label>
-        <input id="audit-date-from" className="input" type="date" value={fromDate} style={{ width: 150 }}
+        <label className="field-label" htmlFor="audit-date-from">From</label>
+        <input id="audit-date-from" className="input" type="date" value={fromDate} style={{ width: 140 }}
           onChange={(e) => updateParams({ from_date: e.target.value || undefined, to_date: e.target.value || undefined })}
-          title="Events dated on or after this date (inclusive) — the event's own date, not when the write happened" />
-        <label className="muted" htmlFor="audit-date-to" style={{ fontSize: 12 }}>To</label>
-        <input id="audit-date-to" className="input" type="date" value={toDate} style={{ width: 150 }}
+          title="Events on or after this date — the event's own date, not the day the change was made" />
+        <label className="field-label" htmlFor="audit-date-to">To</label>
+        <input id="audit-date-to" className="input" type="date" value={toDate} style={{ width: 140 }}
           onChange={(e) => updateParams({ to_date: e.target.value || undefined })}
-          title="Events dated on or before this date (inclusive) — the event's own date, not when the write happened" />
-        <input className="input" placeholder="Search event / CRM id / summary…" value={searchInput}
+          title="Events on or before this date — the event's own date, not the day the change was made" />
+        <input className="input" placeholder="Search event name or KonaOS id…" value={searchInput}
           style={{ width: 220 }} onChange={(e) => setSearchInput(e.target.value)} />
         {hasFilters && (
-          <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear</button>
+          <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear filters</button>
         )}
-        {data && <span className="muted">{data.total} entries{data.total > data.items.length ? ` (showing latest ${data.items.length})` : ""}</span>}
+        {data && <span className="count">{data.total} changes{data.total > data.items.length ? ` (showing latest ${data.items.length})` : ""}</span>}
       </div>
 
       {error ? (
         <div className="card" style={{ borderColor: "var(--crit)" }}>
-          <strong>Couldn't load CRM activity:</strong> {error}
+          <strong>Couldn't load the change log:</strong> {error}
         </div>
       ) : !data ? (
         <Loading />
       ) : data.items.length === 0 ? (
-        <Empty text={hasFilters ? "No activity matches these filters." : "No CRM activity recorded yet."} />
+        <Empty text={hasFilters ? "No changes match these filters." : "The automation hasn't changed anything in KonaOS yet."} />
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Event Date</th>
+                <th>Event date</th>
                 <th>Event</th>
-                <th>Action</th>
-                <th>Summary</th>
-                <th>Written</th>
+                <th>What the automation did</th>
+                <th>What changed in KonaOS</th>
+                <th>When it happened</th>
               </tr>
             </thead>
             <tbody>
@@ -128,7 +130,7 @@ export default function CrmAudit() {
                 <tr
                   key={e.id}
                   onClick={() => e.event_id && navigate(`/events/${e.event_id}`, {
-                    state: { from: location.pathname + location.search, label: "CRM Activity" },
+                    state: { from: location.pathname + location.search, label: "KonaOS Change Log" },
                   })}
                   style={{
                     cursor: e.event_id ? "pointer" : "default",
@@ -185,7 +187,7 @@ function ErrorDiagnostic({ detail }: { detail: Record<string, unknown> | null | 
   return (
     <details style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
       <summary style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: 12 }}>
-        Show diagnostic (what we sent + KonaOS response)
+        Show technical detail (for your developer)
       </summary>
       {response !== undefined && (
         <>

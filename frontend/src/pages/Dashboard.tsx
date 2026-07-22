@@ -346,7 +346,7 @@ export default function Dashboard() {
             </span>
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            Most recent pipeline run — independent of the date selected above.
+            The most recent run, whichever date it covered — not affected by the date picked above.
           </div>
           <RunEventBreakdown
             runId={stats.last_run.id}
@@ -366,7 +366,7 @@ export default function Dashboard() {
           </div>
           {stats.last_run && !runningForDate && (
             <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-              Latest pipeline activity: run #{stats.last_run.id} ({stats.last_run.trigger}
+              Most recent activity: run #{stats.last_run.id} ({stats.last_run.trigger}
               {stats.last_run.target_date ? ` · for ${stats.last_run.target_date}` : " · all dates"})
               {" "}{stats.last_run.status}
               {stats.last_run.finished_at &&
@@ -399,7 +399,7 @@ export default function Dashboard() {
       <div className="grid cols-4" style={{ marginTop: 16 }}>
         <Stat small label="Needs review" value={stats.needs_review} />
         <Stat small label="Errored" value={stats.errored} />
-        <div className="card stat" title="Total OpenAI classifier spend across all pipeline runs — per-run breakdown on the Pipeline Runs tab">
+        <div className="card stat" title="What the AI has cost in total to read event notes — see the cost of each run on the Automation Runs page">
           <div className="label">AI cost (all runs)</div>
           <div className="value small" style={{ cursor: "pointer" }} onClick={() => navigate("/runs")}>
             ${stats.ai_usage.cost_usd.toFixed(2)}
@@ -413,7 +413,7 @@ export default function Dashboard() {
           <div className="value small">
             {stats.last_run ? (
               <span style={{ cursor: "pointer" }} onClick={() => navigate("/runs")}
-                title="Open Pipeline Runs">
+                title="Open Automation Runs">
                 #{stats.last_run.id} · {stats.last_run.status}
               </span>
             ) : (
@@ -498,18 +498,18 @@ function RunModal({
         {phase === "running" ? (
           <>
             <div className="spinner" />
-            <h2>Pipeline running…</h2>
+            <h2>Running…</h2>
             <p className="muted">
               {targetDate ? `Processing events for ${targetDate}` : "Processing all events"}
             </p>
             <StepList steps={result?.progress ?? []} />
             <div className="flex" style={{ justifyContent: "center", gap: 10, marginTop: 14 }}>
-              <button className="btn" onClick={onViewRun}>Watch in Pipeline Runs</button>
+              <button className="btn" onClick={onViewRun}>Watch in Automation Runs</button>
               <button className="btn primary" onClick={onBackground}>Continue in background</button>
             </div>
             <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              The pipeline runs on the server — closing this window doesn't stop it.
-              Follow it any time from the Pipeline Runs page.
+              This runs on the server — closing this window won't stop it. You can pick it back
+              up any time from the Automation Runs page.
             </p>
           </>
         ) : (

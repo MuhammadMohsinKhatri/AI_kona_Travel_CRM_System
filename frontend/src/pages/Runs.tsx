@@ -44,12 +44,12 @@ export default function Runs() {
 
   return (
     <>
-      <h1 className="page-title">Pipeline Runs</h1>
+      <h1 className="page-title">Automation Runs</h1>
       <p className="page-sub">
-        History of ingest → invoice executions. Runs execute in the background worker —
-        closing the Dashboard popup (or refreshing) never stops one. Click a running run
-        to watch its live progress; the nightly run fires at 11:30 PM New York time for
-        that day's events.
+        Every time the automation has run, and what it did each time. It runs by itself each
+        night at 11:30 PM New York time for that day's events. Runs carry on in the background —
+        closing the pop-up or refreshing the page never stops one. Click a run in progress to
+        watch it live.
       </p>
 
       {!data ? (

@@ -50,27 +50,65 @@ a:hover { text-decoration: underline; }
   position: sticky;
   top: 0;
   height: 100vh;
+  transition: width .16s ease, padding .16s ease;
 }
 /* The product name is long and the sidebar is 220px, so it wraps: align the
    dot to the FIRST line (not the centre of a 3-line block) and stop it being
    squashed by the flex row. */
-.brand { font-weight: 700; font-size: 15px; line-height: 1.3; margin-bottom: 18px; display: flex; gap: 8px; align-items: flex-start; }
+.brand { font-weight: 700; font-size: 15px; line-height: 1.3; margin-bottom: 10px; display: flex; gap: 8px; align-items: flex-start; }
 .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--brand); flex: none; margin-top: 4px; }
 .nav-link {
   padding: 9px 12px;
   border-radius: 8px;
   color: var(--text-dim);
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .nav-link:hover { background: var(--surface-2); text-decoration: none; }
 .nav-link.active { background: var(--brand); color: #fff; }
+.nav-icon { flex: none; width: 18px; text-align: center; font-size: 14px; line-height: 1; }
 .sidebar .spacer { flex: 1; }
+.sidebar-user { color: var(--text-dim); font-size: 12px; padding: 0 12px; margin-top: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sign-out { margin-top: 8px; display: flex; align-items: center; gap: 10px; justify-content: flex-start; }
+
+/* ── Collapsible sidebar ───────────────────────────────────────────────────
+   Collapsed, the sidebar becomes an icon rail: labels are hidden but every
+   control keeps its title= tooltip, so nothing becomes unreachable. The
+   toggle itself stays visible in both states (it is the only way back). */
+.sidebar-toggle {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-dim); border-radius: 8px;
+  padding: 7px 12px; margin-bottom: 10px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+}
+.sidebar-toggle:hover { background: var(--surface-2); color: var(--text); border-color: var(--brand); }
+.sidebar-toggle .chev { flex: none; width: 18px; text-align: center; font-size: 14px; line-height: 1; }
+
+.layout.collapsed .sidebar { width: 64px; padding-left: 10px; padding-right: 10px; }
+.layout.collapsed .nav-label,
+.layout.collapsed .brand-name,
+.layout.collapsed .sidebar-user { display: none; }
+.layout.collapsed .brand { justify-content: center; margin-bottom: 14px; }
+.layout.collapsed .brand .dot { width: 12px; height: 12px; margin-top: 0; }
+.layout.collapsed .nav-link,
+.layout.collapsed .sidebar-toggle,
+.layout.collapsed .sign-out { justify-content: center; padding-left: 8px; padding-right: 8px; gap: 0; }
+
 /* min-width: 0 matters: a flex child's default min-width is `auto`, so a wide
    table stretches the whole page sideways (hiding the sidebar behind a
    page-level scrollbar) instead of scrolling inside its own box. */
 .content { flex: 1; min-width: 0; padding: 26px 32px; max-width: 1200px; }
+/* Wide tables (the ledger, the change log) get the whole window — capping
+   them at 1200px is what forced most of the horizontal scrolling. */
+.content.wide { max-width: none; }
 .page-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
-.page-sub { color: var(--text-dim); margin: 0 0 22px; }
+.page-sub { color: var(--text-dim); margin: 0 0 22px; max-width: 900px; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
 
 /* Cards */
@@ -112,11 +150,26 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
 .sheet tbody tr:hover td { background: var(--surface-2); }
 
-/* Frozen header row */
-.sheet thead th { position: sticky; top: 0; z-index: 3; }
-.sheet thead th::after {  /* keeps a visible edge while rows scroll under */
-  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
-  border-bottom: 1px solid var(--border);
+/* Frozen header — two rows: a group band ("Card sales (Square)") over the
+   short per-column labels. Grouping is what makes the columns narrow enough
+   to read without scrolling three screens sideways: each label is one or two
+   words instead of "Square: Net Sales (Card)".
+   Row 2 sticks BELOW row 1, so its offset is row 1's height — both are fixed
+   here so the two stay locked together. */
+.sheet thead th { position: sticky; z-index: 3; }
+.sheet thead tr:first-child > th { top: 0; height: 22px; }
+.sheet thead tr:nth-child(2) > th { top: 22px; }
+/* Identity columns rowspan both header rows, so they anchor at the top. */
+.sheet thead tr:first-child > th.stick { top: 0; }
+
+/* The group band: quiet, uppercase, and clearly subordinate to the labels
+   under it — it names a block, it isn't a column of its own. */
+.sheet thead th.grp {
+  font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--brand-ink);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2));
+  text-align: center; border-bottom: 1px solid var(--border);
+  padding-top: 4px; padding-bottom: 4px;
 }
 
 /* Frozen identity columns.
@@ -131,11 +184,11 @@ tbody tr:last-child td { border-bottom: none; }
    data deserves the horizontal room. Long names/models ellipsize and the
    full text is on hover (title=). left offsets are cumulative widths. */
 .sheet .stick-1 { left: 0; }
-.sheet .stick-1 > .cell { width: 94px; }
-.sheet .stick-2 { left: 94px; }
-.sheet .stick-2 > .cell { width: 218px; }
-.sheet .stick-3 { left: 312px; }
-.sheet .stick-3 > .cell { width: 148px; }
+.sheet .stick-1 > .cell { width: 86px; }
+.sheet .stick-2 { left: 86px; }
+.sheet .stick-2 > .cell { width: 194px; }
+.sheet .stick-3 { left: 280px; }
+.sheet .stick-3 > .cell { width: 130px; }
 /* Shadow marks where the frozen block ends — only while scrolled right. */
 .sheet .stick-3::before {
   content: ""; position: absolute; top: 0; right: -6px; bottom: 0; width: 6px;
@@ -154,37 +207,38 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tfoot td.stick { z-index: 5; }
 /* Totals label spans the three frozen columns — pin the whole block. */
 .sheet tfoot td.stick-span { left: 0; }
-.sheet tfoot td.stick-span > .cell { width: 460px; }  /* 94 + 218 + 148 */
+.sheet tfoot td.stick-span > .cell { width: 410px; }  /* 86 + 194 + 130 */
 /* Numbers align on the decimal — makes columns scannable at a glance. */
 .sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
 
 /* ── Sheet visual language: ink + dim ink + ONE brand accent ──────────────
    Data stays in text colors; the brand blue appears only where the eye
    should land first (headers' underline, the totals row, key money). */
-.sheet thead th {
+.sheet thead tr:nth-child(2) > th, .sheet thead th.stick {
   font-weight: 700;
   color: var(--text);
   border-bottom: 2px solid var(--brand);
+  font-size: 11.5px;
 }
-/* Column-group separators: Square block (4), Cash (10), billing (13),
-   PAID? (21). Hairlines only in head+body — the footer has colSpans, so
-   nth-child would land the lines on the wrong columns there. */
-.sheet thead th:nth-child(4), .sheet tbody td:nth-child(4),
-.sheet thead th:nth-child(10), .sheet tbody td:nth-child(10),
-.sheet thead th:nth-child(13), .sheet tbody td:nth-child(13),
-.sheet thead th:nth-child(21), .sheet tbody td:nth-child(21) {
-  border-left: 1px solid var(--border);
-}
-/* Check / Invoice — the sheet's headline money column (index shifts if
-   columns are reordered; update alongside the header row). */
-.sheet tbody td:nth-child(13) { font-weight: 600; }
+/* Column-group separators. Marked with an explicit class rather than
+   nth-child so reordering a column can't silently move the lines onto the
+   wrong ones (and so the same class works in head, body, and footer). */
+.sheet .sep { border-left: 1px solid var(--border); }
+/* Check / Invoice — the sheet's headline money column. */
+.sheet tbody td.key { font-weight: 700; }
 /* Totals: the row the eye should find — brand-tinted, heavy top rule. */
 .sheet tfoot td {
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   border-top: 2px solid var(--brand);
   font-variant-numeric: tabular-nums;
 }
-.sheet tbody td { font-size: 13px; }
+/* The numbers are the point of this page — give them a touch more size and
+   weight than the surrounding chrome. */
+.sheet tbody td { font-size: 13.5px; }
+.sheet tbody td.right { font-weight: 500; }
+/* A zero isn't news; dim it so the eye lands on the columns that carry a
+   real amount. */
+.sheet tbody td.zero { color: var(--text-dim); font-weight: 400; }
 .sheet .muted { color: var(--text-dim); }
 
 /* Compact rows so ~10 fit in the viewport before scrolling (default cell
@@ -245,8 +299,34 @@ tbody tr:hover td.actions { background: var(--surface-2); }
   color: var(--text);
   font-size: 14px;
 }
-.toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+.toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
 .select { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+
+/* ── Filter bar: small text, high contrast ────────────────────────────────
+   Filters are chrome, not content — they shouldn't out-shout the table. So
+   they shrink, but go bold in full text colour (not muted grey) so they stay
+   easy to read and obviously clickable at the smaller size. */
+.toolbar .btn, .toolbar .select, .toolbar .input,
+.topbar .btn, .topbar .select {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 10px;
+  color: var(--text);
+}
+.toolbar .select, .toolbar .input { border-color: var(--border); }
+.toolbar .select:hover, .toolbar .input:hover, .toolbar .btn:hover { border-color: var(--brand); }
+.toolbar .select:focus, .toolbar .input:focus {
+  outline: none; border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+/* Field captions ("From", "To", "or custom range") — small, uppercase, and
+   spaced so the eye groups each caption with the control it labels. */
+.toolbar .field-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--text-dim);
+  margin-left: 4px;
+}
+.toolbar .count { font-size: 12.5px; font-weight: 600; color: var(--text-dim); margin-left: 2px; }
 
 /* Login */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; }
@@ -363,3 +443,34 @@ code.inline {
 .status { border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px; font-size: 13px; border: 1px solid; }
 .status.ok { background: rgba(22,163,74,.10); color: var(--ok); border-color: rgba(22,163,74,.3); }
 .status.bad { background: rgba(220,38,38,.08); color: var(--crit); border-color: rgba(220,38,38,.25); }
+
+/* ── Guide page ────────────────────────────────────────────────────────── */
+.guide-videos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-bottom: 8px; }
+@media (max-width: 1000px) { .guide-videos { grid-template-columns: 1fr; } }
+.video-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* 16:9 box — the iframe fills it, so the card never jumps as the embed loads. */
+.video-frame { position: relative; width: 100%; padding-top: 56.25%; background: var(--surface-2); }
+.video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.video-meta { padding: 12px 14px 14px; }
+.video-meta .n { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--brand-ink); }
+.video-meta h3 { margin: 4px 0 5px; font-size: 15px; }
+.video-meta p { margin: 0; font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+.guide-section { margin: 30px 0 12px; }
+.guide-section h2 { font-size: 17px; margin: 0 0 4px; }
+.guide-section p.lead { color: var(--text-dim); margin: 0; max-width: 900px; }
+
+.guide-pages { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (max-width: 1000px) { .guide-pages { grid-template-columns: 1fr; } }
+.guide-page-card { display: block; color: inherit; }
+.guide-page-card:hover { text-decoration: none; border-color: var(--brand); }
+.guide-page-card h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.guide-page-card p { margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: var(--text-dim); }
+.guide-page-card .use-when { font-size: 12.5px; color: var(--text); background: var(--surface-2); border-radius: 6px; padding: 7px 10px; }
+.guide-page-card .use-when b { color: var(--brand-ink); }
+
+/* Plain-language glossary */
+.glossary { display: grid; grid-template-columns: 200px 1fr; gap: 10px 18px; font-size: 13.5px; align-items: baseline; }
+@media (max-width: 700px) { .glossary { grid-template-columns: 1fr; gap: 2px 0; } }
+.glossary dt { font-weight: 700; }
+.glossary dd { margin: 0; color: var(--text-dim); line-height: 1.55; }

@@ -66,7 +66,10 @@ export default function Invoices() {
   return (
     <>
       <h1 className="page-title">Invoices</h1>
-      <p className="page-sub">Invoice drafts created in the CRM by the pipeline.</p>
+      <p className="page-sub">
+        Draft invoices the automation has created in KonaOS, ready to send. Events the customer
+        already paid for at the truck don't get one.
+      </p>
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
         <select className="select" value={month} onChange={(e) => pickMonth(e.target.value)} title="Month shortcut">

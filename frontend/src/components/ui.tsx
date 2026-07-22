@@ -156,7 +156,7 @@ export function Empty({ text }: { text: string }) {
 export function RunEventBreakdown({
   runId,
   from = "/runs",
-  fromLabel = "Pipeline Runs",
+  fromLabel = "Automation Runs",
   compact = false,
 }: {
   runId: number;
@@ -179,8 +179,8 @@ export function RunEventBreakdown({
   if (events.length === 0)
     return (
       <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
-        No events are attributed to this run — either nothing was fetched, or a later
-        run re-processed the same events and now owns them. Re-run this date to re-link them.
+        No events are linked to this run — either nothing was found, or a later run
+        re-processed the same events and now owns them. Re-run this date to re-link them.
       </p>
     );
 
@@ -200,19 +200,19 @@ export function RunEventBreakdown({
     <div style={{ marginTop: compact ? 4 : 16 }}>
       {!compact && (
         <div className="section-title" style={{ marginTop: 0 }}>
-          Summary — what happened to each event ({events.length})
+          What happened to each event ({events.length})
         </div>
       )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, margin: "4px 0 14px", fontSize: 14 }}>
-        <span><strong style={{ color: "var(--ok)" }}>{processed.length}</strong> processed</span>
+        <span><strong style={{ color: "var(--ok)" }}>{processed.length}</strong> done</span>
         <span><strong style={{ color: "var(--warn)" }}>{skipped.length}</strong> skipped</span>
-        <span><strong style={{ color: "var(--crit)" }}>{errored.length}</strong> errored</span>
+        <span><strong style={{ color: "var(--crit)" }}>{errored.length}</strong> failed</span>
       </div>
 
       {errored.length > 0 && (
-        <GroupSection color="var(--crit)" title={`Errored (${errored.length})`}
-          hint="Something failed for these events — the reason is shown in red.">
+        <GroupSection color="var(--crit)" title={`Failed (${errored.length})`}
+          hint="Something went wrong on these — the reason is shown in red.">
           {errored.map((e) => (
             <div key={e.id} className="run-ev" onClick={() => open(e)}>
               <div className="run-ev-head">
@@ -231,7 +231,7 @@ export function RunEventBreakdown({
 
       {skipped.length > 0 && (
         <GroupSection color="var(--warn)" title={`Skipped (${skipped.length})`}
-          hint="Filtered out before processing — never invoiced or synced.">
+          hint="Left alone on purpose — never invoiced or changed in KonaOS.">
           {skipped.map((e) => (
             <div key={e.id} className="run-ev" onClick={() => open(e)}>
               <div className="run-ev-head">
@@ -247,8 +247,8 @@ export function RunEventBreakdown({
       )}
 
       {processed.length > 0 && (
-        <GroupSection color="var(--ok)" title={`Processed (${processed.length})`}
-          hint="Went all the way through. Event type + billing model shown.">
+        <GroupSection color="var(--ok)" title={`Done (${processed.length})`}
+          hint="Went all the way through. Event type and how it was charged are shown.">
           {processed.map((e) => (
             <div key={e.id} className="run-ev" onClick={() => open(e)}>
               <div className="run-ev-head">

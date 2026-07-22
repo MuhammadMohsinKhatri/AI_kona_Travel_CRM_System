@@ -27,8 +27,11 @@ export default function Alerts() {
 
   return (
     <>
-      <h1 className="page-title">Alerts</h1>
-      <p className="page-sub">Financial issues flagged by the pipeline that need human review.</p>
+      <h1 className="page-title">Needs Attention</h1>
+      <p className="page-sub">
+        Money problems the automation spotted and wants a person to look at — a total that
+        doesn't match Square, a missing deposit, an unusually large discount.
+      </p>
 
       <div className="toolbar">
         <select className="select" value={severity} onChange={(e) => setSeverity(e.target.value)}>

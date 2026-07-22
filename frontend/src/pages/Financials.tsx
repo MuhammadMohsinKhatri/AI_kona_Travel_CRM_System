@@ -122,10 +122,10 @@ export default function Financials() {
     if (importing) return;
     const brandLabel = importSource === "tom" ? "Travelin' Tom" : "Kona Ice";
     if (!window.confirm(
-      `Import the ${brandLabel} financial Google Sheet into the ledger?\n\n` +
+      `Bring the old ${brandLabel} Google Sheet into this page?\n\n` +
       "• Events not yet in the system get a placeholder record.\n" +
-      "• Rows the pipeline already produced are left untouched.\n" +
-      "• Safe to run repeatedly — it refreshes rows it previously imported."
+      "• Rows the automation already produced are left untouched.\n" +
+      "• Safe to run more than once — it just refreshes what it imported before."
     )) return;
     setImporting(true);
     setImportMsg("");
@@ -133,7 +133,7 @@ export default function Financials() {
       const r = await api.importFinancialsSheet(importSource);
       setImportMsg(
         `Imported ${r.label} — ${r.created} new, ${r.updated} refreshed, ` +
-        `${r.skipped_protected} left untouched (pipeline-owned), ` +
+        `${r.skipped_protected} left untouched (produced by the automation), ` +
         `${r.placeholders_created} placeholder event(s) created.`
       );
       // New months / rows may have appeared — refresh both.
@@ -166,9 +166,8 @@ export default function Financials() {
         <div>
           <h1 className="page-title">Financials</h1>
           <p className="page-sub">
-            The financial ledger — one row per event, updated on every pipeline run. Stored in
-            PostgreSQL (replaces the monthly Google Sheet). All 46 sheet columns are saved; the
-            key ones are shown here, the full set is in the CSV export.
+            Every event and what it was worth — one row each. Use the filters to pick a date
+            range or a brand, and download whatever you're looking at as a spreadsheet.
           </p>
         </div>
         <div className="flex" style={{ gap: 8 }}>
@@ -179,11 +178,12 @@ export default function Financials() {
             <option value="tom">Travelin' Tom</option>
           </select>
           <button className="btn" onClick={importSheet} disabled={importing}
-            title="Import the selected brand's financial Google Sheet into the ledger (repeatable; won't overwrite pipeline rows)">
-            {importing ? "⏳ Importing…" : "⬆ Import from Google Sheet"}
+            title="Bring the selected brand's old Google Sheet into this page. Safe to repeat — it never overwrites rows the automation produced.">
+            {importing ? "⏳ Importing…" : "⬆ Import old sheet"}
           </button>
-          <button className="btn" onClick={downloadCsv} disabled={!data || data.total === 0}>
-            ⬇ Download CSV (all 46 columns)
+          <button className="btn primary" onClick={downloadCsv} disabled={!data || data.total === 0}
+            title="Download what you're currently looking at, with all 46 columns">
+            ⬇ Download spreadsheet
           </button>
         </div>
       </div>
@@ -208,19 +208,19 @@ export default function Financials() {
           <option value="">All months</option>
           {months.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <span className="muted" style={{ fontSize: 12 }}>or custom range:</span>
-        <label className="muted" htmlFor="fin-date-from" style={{ fontSize: 12 }}>From</label>
-        <input id="fin-date-from" className="input" type="date" value={fromDate} style={{ width: 150 }}
-          onChange={(e) => pickRange({ from: e.target.value })} title="Rows on or after this date (inclusive)" />
-        <label className="muted" htmlFor="fin-date-to" style={{ fontSize: 12 }}>To</label>
-        <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 150 }}
-          onChange={(e) => pickRange({ to: e.target.value })} title="Rows on or before this date (inclusive)" />
+        <span className="field-label">or dates</span>
+        <label className="field-label" htmlFor="fin-date-from">From</label>
+        <input id="fin-date-from" className="input" type="date" value={fromDate} style={{ width: 140 }}
+          onChange={(e) => pickRange({ from: e.target.value })} title="Events on or after this date" />
+        <label className="field-label" htmlFor="fin-date-to">To</label>
+        <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 140 }}
+          onChange={(e) => pickRange({ to: e.target.value })} title="Events on or before this date" />
         <select className="select" value={brand} onChange={(e) => updateParams({ brand: e.target.value || undefined })}>
           <option value="">All brands</option>
           {(data?.brands ?? []).map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
         <select className="select" value={eventType} onChange={(e) => updateParams({ event_type: e.target.value || undefined })}>
-          <option value="">All types</option>
+          <option value="">All event types</option>
           {(data?.event_types ?? []).map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <select className="select" value={paid} onChange={(e) => updateParams({ paid: e.target.value || undefined })}>
@@ -228,19 +228,19 @@ export default function Financials() {
           <option value="true">Paid only</option>
           <option value="false">Unpaid only</option>
         </select>
-        <input className="input" placeholder="Search event / code…" value={searchInput}
+        <input className="input" placeholder="Search event name or code…" value={searchInput}
           style={{ width: 190 }} onChange={(e) => setSearchInput(e.target.value)} />
         {hasFilters && (
-          <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear</button>
+          <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear filters</button>
         )}
-        {data && <span className="muted">{data.total} entries</span>}
+        {data && <span className="count">{data.total} events</span>}
         {/* Bulk delete is date-scoped: wipe the selected day/month (plus any
             other active filters), then re-run the pipeline to rebuild clean
             rows. The backend rejects the call without a date scope. */}
         {(month || fromDate || toDate) && data && data.total > 0 && (
           <BulkDeleteButton
             count={data.total}
-            noun="ledger rows"
+            noun="rows"
             onDelete={async () => {
               await api.deleteFinancials(params);
               await reload();
@@ -251,10 +251,10 @@ export default function Financials() {
 
       {error ? (
         <div className="card" style={{ borderColor: "var(--crit)" }}>
-          <strong>Couldn't load the ledger:</strong> {error}
+          <strong>Couldn't load the financials:</strong> {error}
           <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-            Check that the backend is up (<code>docker compose ps</code>) and its logs
-            (<code>docker compose logs backend</code>).
+            The server didn't respond. Try refreshing — if it keeps happening, the system needs
+            a look from your developer.
           </div>
         </div>
       ) : !data ? (
@@ -263,49 +263,59 @@ export default function Financials() {
         <Empty
           text={
             hasFilters
-              ? "No ledger entries match these filters — clear them or widen the date range."
-              : "No ledger entries yet. Rows are written by pipeline runs: open the Dashboard, pick a date with events, and run the pipeline."
+              ? "No events match these filters — clear them or widen the date range."
+              : "Nothing here yet. Rows appear once the automation has run: open the Dashboard, pick a date that had events, and press Run."
           }
         />
       ) : (
         <>
           <div className="grid cols-4" style={{ marginBottom: 16 }}>
-            <Tot label="Invoiced" v={money(data.totals.invoice_total)} />
-            <Tot label="Subtotal" v={money(data.totals.subtotal)} />
-            <Tot label="Tax + CC fees" v={money(data.totals.sales_tax + data.totals.cc_fee)} />
-            <Tot label="Square sales" v={money(data.totals.square_sales)} />
+            <Tot label="Total invoiced" v={money(data.totals.invoice_total)} />
+            <Tot label="Before tax" v={money(data.totals.subtotal)} />
+            <Tot label="Tax + card fees" v={money(data.totals.sales_tax + data.totals.cc_fee)} />
+            <Tot label="Card sales (Square)" v={money(data.totals.square_sales)} />
           </div>
 
-          {/* Sheet-order columns: wide by design, so DATE/EVENT/EVENT TYPE are
-              frozen on the left and the header/totals rows are pinned. */}
+          {/* Columns are grouped under a header band so each label can be one
+              or two words — that, plus the full-width page, is what keeps this
+              readable without scrolling sideways for a screen and a half.
+              DATE / EVENT / TYPE stay frozen on the left, and the header and
+              totals rows are pinned, so a figure 15 columns over still tells
+              you which event it belongs to. */}
           <div className="table-wrap sheet">
             <table style={{ whiteSpace: "nowrap" }}>
               <thead>
                 <tr>
-                  <th className="stick stick-1"><div className="cell">DATE</div></th>
-                  <th className="stick stick-2"><div className="cell">EVENT</div></th>
-                  <th className="stick stick-3"><div className="cell">EVENT TYPE</div></th>
-                  <th className="right">Square: Gross Sales</th>
-                  <th className="right">Square: Discounts</th>
-                  <th className="right">Square: Net Sales (Card)</th>
-                  <th className="right">Square: Card Tax</th>
-                  <th className="right">Square: Tips (Card)</th>
-                  <th className="right">Square: CC Fee (4%)</th>
-                  <th className="right">Cash Collected</th>
-                  <th className="right">Cash Tax</th>
-                  <th className="right">Cash Pre-Tax</th>
-                  <th className="right">Check / Invoice</th>
-                  <th className="right">Deposit / Prepay</th>
-                  <th>Taxable?</th>
-                  <th className="right">Event Sales - Collected</th>
-                  <th className="right">Sales Tax Amount</th>
+                  <th className="stick stick-1" rowSpan={2}><div className="cell">Date</div></th>
+                  <th className="stick stick-2" rowSpan={2}><div className="cell">Event</div></th>
+                  <th className="stick stick-3" rowSpan={2}><div className="cell">Type &amp; billing</div></th>
+                  <th className="grp sep" colSpan={6}>Card sales (Square)</th>
+                  <th className="grp sep" colSpan={3}>Cash</th>
+                  <th className="grp sep" colSpan={2}>Invoiced / prepaid</th>
+                  <th className="grp sep" colSpan={7}>Event totals</th>
+                  <th className="sep" rowSpan={2}>Paid?</th>
+                  <th rowSpan={2}>Why this amount</th>
+                  <th className="actions" rowSpan={2}></th>
+                </tr>
+                <tr>
+                  <th className="right sep">Gross</th>
+                  <th className="right">Discounts</th>
+                  <th className="right">Net (card)</th>
+                  <th className="right">Card tax</th>
+                  <th className="right">Tips</th>
+                  <th className="right">Fee 4%</th>
+                  <th className="right sep">Collected</th>
+                  <th className="right">Tax</th>
+                  <th className="right">Before tax</th>
+                  <th className="right sep">Check / invoice</th>
+                  <th className="right">Deposit</th>
+                  <th className="sep">Taxable?</th>
+                  <th className="right">Collected</th>
+                  <th className="right">Sales tax</th>
                   <th className="right">Sales $</th>
-                  <th className="right">Giveback Amount</th>
-                  <th className="right">Net Event Sales</th>
-                  <th className="right">Location Fee</th>
-                  <th>PAID?</th>
-                  <th>Reasoning</th>
-                  <th className="actions"></th>
+                  <th className="right">Giveback</th>
+                  <th className="right">Net sales</th>
+                  <th className="right">Location fee</th>
                 </tr>
               </thead>
               <tbody>
@@ -332,35 +342,36 @@ export default function Financials() {
                         </div>
                       </div>
                     </td>
-                    <td className="right">{money(r.square_gross_sales)}</td>
-                    <td className="right">{money(r.square_discounts)}</td>
-                    <td className="right">{money(r.square_net_card)}</td>
-                    <td className="right">{money(r.square_card_tax)}</td>
-                    <td className="right">{money(r.square_tips_card)}</td>
-                    <td className="right">{money(r.square_cc_fee)}</td>
-                    <td className="right">{money(r.cash_collected)}</td>
-                    <td className="right">{money(r.cash_tax)}</td>
-                    <td className="right">{money(r.cash_pre_tax)}</td>
-                    <td className="right">{money(r.check_invoice)}</td>
-                    <td className="right">{money(r.deposit)}</td>
-                    <td>
+                    <Num v={r.square_gross_sales} sep />
+                    <Num v={r.square_discounts} />
+                    <Num v={r.square_net_card} />
+                    <Num v={r.square_card_tax} />
+                    <Num v={r.square_tips_card} />
+                    <Num v={r.square_cc_fee} />
+                    <Num v={r.cash_collected} sep />
+                    <Num v={r.cash_tax} />
+                    <Num v={r.cash_pre_tax} />
+                    <Num v={r.check_invoice} sep cls="key" />
+                    <Num v={r.deposit} />
+                    <td className="sep">
                       <Badge kind={r.taxable ? "gray" : "green"}>{r.taxable ? "Taxable" : "Exempt"}</Badge>
                     </td>
-                    <td className="right">{money(r.event_sales_collected)}</td>
-                    <td className="right">{money(r.sales_tax)}</td>
-                    <td className="right">{money(r.sales_dollars)}</td>
-                    <td className="right">{money(r.giveback_amount)}</td>
-                    <td className="right">{money(r.net_event_sales)}</td>
-                    <td className="right">{money(r.location_fee)}</td>
-                    <td>
+                    <Num v={r.event_sales_collected} />
+                    <Num v={r.sales_tax} />
+                    <Num v={r.sales_dollars} />
+                    <Num v={r.giveback_amount} />
+                    <Num v={r.net_event_sales} />
+                    <Num v={r.location_fee} />
+                    <td className="sep">
                       <Badge kind={r.paid ? "green" : "gray"}>
                         {r.paid ? `Paid${r.payment_method ? ` · ${r.payment_method}` : ""}` : "Unpaid"}
                       </Badge>
                     </td>
-                    {/* Classifier reasoning — full text on hover (it's long). */}
+                    {/* How the system arrived at this figure — full text on
+                        hover, since it runs long. */}
                     <td
                       title={r.note || ""}
-                      style={{ minWidth: 240, maxWidth: 320, fontSize: 12 }}
+                      style={{ minWidth: 200, maxWidth: 280, fontSize: 12 }}
                     >
                       <div className="clamp2">
                         {r.note ? (r.note.length > 120 ? r.note.slice(0, 120) + "…" : r.note) : "—"}
@@ -368,7 +379,7 @@ export default function Financials() {
                     </td>
                     <td className="actions">
                       <DeleteButton
-                        title="Delete this ledger row (the event is kept; re-run rebuilds it)"
+                        title="Remove this row (the event itself is kept — re-running the automation rebuilds it)"
                         onDelete={async () => { await api.deleteFinancialEntry(r.id); await reload(); }}
                       />
                     </td>
@@ -383,25 +394,25 @@ export default function Financials() {
                       <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
                     </div>
                   </td>
-                  <td className="right">{money(sum("square_gross_sales"))}</td>
+                  <td className="right sep">{money(sum("square_gross_sales"))}</td>
                   <td className="right">{money(sum("square_discounts"))}</td>
                   <td className="right">{money(sum("square_net_card"))}</td>
                   <td className="right">{money(sum("square_card_tax"))}</td>
                   <td className="right">{money(sum("square_tips_card"))}</td>
                   <td className="right">{money(sum("square_cc_fee"))}</td>
-                  <td className="right">{money(sum("cash_collected"))}</td>
+                  <td className="right sep">{money(sum("cash_collected"))}</td>
                   <td className="right">{money(sum("cash_tax"))}</td>
                   <td className="right">{money(sum("cash_pre_tax"))}</td>
-                  <td className="right">{money(sum("check_invoice"))}</td>
+                  <td className="right sep">{money(sum("check_invoice"))}</td>
                   <td className="right">{money(sum("deposit"))}</td>
-                  <td />
+                  <td className="sep" />
                   <td className="right">{money(sum("event_sales_collected"))}</td>
                   <td className="right">{money(sum("sales_tax"))}</td>
                   <td className="right">{money(sum("sales_dollars"))}</td>
                   <td className="right">{money(sum("giveback_amount"))}</td>
                   <td className="right">{money(sum("net_event_sales"))}</td>
                   <td className="right">{money(sum("location_fee"))}</td>
-                  <td />
+                  <td className="sep" />
                   <td />
                   <td />
                 </tr>
@@ -411,6 +422,18 @@ export default function Financials() {
         </>
       )}
     </>
+  );
+}
+
+/** A money cell. Zero and missing values are dimmed so the eye skips them and
+ *  lands on the columns that actually carry an amount — most rows only use a
+ *  handful of the 18 figures. `sep` marks the first column of a header group. */
+function Num({ v, sep, cls }: { v: number | null | undefined; sep?: boolean; cls?: string }) {
+  const empty = !v;
+  return (
+    <td className={["right", sep && "sep", cls, empty && "zero"].filter(Boolean).join(" ")}>
+      {money(v)}
+    </td>
   );
 }
 

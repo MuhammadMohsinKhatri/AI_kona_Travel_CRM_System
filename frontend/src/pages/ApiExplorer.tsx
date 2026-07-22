@@ -93,8 +93,8 @@ export default function ApiExplorer() {
     <>
       <h1 className="page-title">API Explorer</h1>
       <p className="page-sub">
-        Every endpoint this backend exposes — including the merged Kona OS CRM APIs — generated
-        live from the server's OpenAPI schema.
+        A technical page for developers: every connection this system offers to other software,
+        including the KonaOS ones. Nothing here is needed for day-to-day work.
       </p>
 
       <div className="card" style={{ marginBottom: 16 }}>
