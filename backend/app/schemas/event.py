@@ -35,6 +35,17 @@ class AlertOut(BaseModel):
     action: str
     resolved: bool
     created_at: datetime
+    # Which event this is about. Without it an alert is unactionable — "rate
+    # per serving is missing" means nothing if you can't tell whose.
+    # None for system-level alerts (e.g. an expired KonaOS session key).
+    event_id: Optional[int] = None
+    event_name: Optional[str] = None
+    crm_event_id: Optional[str] = None
+    event_date: Optional[str] = None
+    brand: Optional[str] = None
+    source: str = "financial"
+    notified: bool = False
+    notify_error: str = ""
 
     model_config = {"from_attributes": True}
 

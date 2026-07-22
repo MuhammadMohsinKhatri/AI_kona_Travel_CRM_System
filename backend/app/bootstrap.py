@@ -15,7 +15,37 @@ def init_db() -> None:
     # model change deploys cleanly without hand-run ALTERs (no Alembic set up).
     Base.metadata.create_all(bind=engine)
     _sync_columns()
+    _relax_nullable()
     seed_admin()
+
+
+# Columns that started life NOT NULL and later had to accept NULL. _sync_columns
+# only ADDs columns, so an existing table keeps the old constraint and every
+# insert of the new kind fails.
+#   alerts.event_id — a dead KonaOS session key is a real alert with no event
+#   attached, so the FK has to be optional.
+_NOW_NULLABLE: tuple[tuple[str, str], ...] = (("alerts", "event_id"),)
+
+
+def _relax_nullable() -> None:
+    """DROP NOT NULL where the model now allows NULL but the live table doesn't.
+
+    Postgres only. SQLite can't ALTER a constraint, but a dev SQLite file is
+    cheap to delete and rebuild, so it isn't worth the table-rebuild dance.
+    """
+    if engine.dialect.name == "sqlite":
+        return
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table, column in _NOW_NULLABLE:
+            if not inspector.has_table(table):
+                continue
+            for live in inspector.get_columns(table):
+                if live["name"] == column and not live.get("nullable", True):
+                    conn.execute(
+                        text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL")
+                    )
+                    print(f"[INFO] schema sync: {table}.{column} is now nullable")
 
 
 def _sync_columns() -> None:

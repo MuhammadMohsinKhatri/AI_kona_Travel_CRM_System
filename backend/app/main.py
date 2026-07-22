@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (alerts, auth, crm_audit, dashboard, events, financials,
-                            health, invoices, pipeline)
+                            health, invoices, pipeline, settings as settings_routes)
 from app.bootstrap import init_db
 from app.config import settings
 from app.konaos import router as konaos
@@ -45,6 +45,7 @@ app.include_router(alerts.router)
 app.include_router(pipeline.router)
 app.include_router(financials.router)
 app.include_router(crm_audit.router)
+app.include_router(settings_routes.router)
 # KonaOS CRM endpoints (direct client for api.konaos.com)
 app.include_router(konaos.router, prefix="/api/konaos", tags=["konaos"])
 

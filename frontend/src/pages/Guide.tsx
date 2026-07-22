@@ -81,7 +81,7 @@ const PAGES = [
   {
     to: "/financials",
     icon: "💰",
-    name: "Financials",
+    name: "Event Financials",
     what:
       "One row per event with every figure — card sales, cash, tax, fees, what was invoiced. " +
       "This is what used to live in the monthly Google Sheet, but you can filter it by date, " +

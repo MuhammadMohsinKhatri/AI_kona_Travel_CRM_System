@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.core import billing, event_cleaner, invoice_builder
+from app.core import billing, event_cleaner, invoice_builder, notify, overrides
 from app.core.alerts import check_alerts
 from app.core.equipment import map_equipment
 from app.integrations import factory
@@ -287,7 +287,20 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         for i, item in enumerate(list(items), 1):
             progress.counter("calculate", i, len(items))
             try:
-                calc = billing.calculate_invoice(item["classification"])
+                # Feed actual sales in so a min-guarantee event can be priced
+                # on the gap to its minimum rather than the whole minimum.
+                # Both sides are PRE-TAX: the minimum is a sales target, and
+                # tax isn't the truck's revenue, so it must not help clear it.
+                sq_bd = (item.get("square") or {}).get("breakdown") or {}
+                cash_known = _cash_override_for(db, item["crm_id"])
+                classification = {
+                    **item["classification"],
+                    "ACTUAL_CARD_SALES": _num(sq_bd.get("net_card")),
+                    "ACTUAL_CASH_PRE_TAX": cash_known if cash_known is not None else 0.0,
+                    "ACTUAL_SALES_KNOWN": cash_known is not None,
+                }
+                calc = billing.calculate_invoice(classification)
+                item["classification"] = classification
                 item["calc"] = calc
                 item["merged"] = {**item["classification"], "calculations": calc}
                 item["event"] = _upsert_event(
@@ -316,9 +329,32 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
             # error there must say "syncing", not "creating the invoice".
             phase_of_failure = "invoice"
             try:
-                payload = invoice_builder.build_invoice_payload(
-                    item["merged"], item["cleaned"], item["raw"]
-                )
+                # Min-guarantee events are held back until cash is counted.
+                # Their invoice IS the shortfall between actual sales and the
+                # guaranteed minimum, so drafting one now — with cash still
+                # unknown and therefore 0 — would bill the host the entire
+                # minimum for an event that may well have covered it.
+                if (
+                    overrides.is_min_guarantee(item["classification"].get("BILLING_MODEL"))
+                    and not item["classification"].get("ACTUAL_SALES_KNOWN")
+                ):
+                    note(f"[{item['crm_id']}] invoice deferred — min-guarantee event "
+                         f"awaiting cash; will settle once cash is posted")
+                    _audit(
+                        db, item["event"], "invoice_deferred",
+                        "Min-guarantee event — invoice held until cash is counted "
+                        "(the invoice is the gap between actual sales and the minimum)",
+                        detail={
+                            "billing_model": item["classification"].get("BILLING_MODEL"),
+                            "minimum_required": item["calc"].get("MINIMUM_REQUIRED"),
+                        },
+                        run_id=run.id,
+                    )
+                    payload = None
+                else:
+                    payload = invoice_builder.build_invoice_payload(
+                        item["merged"], item["cleaned"], item["raw"]
+                    )
                 if payload:
                     if dry_run:
                         # Compute + store locally, but write NOTHING to the CRM.
@@ -444,11 +480,18 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
             progress.counter("alerts", i, len(items))
             try:
                 alert_result = check_alerts(item["merged"])
-                _save_alerts(db, item["event"], alert_result["alerts"])
+                saved_alerts = _save_alerts(db, item["event"], alert_result["alerts"])
                 run.alerts_raised += len(alert_result["alerts"])
                 if alert_result["hasAlerts"]:
                     item["event"].status = "needs_review"
-                    notifier.send(alert_result["telegramMessage"])
+                    # One Telegram message per alert, each linking to its own
+                    # page — a single digest can't be acted on from a phone.
+                    # Best-effort by design: a Telegram outage must not fail a
+                    # run that computed its invoices correctly.
+                    for alert_row in saved_alerts:
+                        notify.notify_alert(
+                            db, alert_row, event_name=item["event"].event_name or ""
+                        )
                 db.commit()
             except Exception as exc:  # noqa: BLE001
                 drop_errored(items, item, exc, "alerts")
@@ -538,6 +581,23 @@ def _upsert_event(
 
     db.flush()
     return event
+
+
+def _cash_override_for(db: Session, crm_event_id: str) -> Optional[float]:
+    """Cash actually counted for this event, pre-tax, or None if not yet posted.
+
+    None and 0.0 mean very different things here: None is "nobody has counted
+    the till yet", 0.0 is "counted, and it was zero". A min-guarantee invoice
+    must not be settled on the first.
+    """
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None or overrides.get_override(entry, "cash_collected") is None:
+        return None
+    return entry.cash_pre_tax or 0.0
 
 
 def _store_local_invoice(
@@ -657,12 +717,24 @@ def _replace_draft(
     return "created"
 
 
-def _save_alerts(db: Session, event: Event, alerts: list[dict[str, str]]) -> None:
+def _save_alerts(db: Session, event: Event, alerts: list[dict[str, str]]) -> list[Alert]:
+    """Replace this event's alerts, and return the new rows so they can be pushed.
+
+    Returning them matters: a Telegram message needs each alert's id to build
+    a deep link, which only exists after the flush.
+    """
     db.query(Alert).filter(Alert.event_id == event.id).delete()
+    saved = []
     for a in alerts:
-        db.add(Alert(event_id=event.id, severity=a["severity"],
-                     issue=a["issue"], action=a.get("action", "")))
-    db.flush()
+        row = Alert(
+            event_id=event.id, severity=a["severity"],
+            issue=a["issue"], action=a.get("action", ""),
+            source="financial",
+        )
+        db.add(row)
+        saved.append(row)
+    db.flush()  # assigns ids
+    return saved
 
 
 # Human-readable phase names for the CRM Activity error summary — the raw
@@ -849,7 +921,15 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     invoice_total = _num(calc.get("FINAL_INVOICE_AMOUNT"))
     payment_method = str(calc.get("PAYMENT_METHOD", ""))
     taxable = str(cls.get("TAXABLE", "YES")).upper() == "YES"
-    cash_collected = _num(cls.get("CASH_COLLECTED_AMOUNT"))
+    # An override wins over the classifier and survives re-runs. Cash is
+    # counted after the event by another automation (or by hand), so whatever
+    # the driver did or didn't write in the notes is not the truth — and
+    # recomputing it here would silently wipe the real figure every night.
+    cash_override = overrides.get_override(entry, "cash_collected")
+    cash_collected = (
+        _num(cash_override) if cash_override is not None
+        else _num(cls.get("CASH_COLLECTED_AMOUNT"))
+    )
     tax_rate = _num(calc.get("TAX_RATE"))
     sq_breakdown = sq.get("breakdown") or {}
 
@@ -968,6 +1048,15 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     entry.subtotal = subtotal
     entry.actual_sales = _num(sq_breakdown.get("net_card")) or cash_collected
     entry.mg_shortfall = _num(calc.get("MG_SHORTFALL"))
+    # ── Min-guarantee: the invoice is the gap to the minimum, so it cannot be
+    # settled until cash is known. Snapshot the minimum now, and flag the row
+    # as blocked unless cash has already been posted for it. Clearing the flag
+    # is what POST .../cash does.
+    entry.minimum_required = _num(calc.get("MINIMUM_REQUIRED"))
+    if overrides.is_min_guarantee(entry.billing_model):
+        entry.awaiting_cash = overrides.get_override(entry, "cash_collected") is None
+    else:
+        entry.awaiting_cash = False
     entry.total_tax_rate = tax_rate
     entry.total_tax = _num(calc.get("TOTAL_TAX"))
     # rollups

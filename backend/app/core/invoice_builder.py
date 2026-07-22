@@ -61,6 +61,13 @@ def build_invoice_payload(
         return None
     invoice_type = "Invoice" if event_type_raw == "INVOICE" else "Hybrid"
 
+    # Nothing owed → no invoice. This is the normal outcome for a
+    # min-guarantee event whose sales covered the minimum: the shortfall is
+    # zero, so there is nothing to bill and a $0 draft would just be noise in
+    # KonaOS for someone to chase.
+    if _num(calc.get("FINAL_INVOICE_AMOUNT")) <= 0:
+        return None
+
     source_event = cleaned or {}
     raw = raw_event or {}
 

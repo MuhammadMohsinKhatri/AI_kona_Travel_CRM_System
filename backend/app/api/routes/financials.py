@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,10 +10,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel, Field
+
 from app.api.deps import get_current_user
 from app.config import settings
+from app.core import overrides as ov
 from app.db.base import get_db
-from app.models import Event, FinancialEntry, User
+from app.konaos.router import verify_api_key
+from app.models import CrmAuditEntry, Event, FinancialEntry, PipelineRun, User
 
 router = APIRouter(prefix="/api/financials", tags=["financials"])
 
@@ -180,9 +184,16 @@ def list_entries(
             "square_tips_card": e.square_tips_card,
             "square_cc_fee": e.square_cc_fee,
             "square_orders": e.square_orders, "square_device": e.square_device,
-            # Cash split (11-13)
+            # Cash split (11-13). cash_source lets the UI show whether the
+            # figure was counted for real or just read out of the notes.
             "cash_collected": e.cash_collected, "cash_tax": e.cash_tax,
             "cash_pre_tax": e.cash_pre_tax,
+            "crm_event_id": e.crm_event_id,
+            # Per-field provenance so the UI can mark which figures a human or
+            # a bot actually set, versus what the classifier guessed.
+            "sources": _sources(e),
+            "awaiting_cash": e.awaiting_cash,
+            "minimum_required": e.minimum_required,
             # Billing (14-22)
             "taxable": e.taxable,
             "event_sales_collected": e.event_sales_collected,
@@ -214,6 +225,286 @@ def list_entries(
             "check_invoice": round(float(totals[6]), 2), "units_served": round(float(totals[7]), 1),
         },
     }
+
+
+class CashUpdate(BaseModel):
+    """Cash counted after the event, posted by an automation or a person."""
+
+    cash_collected: float = Field(ge=0, description="Total cash taken, including tax")
+    source: str = Field(
+        default="api",
+        description="'api' when posted by an automation, 'manual' when typed by a person",
+    )
+    by: str = Field(default="", max_length=255, description="Which automation or which person")
+
+
+def _cash_response(entry: FinancialEntry, recomputed: dict[str, float]) -> dict:
+    shortfall = ov.mg_shortfall(entry) if ov.is_min_guarantee(entry.billing_model) else 0.0
+    return {
+        "event_id": entry.event_id,
+        "crm_event_id": entry.crm_event_id,
+        "cash_collected": entry.cash_collected,
+        "source": ov.source_of(entry, "cash_collected"),
+        "recomputed": recomputed,
+        "min_guarantee": ov.is_min_guarantee(entry.billing_model),
+        "minimum_required": entry.minimum_required,
+        "shortfall": shortfall,
+        "awaiting_cash": entry.awaiting_cash,
+        "invoice_needed": shortfall > 0,
+    }
+
+
+@router.patch("/by-event/{crm_event_id}/cash")
+def set_cash_by_event(
+    crm_event_id: str,
+    body: CashUpdate,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key),
+) -> dict:
+    """Record the cash counted for an event, and settle everything that depends on it.
+
+    Keyed by the KonaOS event id rather than our internal row id, so a caller
+    only needs the id it already has.
+
+    Auth matches the /api/konaos/* endpoints: send `X-API-Key: <GPT_API_KEY>`
+    from an automation, or a dashboard bearer token from the UI.
+
+    The override wins over the classifier permanently — a later pipeline run
+    will NOT overwrite it with whatever the driver's notes happened to say.
+
+    For a min-guarantee event this is also the trigger that settles the
+    invoice: the nightly run defers those (the invoice IS the gap between
+    actual sales and the guaranteed minimum, which isn't knowable until cash
+    is in). The response reports whether an invoice is due; `shortfall` of 0
+    means the minimum was met and no invoice should exist.
+    """
+    if body.source not in ov.VALID_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"source must be one of {ov.VALID_SOURCES}",
+        )
+
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ledger row for event {crm_event_id} — has it been processed yet?",
+        )
+
+    previous = entry.cash_collected
+    was_awaiting = entry.awaiting_cash
+    ov.set_override(entry, "cash_collected", body.cash_collected, source=body.source, by=body.by)
+    recomputed = ov.recompute_cash_chain(entry)
+
+    if entry.awaiting_cash:
+        entry.awaiting_cash = False
+
+    _audit_cash(db, entry, previous, body, recomputed)
+    db.commit()
+    db.refresh(entry)
+
+    # A min-guarantee event that was blocked on cash can now be settled. Do it
+    # by re-running this ONE event through the normal pipeline rather than
+    # building an invoice here: the pipeline already owns invoice creation,
+    # KonaOS sync, duplicate protection and the audit trail, and duplicating
+    # any of that would be a second implementation to keep in step.
+    settled_run_id = None
+    if was_awaiting and ov.is_min_guarantee(entry.billing_model):
+        settled_run_id = _settle_event(db, entry.crm_event_id)
+
+    response = _cash_response(entry, recomputed)
+    response["settlement_run_id"] = settled_run_id
+    return response
+
+
+def _settle_event(db: Session, crm_event_id: str) -> Optional[int]:
+    """Re-run a single event so its invoice decision is remade with cash known.
+
+    Returns the run id to follow on the Automation Runs page, or None if the
+    run couldn't be started (never fatal — the cash itself is already saved,
+    and the next nightly run will settle it).
+    """
+    try:
+        run = PipelineRun(
+            status="running",
+            trigger="cash-settlement",
+            filter_event_ids=[crm_event_id],
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        if settings.pipeline_run_inline:
+            # No BackgroundTasks here (this can be called from a plain API
+            # request), so run it on a thread and let the caller poll.
+            import threading
+
+            from app.api.routes.pipeline import _execute_run
+
+            threading.Thread(target=_execute_run, args=(run.id,), daemon=True).start()
+        else:
+            from app.tasks.pipeline_tasks import run_pipeline_task
+
+            run_pipeline_task.delay(run_id=run.id, trigger="cash-settlement", target_date=None)
+        return run.id
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@router.delete("/by-event/{crm_event_id}/cash")
+def clear_cash_by_event(
+    crm_event_id: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key),
+) -> dict:
+    """Undo a cash override and hand the field back to the automation.
+
+    The recompute still runs, so the row falls back to whatever the classifier
+    read from the notes rather than being left on the manual figure.
+    """
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ledger row for event {crm_event_id}")
+    ov.clear_override(entry, "cash_collected")
+    entry.cash_collected = 0.0
+    recomputed = ov.recompute_cash_chain(entry)
+    db.commit()
+    db.refresh(entry)
+    return _cash_response(entry, recomputed)
+
+
+class FieldsUpdate(BaseModel):
+    """The non-cash fields a person or an automation may set.
+
+    Every field is optional — send only what you're changing. Unlike cash,
+    NOTHING is recalculated from these: they are recorded, shown, and left
+    alone. Wiring them into the billing engine is a deliberate later step.
+    """
+
+    deposit: Optional[float] = Field(default=None, ge=0)
+    taxable: Optional[bool] = None
+    paid: Optional[bool] = None
+    payment_method: Optional[str] = Field(default=None, max_length=32)
+    source: str = Field(default="api", description="'api' or 'manual'")
+    by: str = Field(default="", max_length=255)
+
+
+@router.patch("/by-event/{crm_event_id}/fields")
+def set_fields_by_event(
+    crm_event_id: str,
+    body: FieldsUpdate,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key),
+) -> dict:
+    """Set deposit / taxable / paid / payment method for an event.
+
+    Same auth and same override machinery as the cash endpoint, so an
+    automation and a person go through identical logic and both leave a
+    provenance trail.
+
+    IMPORTANT: these are stored only. No dependent figure moves — an invoice
+    total will not change because you flipped `taxable` here. Cash is
+    currently the only field that recalculates.
+    """
+    if body.source not in ov.VALID_SOURCES:
+        raise HTTPException(status_code=400, detail=f"source must be one of {ov.VALID_SOURCES}")
+
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No ledger row for event {crm_event_id}")
+
+    changes: dict[str, Any] = {}
+    for field in ("deposit", "taxable", "paid", "payment_method"):
+        value = getattr(body, field)
+        if value is None:
+            continue
+        changes[field] = value
+        ov.set_override(entry, field, value, source=body.source, by=body.by)
+        setattr(entry, field, value)
+
+    if not changes:
+        raise HTTPException(
+            status_code=400,
+            detail="Send at least one of: deposit, taxable, paid, payment_method",
+        )
+
+    event = db.get(Event, entry.event_id)
+    if event is not None:
+        who = body.by or ("an automation" if body.source == "api" else "a user")
+        db.add(
+            CrmAuditEntry(
+                event_id=event.id,
+                crm_event_id=entry.crm_event_id,
+                event_name=entry.event_name,
+                event_date=entry.event_date,
+                action="fields_updated",
+                summary=(
+                    f"{', '.join(f'{k} = {v}' for k, v in changes.items())} "
+                    f"set by {who} (no other figures changed)"
+                ),
+                detail={"source": body.source, "by": body.by, "values": changes},
+            )
+        )
+
+    db.commit()
+    db.refresh(entry)
+    return {
+        "crm_event_id": entry.crm_event_id,
+        "updated": changes,
+        "sources": _sources(entry),
+        "recalculated": False,
+    }
+
+
+def _sources(entry: FinancialEntry) -> dict[str, str]:
+    """Where each overridable field's value came from: api | manual | ai."""
+    return {field: ov.source_of(entry, field) for field in ov.OVERRIDABLE}
+
+
+def _audit_cash(
+    db: Session, entry: FinancialEntry, previous: float, body: CashUpdate,
+    recomputed: dict[str, float],
+) -> None:
+    """Log the change so the KonaOS Change Log answers 'who changed this cash figure'.
+
+    Best-effort: a missing event row must not fail the update itself.
+    """
+    event = db.get(Event, entry.event_id)
+    if event is None:
+        return
+    who = body.by or ("an automation" if body.source == "api" else "a user")
+    db.add(
+        CrmAuditEntry(
+            event_id=event.id,
+            crm_event_id=entry.crm_event_id,
+            event_name=entry.event_name,
+            event_date=entry.event_date,
+            action="cash_updated",
+            summary=(
+                f"Cash set to ${body.cash_collected:,.2f} "
+                f"(was ${previous or 0:,.2f}) by {who}"
+            ),
+            detail={
+                "source": body.source,
+                "by": body.by,
+                "previous": previous,
+                "values": {"cash_collected": body.cash_collected},
+                "recomputed": recomputed,
+            },
+        )
+    )
 
 
 # response_model=None: see alerts.py — required for 204 + `-> None` on FastAPI 0.115.

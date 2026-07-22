@@ -9,14 +9,17 @@ const links = [
   { to: "/", label: "Dashboard", icon: "📊", end: true },
   { to: "/events", label: "Events", icon: "📅" },
   { to: "/invoices", label: "Invoices", icon: "🧾" },
-  { to: "/financials", label: "Financials", icon: "💰" },
+  { to: "/financials", label: "Event Financials", icon: "💰" },
   { to: "/alerts", label: "Needs Attention", icon: "⚠️" },
   { to: "/runs", label: "Automation Runs", icon: "⚙️" },
   { to: "/crm-activity", label: "KonaOS Change Log", icon: "📝" },
   { to: "/api-explorer", label: "API Explorer", icon: "🔌" },
 ];
 
-const helpLink = { to: "/guide", label: "Guide & Tutorials", icon: "📘" };
+const bottomLinks = [
+  { to: "/settings", label: "Settings", icon: "⚙" },
+  { to: "/guide", label: "Guide & Tutorials", icon: "📘" },
+];
 
 /** Pages whose content is a wide table benefit from the full window width —
  *  the default 1200px cap forces needless horizontal scrolling on them. */
@@ -71,7 +74,7 @@ export default function Layout() {
 
         {links.map(navLink)}
         <div className="spacer" />
-        {navLink(helpLink)}
+        {bottomLinks.map(navLink)}
         <div className="sidebar-user" title={user?.email}>
           {user?.email}
         </div>

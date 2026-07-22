@@ -118,11 +118,48 @@ export const api = {
     request<{ deleted: number }>("/api/financials?" + new URLSearchParams(params), {
       method: "DELETE",
     }),
+  /** Record the cash counted for an event. Keyed by KonaOS event id — the
+   *  same endpoint the cash automation posts to, so the UI and the bot go
+   *  through identical logic. `source: "manual"` marks it as typed by a
+   *  person rather than posted by a machine. */
+  setEventCash: (crmEventId: string, cash: number, by = "") =>
+    request<CashUpdateResult>(
+      `/api/financials/by-event/${encodeURIComponent(crmEventId)}/cash`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ cash_collected: cash, source: "manual", by }),
+      }
+    ),
+  /** Set deposit / taxable / paid / payment method. Recorded and shown, but
+   *  deliberately inert: nothing else recalculates from these yet. */
+  setEventFields: (
+    crmEventId: string,
+    fields: Partial<Pick<FinancialRow, "deposit" | "taxable" | "paid" | "payment_method">>,
+    by = ""
+  ) =>
+    request<FieldsUpdateResult>(
+      `/api/financials/by-event/${encodeURIComponent(crmEventId)}/fields`,
+      { method: "PATCH", body: JSON.stringify({ ...fields, source: "manual", by }) }
+    ),
+  clearEventCash: (crmEventId: string) =>
+    request<CashUpdateResult>(
+      `/api/financials/by-event/${encodeURIComponent(crmEventId)}/cash`,
+      { method: "DELETE" }
+    ),
   importFinancialsSheet: (sheet: "kona" | "tom" = "kona") =>
     request<SheetImportResult>(
       "/api/financials/import-sheet?" + new URLSearchParams({ sheet }),
       { method: "POST" }
     ),
+  alert: (id: number) => request<AlertDetail>(`/api/alerts/${id}`),
+  telegramSettings: () => request<TelegramSettings>("/api/settings/telegram"),
+  saveTelegramSettings: (body: TelegramSettingsInput) =>
+    request<TelegramSettings>("/api/settings/telegram", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  testTelegram: () =>
+    request<TelegramTestResult>("/api/settings/telegram/test", { method: "POST" }),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {
@@ -154,9 +191,44 @@ export interface QuickCreateResult {
   driverNotesError?: string | null;
 }
 
+export interface CashUpdateResult {
+  event_id: number;
+  crm_event_id: string;
+  cash_collected: number;
+  source: "api" | "manual" | "ai";
+  recomputed: Record<string, number>;
+  min_guarantee: boolean;
+  minimum_required: number;
+  shortfall: number;
+  awaiting_cash: boolean;
+  invoice_needed: boolean;
+  /** Set when posting cash unblocked a min-guarantee event: the id of the
+   *  single-event run that remakes its invoice decision. Follow it on the
+   *  Automation Runs page. */
+  settlement_run_id?: number | null;
+}
+
+/** Where a field's current value came from. "ai" = the classifier read it out
+ *  of the driver's notes (treat as a guess); "api" = an automation posted it;
+ *  "manual" = a person typed it. */
+export type FieldSource = "api" | "manual" | "ai";
+
+export interface FieldsUpdateResult {
+  crm_event_id: string;
+  updated: Record<string, unknown>;
+  sources: Record<string, FieldSource>;
+  /** Always false for now — these fields are stored, not acted on. */
+  recalculated: boolean;
+}
+
 export interface FinancialRow {
   id: number;
   event_id: number;
+  crm_event_id: string;
+  /** Per-field provenance, keyed by field name (cash_collected, deposit, …). */
+  sources?: Record<string, FieldSource>;
+  awaiting_cash?: boolean;
+  minimum_required?: number;
   event_date: string | null;
   event_name: string;
   event_code: string | null;
@@ -369,6 +441,9 @@ export interface EventSummary {
   created_at: string;
   updated_at: string;
 }
+/** Which system raised the alert — decides the guidance shown for fixing it. */
+export type AlertSource = "financial" | "cash" | "session";
+
 export interface Alert {
   id: number;
   severity: string;
@@ -376,6 +451,59 @@ export interface Alert {
   action: string;
   resolved: boolean;
   created_at: string;
+  /** Event this alert is about. Null for system alerts (e.g. session key). */
+  event_id: number | null;
+  event_name: string | null;
+  crm_event_id: string | null;
+  event_date: string | null;
+  brand: string | null;
+  source: AlertSource;
+  notified: boolean;
+  notify_error: string;
+}
+
+export interface AlertDetail {
+  alert: Alert;
+  guide: { label: string; what: string; fix_in: string; after: string };
+  event: {
+    id: number;
+    crm_event_id: string;
+    event_name: string;
+    event_date: string | null;
+    brand: string;
+    status: string;
+    event_type: string;
+    billing_model: string;
+    final_invoice_amount: number | null;
+  } | null;
+  can_rerun: boolean;
+}
+
+export interface TelegramSettings {
+  enabled: boolean;
+  chat_ids: string[];
+  dashboard_url: string;
+  /** The token itself is never returned — only whether one is stored. */
+  bot_token_set: boolean;
+  bot_token: string;
+  configured: boolean;
+}
+
+export interface TelegramSettingsInput {
+  enabled: boolean;
+  chat_ids: string[];
+  dashboard_url: string;
+  /** Omit to keep the stored token; "" clears it. */
+  bot_token?: string;
+}
+
+export interface TelegramTestResult {
+  ok: boolean;
+  detail: string;
+  sent: number;
+  failed: number;
+  skipped?: boolean;
+  errors: string[];
 }
 export interface Invoice {
   id: number;

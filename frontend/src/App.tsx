@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import Layout from "./components/Layout";
 import { Loading } from "./components/ui";
+import AlertDetail from "./pages/AlertDetail";
 import Alerts from "./pages/Alerts";
 import ApiExplorer from "./pages/ApiExplorer";
 import CrmAudit from "./pages/CrmAudit";
@@ -14,6 +15,7 @@ import Invoices from "./pages/Invoices";
 import Login from "./pages/Login";
 import NewEvent from "./pages/NewEvent";
 import Runs from "./pages/Runs";
+import Settings from "./pages/Settings";
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -40,6 +42,8 @@ export default function App() {
         <Route path="/invoices" element={<Invoices />} />
         <Route path="/financials" element={<Financials />} />
         <Route path="/alerts" element={<Alerts />} />
+        <Route path="/alerts/:id" element={<AlertDetail />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/runs" element={<Runs />} />
         <Route path="/crm-activity" element={<CrmAudit />} />
         <Route path="/api-explorer" element={<ApiExplorer />} />

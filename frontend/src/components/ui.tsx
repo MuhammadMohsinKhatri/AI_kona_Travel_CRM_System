@@ -25,6 +25,8 @@ export function Badge({ kind, children }: { kind: string; children: ReactNode })
     invoice_created: "green",
     invoice_deleted: "red",
     invoice_skipped: "amber",
+    invoice_deferred: "amber",
+    cash_updated: "green",
     event_updated: "blue",
   };
   const cls = map[children as string] ?? map[kind] ?? "gray";

@@ -164,8 +164,8 @@ export default function Financials() {
     <>
       <div className="topbar">
         <div className="title-row">
-          <h1 className="page-title">Financials</h1>
-          <InfoTip text="Every event and what it was worth — one row each. Use the filters to pick a date range or a brand, and download whatever you're looking at as a spreadsheet." />
+          <h1 className="page-title">Event Financials</h1>
+          <InfoTip text="Every event and what it was worth — one row each, with the card sales from Square checked against what was invoiced. Use the filters to pick a date range or a brand, and download whatever you're looking at as a spreadsheet." />
         </div>
         <div className="flex" style={{ gap: 8 }}>
           <select className="select" value={importSource}
@@ -266,14 +266,10 @@ export default function Financials() {
         />
       ) : (
         <>
-          {/* One slim strip instead of four tall cards — the same four figures
-              in roughly a third of the height, so the table starts higher. */}
-          <div className="sum-strip">
-            <Tot label="Total invoiced" v={money(data.totals.invoice_total)} />
-            <Tot label="Before tax" v={money(data.totals.subtotal)} />
-            <Tot label="Tax + card fees" v={money(data.totals.sales_tax + data.totals.cc_fee)} />
-            <Tot label="Card sales (Square)" v={money(data.totals.square_sales)} />
-          </div>
+          {/* No summary strip above the table: the pinned totals row at the
+              bottom of the sheet already carries these figures, and it stays
+              in view while you scroll. Showing them twice cost ~70px of
+              height that the rows use better. */}
 
           {/* Columns are grouped under a header band so each label can be one
               or two words — that, plus the full-width page, is what keeps this
@@ -319,7 +315,7 @@ export default function Financials() {
               </thead>
               <tbody>
                 {data.items.map((r) => (
-                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: location.pathname + location.search, label: "Financials" } })}>
+                  <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: location.pathname + location.search, label: "Event Financials" } })}>
                     <td className="stick stick-1"><div className="cell" style={{ fontWeight: 700 }}>{r.event_date || "—"}</div></td>
                     <td className="stick stick-2" title={r.event_name}>
                       <div className="cell">
@@ -339,6 +335,14 @@ export default function Financials() {
                         <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
                           {r.billing_model || "—"}
                         </div>
+                        {/* Min-guarantee events can't be invoiced until cash is
+                            counted — the invoice IS the gap to the minimum. */}
+                        {r.awaiting_cash && (
+                          <span className="badge amber" style={{ fontSize: 10, padding: "1px 6px" }}
+                            title="Minimum-guarantee event. No invoice yet — it's the gap between actual sales and the guaranteed minimum, so cash has to be counted first.">
+                            needs cash
+                          </span>
+                        )}
                       </div>
                     </td>
                     <Num v={r.square_gross_sales} g="g-sq" sep />
@@ -347,25 +351,26 @@ export default function Financials() {
                     <Num v={r.square_card_tax} g="g-sq" />
                     <Num v={r.square_tips_card} g="g-sq" />
                     <Num v={r.square_cc_fee} g="g-sq" />
-                    <Num v={r.cash_collected} g="g-cash" sep />
+                    <CashCell row={r} onSaved={reload} />
                     <Num v={r.cash_tax} g="g-cash" />
                     <Num v={r.cash_pre_tax} g="g-cash" />
                     <Num v={r.check_invoice} g="g-inv" sep cls="key" />
-                    <Num v={r.deposit} g="g-inv" />
-                    <td className="sep g-tot">
-                      <Badge kind={r.taxable ? "gray" : "green"}>{r.taxable ? "Taxable" : "Exempt"}</Badge>
-                    </td>
+                    <DepositCell row={r} onSaved={reload} />
+                    <ToggleCell
+                      row={r} field="taxable" group="g-tot" onSaved={reload}
+                      on="Taxable" off="Exempt" kindOn="gray" kindOff="green"
+                    />
                     <Num v={r.event_sales_collected} g="g-tot" />
                     <Num v={r.sales_tax} g="g-tot" />
                     <Num v={r.sales_dollars} g="g-tot" />
                     <Num v={r.giveback_amount} g="g-tot" />
                     <Num v={r.net_event_sales} g="g-tot" />
                     <Num v={r.location_fee} g="g-tot" />
-                    <td className="sep">
-                      <Badge kind={r.paid ? "green" : "gray"}>
-                        {r.paid ? `Paid${r.payment_method ? ` · ${r.payment_method}` : ""}` : "Unpaid"}
-                      </Badge>
-                    </td>
+                    <ToggleCell
+                      row={r} field="paid" group="" onSaved={reload}
+                      on="Paid" off="Unpaid" kindOn="green" kindOff="gray"
+                      extra={r.paid && r.payment_method ? ` · ${r.payment_method}` : ""}
+                    />
                     {/* How the system arrived at this figure — full text on
                         hover, since it runs long. */}
                     <td
@@ -424,6 +429,184 @@ export default function Financials() {
   );
 }
 
+/** The one editable cell in the ledger.
+ *
+ *  Cash is counted after the event — usually by the cash automation, sometimes
+ *  by a person — so unlike every other column it's a real input rather than
+ *  something the engine derived. Everything downstream of it (cash tax, event
+ *  sales, sales $) is recomputed server-side on save, which is why those cells
+ *  stay read-only: there's no way to save a row whose tax doesn't follow from
+ *  its cash.
+ *
+ *  The dot shows provenance at a glance — green when a machine or a person
+ *  actually counted it, hollow when it's just what the AI read out of the
+ *  driver's notes (i.e. a guess, and 0 when the notes said nothing). */
+function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<void> | void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(row.cash_collected ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const counted = isSet(row, "cash_collected");
+
+  async function save() {
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0) { setErr("Enter a number, 0 or more"); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      await api.setEventCash(row.crm_event_id, n);
+      setEditing(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // stopPropagation throughout: the row itself navigates to the event.
+  if (editing) {
+    return (
+      <td className="right g-cash sep cash-cell" onClick={(e) => e.stopPropagation()}>
+        <input
+          className="cash-input"
+          autoFocus
+          value={draft}
+          disabled={busy}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") { setEditing(false); setErr(""); }
+          }}
+          onBlur={save}
+          title={err || "Enter to save, Esc to cancel"}
+        />
+        {err && <div className="cash-err">{err}</div>}
+      </td>
+    );
+  }
+
+  return (
+    <td
+      className={"right g-cash sep cash-cell editable" + (row.cash_collected ? "" : " zero")}
+      onClick={(e) => { e.stopPropagation(); setDraft(String(row.cash_collected ?? 0)); setEditing(true); }}
+      title={
+        counted
+          ? `Cash counted — ${sourceLabel(row, "cash_collected")}. Click to change.`
+          : "Not counted yet — this is only what the AI read from the driver's notes. Click to enter the real figure."
+      }
+    >
+      <span className={"cash-dot" + (counted ? " counted" : "")} />
+      {money(row.cash_collected)}
+    </td>
+  );
+}
+
+/** True when a person or an automation set this field, rather than it being
+ *  whatever the classifier inferred. */
+function isSet(row: FinancialRow, field: string): boolean {
+  const s = row.sources?.[field];
+  return s === "api" || s === "manual";
+}
+
+function sourceLabel(row: FinancialRow, field: string): string {
+  const s = row.sources?.[field];
+  if (s === "api") return "posted by an automation";
+  if (s === "manual") return "entered by hand";
+  return "read from the event notes by the AI";
+}
+
+/** Editable "Deposit" cell. Unlike cash, saving this changes NOTHING else —
+ *  it's recorded and shown, and wiring it into the billing engine is a later,
+ *  deliberate step. The tooltip says so, because a user who edits a money
+ *  field reasonably expects the invoice to move. */
+function DepositCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<void> | void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(row.deposit ?? 0));
+  const [err, setErr] = useState("");
+  const set = isSet(row, "deposit");
+
+  async function save() {
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0) { setErr("Enter a number, 0 or more"); return; }
+    setErr("");
+    try {
+      await api.setEventFields(row.crm_event_id, { deposit: n });
+      setEditing(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't save");
+    }
+  }
+
+  if (editing) {
+    return (
+      <td className="right g-inv cash-cell" onClick={(e) => e.stopPropagation()}>
+        <input className="cash-input" autoFocus value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") { setEditing(false); setErr(""); }
+          }}
+          onBlur={save} title={err || "Enter to save, Esc to cancel"} />
+        {err && <div className="cash-err">{err}</div>}
+      </td>
+    );
+  }
+  return (
+    <td
+      className={"right g-inv cash-cell editable" + (row.deposit ? "" : " zero")}
+      onClick={(e) => { e.stopPropagation(); setDraft(String(row.deposit ?? 0)); setEditing(true); }}
+      title={`Deposit received — ${sourceLabel(row, "deposit")}. Click to change. Recorded only: no other figure changes.`}
+    >
+      <span className={"cash-dot" + (set ? " counted" : "")} />
+      {money(row.deposit)}
+    </td>
+  );
+}
+
+/** Taxable? / Paid? — click to flip. Recorded only, nothing recalculates. */
+function ToggleCell({
+  row, field, on, off, kindOn, kindOff, group, onSaved, extra,
+}: {
+  row: FinancialRow;
+  field: "taxable" | "paid";
+  on: string; off: string;
+  kindOn: string; kindOff: string;
+  group: string;
+  onSaved: () => Promise<void> | void;
+  extra?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const value = Boolean(row[field]);
+  const set = isSet(row, field);
+
+  async function toggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.setEventFields(row.crm_event_id, { [field]: !value } as any);
+      await onSaved();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <td
+      className={`sep ${group} cash-cell editable`}
+      onClick={toggle}
+      title={`${sourceLabel(row, field)}. Click to change. Recorded only: no other figure changes.`}
+    >
+      <span className={"cash-dot" + (set ? " counted" : "")} />
+      <Badge kind={value ? kindOn : kindOff}>
+        {busy ? "…" : (value ? on : off) + (extra || "")}
+      </Badge>
+    </td>
+  );
+}
+
 /** A money cell. Zero and missing values are dimmed so the eye skips them and
  *  lands on the columns that actually carry an amount — most rows only use a
  *  handful of the 18 figures. `sep` marks the first column of a header group. */
@@ -438,11 +621,3 @@ function Num({
   );
 }
 
-function Tot({ label, v }: { label: string; v: string }) {
-  return (
-    <div className="sum">
-      <span className="l">{label}</span>
-      <span className="v">{v}</span>
-    </div>
-  );
-}

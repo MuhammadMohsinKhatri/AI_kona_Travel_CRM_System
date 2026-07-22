@@ -9,6 +9,8 @@ const ACTION_LABELS: Record<string, string> = {
   invoice_created: "Created an invoice",
   invoice_deleted: "Removed an invoice",
   invoice_skipped: "No invoice needed",
+  invoice_deferred: "Waiting for cash",
+  cash_updated: "Cash recorded",
   event_updated: "Updated the event",
   error: "Failed",
 };

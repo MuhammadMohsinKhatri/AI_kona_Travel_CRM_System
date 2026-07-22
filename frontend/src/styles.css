@@ -151,19 +151,6 @@ a:hover { text-decoration: underline; }
 }
 .info-tip:hover .tip, .info-tip:focus-within .tip { display: block; }
 
-/* ── Compact totals strip ─────────────────────────────────────────────────
-   The same figures the four stat cards carried, in about a third of the
-   height — on a table-first page the numbers are context, not the headline. */
-.sum-strip {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 0;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 10px 4px; margin-bottom: 12px;
-}
-.sum { display: flex; align-items: baseline; gap: 8px; padding: 0 18px; flex: 1; min-width: 170px; }
-.sum + .sum { border-left: 1px solid var(--border); }
-.sum .l { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); }
-.sum .v { font-size: 17px; font-weight: 700; margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* Cards */
 .grid { display: grid; gap: 16px; }
@@ -195,10 +182,10 @@ tbody tr:last-child td { border-bottom: none; }
    value 20 columns to the right still tells you which event it belongs to.
    Scrolls in both axes inside its own viewport, like a spreadsheet. */
 /* Fill whatever the page chrome above leaves. The subtrahend tracks that
-   chrome: page padding + title row + two filter rows + the totals strip.
-   Trimming the description paragraph and the four stat cards down to one
-   slim strip is what let this grow — keep them in sync if that changes. */
-.table-wrap.sheet { max-height: calc(100vh - 232px); overflow: auto; }
+   chrome: page padding + title row + the filter bar. The description
+   paragraph moved into a hover, and the summary figures live only in the
+   pinned totals row now — keep this in sync if either comes back. */
+.table-wrap.sheet { max-height: calc(100vh - 168px); overflow: auto; }
 
 /* Cell backgrounds must be opaque — sticky cells slide over other cells.
    Setting the background on every td lets zebra/hover cover sticky ones too. */
@@ -321,6 +308,30 @@ tbody tr:last-child td { border-bottom: none; }
 /* A zero isn't news; dim it so the eye lands on the columns that carry a
    real amount. */
 .sheet tbody td.zero { color: var(--text-dim); font-weight: 400; }
+
+/* ── Editable cash cell ───────────────────────────────────────────────────
+   The only writable cell in the ledger. It has to look clickable without
+   turning into a form field on every row, so it stays a plain number until
+   hovered. */
+.sheet td.cash-cell.editable { cursor: text; position: relative; }
+.sheet td.cash-cell.editable:hover {
+  outline: 1.5px solid var(--brand); outline-offset: -1.5px; border-radius: 3px;
+}
+/* Provenance dot: filled = somebody actually counted the till; hollow = it's
+   only what the AI read out of the driver's notes, so treat it as a guess. */
+.cash-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+  border: 1.5px solid var(--text-dim); background: transparent;
+}
+.cash-dot.counted { background: var(--ok); border-color: var(--ok); }
+.cash-input {
+  width: 100%; text-align: right; font: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 4px; border: 1.5px solid var(--brand); border-radius: 4px;
+  background: var(--surface); color: var(--text);
+}
+.cash-err { font-size: 10.5px; color: var(--crit); text-align: right; margin-top: 2px; }
 .sheet .muted { color: var(--text-dim); }
 
 /* Compact rows so ~10 fit in the viewport before scrolling (default cell

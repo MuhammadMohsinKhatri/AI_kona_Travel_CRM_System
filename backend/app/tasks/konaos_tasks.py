@@ -43,13 +43,73 @@ def maintain_konaos_session() -> dict:
     result = asyncio.run(check())
 
     if not result.get("valid"):
-        notifier = factory.get_notifier()
-        notifier.send(
-            "⚠️ *KonaOS session key needs attention*\n\n"
-            "The session key is stale and automatic refresh failed.\n"
-            f"Reason: {result.get('error', 'probe failed')}\n\n"
-            "👉 Grab a fresh `jsessionId` from admin.konaos.com devtools and "
-            "paste it in the dashboard (API Explorer → KonaOS Session) or:\n"
-            "`POST /api/konaos/session {\"session_key\": \"...\"}`"
-        )
+        _raise_session_alert(result.get("error", "the key stopped working"))
+    else:
+        _resolve_session_alerts()
     return result
+
+
+SESSION_ISSUE = "KonaOS connection needs a new session key"
+
+
+def _raise_session_alert(reason: str) -> None:
+    """Put the dead session key on Needs Attention and push it to Telegram.
+
+    Goes through the same Alert table as everything else so there is one place
+    to look — a system problem that only ever appeared in a chat message is a
+    problem nobody finds later. Idempotent: while one is unresolved, a daily
+    re-check won't stack duplicates.
+    """
+    from app.core import notify
+    from app.db.base import SessionLocal
+    from app.models import Alert
+
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(Alert)
+            .filter(Alert.issue == SESSION_ISSUE, Alert.resolved.is_(False))
+            .first()
+        )
+        if existing is not None:
+            return
+        alert = Alert(
+            event_id=None,  # system-level: no event to attach to
+            severity="CRITICAL",
+            source="session",
+            issue=SESSION_ISSUE,
+            action=(
+                "The automation can't reach KonaOS, so no events can be read and no "
+                "invoices created until this is fixed. Open the API Explorer page, go "
+                f"to KonaOS Session, and paste a fresh session key. (Reason: {reason})"
+            ),
+        )
+        db.add(alert)
+        db.flush()
+        notify.notify_alert(db, alert)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _resolve_session_alerts() -> None:
+    """Close out session alerts once the key is working again."""
+    from datetime import datetime, timezone
+
+    from app.db.base import SessionLocal
+    from app.models import Alert
+
+    db = SessionLocal()
+    try:
+        stale = (
+            db.query(Alert)
+            .filter(Alert.issue == SESSION_ISSUE, Alert.resolved.is_(False))
+            .all()
+        )
+        for alert in stale:
+            alert.resolved = True
+            alert.resolved_at = datetime.now(timezone.utc)
+        if stale:
+            db.commit()
+    finally:
+        db.close()

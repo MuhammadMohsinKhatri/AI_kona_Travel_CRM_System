@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -55,6 +55,30 @@ class FinancialEntry(Base):
     cash_collected: Mapped[float] = mapped_column(Float, default=0.0)          # Cash Collected
     cash_tax: Mapped[float] = mapped_column(Float, default=0.0)                # Cash Tax
     cash_pre_tax: Mapped[float] = mapped_column(Float, default=0.0)            # Cash Pre-Tax
+
+    # ── Human/automation overrides ──────────────────────────────────────────
+    # Cash is counted after the event, so the classifier's value (scraped from
+    # whatever the driver wrote in the notes) is a guess at best and 0 at
+    # worst. A value here WINS over the classifier and survives re-runs —
+    # without it, the next nightly run would silently recompute cash from the
+    # notes and wipe the real figure.
+    #
+    # JSON rather than a column per field so adding the next overridable field
+    # (deposit, taxable, payment method…) doesn't need a migration. Keys are
+    # model attribute names: {"cash_collected": 412.50}
+    overrides: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Provenance, keyed the same way, so the UI can show WHERE a figure came
+    # from: {"cash_collected": {"source": "api", "by": "cash-bot", "at": "…"}}
+    # source is one of: "api" (another automation), "manual" (typed by a
+    # person), "ai" (classifier — the default when there's no override).
+    override_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # Min-guarantee events can't be invoiced until cash is known: the invoice
+    # IS the gap between (card + cash) and the minimum. The nightly run defers
+    # them and sets this; posting cash clears it and settles the invoice.
+    awaiting_cash: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Snapshotted so the shortfall can be settled later without re-classifying.
+    minimum_required: Mapped[float] = mapped_column(Float, default=0.0)
 
     # 14-22 Billing
     check_invoice: Mapped[float] = mapped_column(Float, default=0.0)           # Check / Invoice

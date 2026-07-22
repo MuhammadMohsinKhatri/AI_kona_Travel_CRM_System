@@ -42,6 +42,36 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+def _mg_subtotal(event: dict[str, Any], minimum_required: float, location_fee: float) -> float:
+    """What the host owes on a minimum-guarantee event.
+
+    The host guaranteed a minimum; the truck's own sales count toward it, and
+    the host pays only the gap. Sell past the minimum and the host owes
+    nothing — so the subtotal is the SHORTFALL, not the whole minimum.
+
+    Sales are compared pre-tax on both sides: the minimum is a sales target,
+    and tax isn't the truck's revenue. Including it would let a taxable event
+    clear the bar ~6% more easily than an exempt one, for no defensible
+    reason.
+
+    ``ACTUAL_SALES_KNOWN`` is the guard that makes this safe. Cash is counted
+    after the event, so until it is posted the sales figure is incomplete and
+    a shortfall computed from it would be far too large. In that case fall
+    back to the full minimum — but the pipeline defers the invoice entirely
+    for exactly this reason, so that value should never reach a real invoice.
+    """
+    if not event.get("ACTUAL_SALES_KNOWN"):
+        return minimum_required + location_fee
+
+    actual_sales = _num(event.get("ACTUAL_CARD_SALES")) + _num(event.get("ACTUAL_CASH_PRE_TAX"))
+    shortfall = max(0.0, minimum_required - actual_sales)
+    # Minimum covered → nothing to invoice. The location fee rides along with
+    # a shortfall but doesn't create an invoice on its own.
+    if shortfall <= 0:
+        return 0.0
+    return shortfall + location_fee
+
+
 def _r2(v: float) -> float:
     return round(v + 0.0, 2)
 
@@ -149,11 +179,11 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
 
     elif billing_model == "MIN_GUARANTEE_HOURLY":
         minimum_required = total_hours * min_hourly
-        subtotal = minimum_required + location_fee
+        subtotal = _mg_subtotal(event, minimum_required, location_fee)
 
     elif billing_model == "MIN_GUARANTEE_FLAT":
         minimum_required = min_flat
-        subtotal = minimum_required + location_fee
+        subtotal = _mg_subtotal(event, minimum_required, location_fee)
 
     elif billing_model == "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA":
         overage_units = max(0.0, units_total - units_included)
@@ -171,7 +201,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
 
     elif billing_model == "HYBRID_SELLING_PLUS_MIN_GUARANTEE":
         minimum_required = total_hours * min_hourly if min_hourly > 0 else min_flat
-        subtotal = minimum_required + location_fee
+        subtotal = _mg_subtotal(event, minimum_required, location_fee)
 
     else:  # UNDEFINED / unrecognized
         subtotal = base_amount + location_fee
@@ -251,7 +281,18 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         "HOST_AMOUNT": _r2(host_amount),
         "GUEST_AMOUNT": _r2(guest_amount),
         "MINIMUM_REQUIRED": _r2(minimum_required),
-        "MG_SHORTFALL": _r2(ai_mg_shortfall),
+        # Computed from actual sales once cash is known; otherwise whatever the
+        # driver wrote in the notes, which is all we have to go on.
+        "MG_SHORTFALL": _r2(
+            max(
+                0.0,
+                minimum_required
+                - _num(event.get("ACTUAL_CARD_SALES"))
+                - _num(event.get("ACTUAL_CASH_PRE_TAX")),
+            )
+            if (minimum_required and event.get("ACTUAL_SALES_KNOWN"))
+            else ai_mg_shortfall
+        ),
         # ── ADD-ON / ALL-IN ──
         "ADDON_AMOUNT": _r2(addon_amount),
         "ADDON_LABEL": addon_label,
