@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
-import { Badge, BulkDeleteButton, DeleteButton, Empty, Loading, money } from "../components/ui";
+import { Badge, BulkDeleteButton, DeleteButton, Empty, InfoTip, Loading, money } from "../components/ui";
 
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
  *  Postgres and are upserted by every pipeline run.
@@ -163,12 +163,9 @@ export default function Financials() {
   return (
     <>
       <div className="topbar">
-        <div>
+        <div className="title-row">
           <h1 className="page-title">Financials</h1>
-          <p className="page-sub">
-            Every event and what it was worth — one row each. Use the filters to pick a date
-            range or a brand, and download whatever you're looking at as a spreadsheet.
-          </p>
+          <InfoTip text="Every event and what it was worth — one row each. Use the filters to pick a date range or a brand, and download whatever you're looking at as a spreadsheet." />
         </div>
         <div className="flex" style={{ gap: 8 }}>
           <select className="select" value={importSource}
@@ -179,11 +176,11 @@ export default function Financials() {
           </select>
           <button className="btn" onClick={importSheet} disabled={importing}
             title="Bring the selected brand's old Google Sheet into this page. Safe to repeat — it never overwrites rows the automation produced.">
-            {importing ? "⏳ Importing…" : "⬆ Import old sheet"}
+            {importing ? "⏳ Importing…" : "⬆ Import sheet"}
           </button>
           <button className="btn primary" onClick={downloadCsv} disabled={!data || data.total === 0}
             title="Download what you're currently looking at, with all 46 columns">
-            ⬇ Download spreadsheet
+            ⬇ Export CSV
           </button>
         </div>
       </div>
@@ -210,10 +207,10 @@ export default function Financials() {
         </select>
         <span className="field-label">or dates</span>
         <label className="field-label" htmlFor="fin-date-from">From</label>
-        <input id="fin-date-from" className="input" type="date" value={fromDate} style={{ width: 140 }}
+        <input id="fin-date-from" className="input" type="date" value={fromDate} style={{ width: 132 }}
           onChange={(e) => pickRange({ from: e.target.value })} title="Events on or after this date" />
         <label className="field-label" htmlFor="fin-date-to">To</label>
-        <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 140 }}
+        <input id="fin-date-to" className="input" type="date" value={toDate} style={{ width: 132 }}
           onChange={(e) => pickRange({ to: e.target.value })} title="Events on or before this date" />
         <select className="select" value={brand} onChange={(e) => updateParams({ brand: e.target.value || undefined })}>
           <option value="">All brands</option>
@@ -229,7 +226,7 @@ export default function Financials() {
           <option value="false">Unpaid only</option>
         </select>
         <input className="input" placeholder="Search event name or code…" value={searchInput}
-          style={{ width: 190 }} onChange={(e) => setSearchInput(e.target.value)} />
+          style={{ width: 170 }} onChange={(e) => setSearchInput(e.target.value)} />
         {hasFilters && (
           <button className="btn" onClick={clearFilters} title="Clear all filters">✕ Clear filters</button>
         )}
@@ -269,7 +266,9 @@ export default function Financials() {
         />
       ) : (
         <>
-          <div className="grid cols-4" style={{ marginBottom: 16 }}>
+          {/* One slim strip instead of four tall cards — the same four figures
+              in roughly a third of the height, so the table starts higher. */}
+          <div className="sum-strip">
             <Tot label="Total invoiced" v={money(data.totals.invoice_total)} />
             <Tot label="Before tax" v={money(data.totals.subtotal)} />
             <Tot label="Tax + card fees" v={money(data.totals.sales_tax + data.totals.cc_fee)} />
@@ -289,10 +288,10 @@ export default function Financials() {
                   <th className="stick stick-1" rowSpan={2}><div className="cell">Date</div></th>
                   <th className="stick stick-2" rowSpan={2}><div className="cell">Event</div></th>
                   <th className="stick stick-3" rowSpan={2}><div className="cell">Type &amp; billing</div></th>
-                  <th className="grp sep" colSpan={6}>Card sales (Square)</th>
-                  <th className="grp sep" colSpan={3}>Cash</th>
-                  <th className="grp sep" colSpan={2}>Invoiced / prepaid</th>
-                  <th className="grp sep" colSpan={7}>Event totals</th>
+                  <th className="grp g-sq sep" colSpan={6}>Card sales (Square)</th>
+                  <th className="grp g-cash sep" colSpan={3}>Cash</th>
+                  <th className="grp g-inv sep" colSpan={2}>Invoiced / prepaid</th>
+                  <th className="grp g-tot sep" colSpan={7}>Event totals</th>
                   <th className="sep" rowSpan={2}>Paid?</th>
                   <th rowSpan={2}>Why this amount</th>
                   <th className="actions" rowSpan={2}></th>
@@ -342,26 +341,26 @@ export default function Financials() {
                         </div>
                       </div>
                     </td>
-                    <Num v={r.square_gross_sales} sep />
-                    <Num v={r.square_discounts} />
-                    <Num v={r.square_net_card} />
-                    <Num v={r.square_card_tax} />
-                    <Num v={r.square_tips_card} />
-                    <Num v={r.square_cc_fee} />
-                    <Num v={r.cash_collected} sep />
-                    <Num v={r.cash_tax} />
-                    <Num v={r.cash_pre_tax} />
-                    <Num v={r.check_invoice} sep cls="key" />
-                    <Num v={r.deposit} />
-                    <td className="sep">
+                    <Num v={r.square_gross_sales} g="g-sq" sep />
+                    <Num v={r.square_discounts} g="g-sq" />
+                    <Num v={r.square_net_card} g="g-sq" />
+                    <Num v={r.square_card_tax} g="g-sq" />
+                    <Num v={r.square_tips_card} g="g-sq" />
+                    <Num v={r.square_cc_fee} g="g-sq" />
+                    <Num v={r.cash_collected} g="g-cash" sep />
+                    <Num v={r.cash_tax} g="g-cash" />
+                    <Num v={r.cash_pre_tax} g="g-cash" />
+                    <Num v={r.check_invoice} g="g-inv" sep cls="key" />
+                    <Num v={r.deposit} g="g-inv" />
+                    <td className="sep g-tot">
                       <Badge kind={r.taxable ? "gray" : "green"}>{r.taxable ? "Taxable" : "Exempt"}</Badge>
                     </td>
-                    <Num v={r.event_sales_collected} />
-                    <Num v={r.sales_tax} />
-                    <Num v={r.sales_dollars} />
-                    <Num v={r.giveback_amount} />
-                    <Num v={r.net_event_sales} />
-                    <Num v={r.location_fee} />
+                    <Num v={r.event_sales_collected} g="g-tot" />
+                    <Num v={r.sales_tax} g="g-tot" />
+                    <Num v={r.sales_dollars} g="g-tot" />
+                    <Num v={r.giveback_amount} g="g-tot" />
+                    <Num v={r.net_event_sales} g="g-tot" />
+                    <Num v={r.location_fee} g="g-tot" />
                     <td className="sep">
                       <Badge kind={r.paid ? "green" : "gray"}>
                         {r.paid ? `Paid${r.payment_method ? ` · ${r.payment_method}` : ""}` : "Unpaid"}
@@ -394,24 +393,24 @@ export default function Financials() {
                       <span className="muted" style={{ fontWeight: 400 }}> · {data.total} rows</span>
                     </div>
                   </td>
-                  <td className="right sep">{money(sum("square_gross_sales"))}</td>
-                  <td className="right">{money(sum("square_discounts"))}</td>
-                  <td className="right">{money(sum("square_net_card"))}</td>
-                  <td className="right">{money(sum("square_card_tax"))}</td>
-                  <td className="right">{money(sum("square_tips_card"))}</td>
-                  <td className="right">{money(sum("square_cc_fee"))}</td>
-                  <td className="right sep">{money(sum("cash_collected"))}</td>
-                  <td className="right">{money(sum("cash_tax"))}</td>
-                  <td className="right">{money(sum("cash_pre_tax"))}</td>
-                  <td className="right sep">{money(sum("check_invoice"))}</td>
-                  <td className="right">{money(sum("deposit"))}</td>
-                  <td className="sep" />
-                  <td className="right">{money(sum("event_sales_collected"))}</td>
-                  <td className="right">{money(sum("sales_tax"))}</td>
-                  <td className="right">{money(sum("sales_dollars"))}</td>
-                  <td className="right">{money(sum("giveback_amount"))}</td>
-                  <td className="right">{money(sum("net_event_sales"))}</td>
-                  <td className="right">{money(sum("location_fee"))}</td>
+                  <td className="right g-sq sep">{money(sum("square_gross_sales"))}</td>
+                  <td className="right g-sq">{money(sum("square_discounts"))}</td>
+                  <td className="right g-sq">{money(sum("square_net_card"))}</td>
+                  <td className="right g-sq">{money(sum("square_card_tax"))}</td>
+                  <td className="right g-sq">{money(sum("square_tips_card"))}</td>
+                  <td className="right g-sq">{money(sum("square_cc_fee"))}</td>
+                  <td className="right g-cash sep">{money(sum("cash_collected"))}</td>
+                  <td className="right g-cash">{money(sum("cash_tax"))}</td>
+                  <td className="right g-cash">{money(sum("cash_pre_tax"))}</td>
+                  <td className="right g-inv sep">{money(sum("check_invoice"))}</td>
+                  <td className="right g-inv">{money(sum("deposit"))}</td>
+                  <td className="sep g-tot" />
+                  <td className="right g-tot">{money(sum("event_sales_collected"))}</td>
+                  <td className="right g-tot">{money(sum("sales_tax"))}</td>
+                  <td className="right g-tot">{money(sum("sales_dollars"))}</td>
+                  <td className="right g-tot">{money(sum("giveback_amount"))}</td>
+                  <td className="right g-tot">{money(sum("net_event_sales"))}</td>
+                  <td className="right g-tot">{money(sum("location_fee"))}</td>
                   <td className="sep" />
                   <td />
                   <td />
@@ -428,10 +427,12 @@ export default function Financials() {
 /** A money cell. Zero and missing values are dimmed so the eye skips them and
  *  lands on the columns that actually carry an amount — most rows only use a
  *  handful of the 18 figures. `sep` marks the first column of a header group. */
-function Num({ v, sep, cls }: { v: number | null | undefined; sep?: boolean; cls?: string }) {
+function Num({
+  v, sep, cls, g,
+}: { v: number | null | undefined; sep?: boolean; cls?: string; g?: string }) {
   const empty = !v;
   return (
-    <td className={["right", sep && "sep", cls, empty && "zero"].filter(Boolean).join(" ")}>
+    <td className={["right", g, sep && "sep", cls, empty && "zero"].filter(Boolean).join(" ")}>
       {money(v)}
     </td>
   );
@@ -439,9 +440,9 @@ function Num({ v, sep, cls }: { v: number | null | undefined; sep?: boolean; cls
 
 function Tot({ label, v }: { label: string; v: string }) {
   return (
-    <div className="card stat">
-      <div className="label">{label}</div>
-      <div className="value small">{v}</div>
+    <div className="sum">
+      <span className="l">{label}</span>
+      <span className="v">{v}</span>
     </div>
   );
 }

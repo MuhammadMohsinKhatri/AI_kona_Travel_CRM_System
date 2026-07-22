@@ -31,6 +31,19 @@ export function Badge({ kind, children }: { kind: string; children: ReactNode })
   return <span className={`badge ${cls}`}>{children}</span>;
 }
 
+/** A small "i" that reveals explanatory text on hover/focus. Lets a page keep
+ *  its explanation without spending a paragraph of vertical space on it —
+ *  the tables are the point of these screens, so they should start high.
+ *  `tabIndex` + `focus-within` so it's reachable by keyboard, not mouse-only. */
+export function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="info-tip" tabIndex={0} role="note" aria-label={text}>
+      <span className="i" aria-hidden="true">i</span>
+      <span className="tip">{text}</span>
+    </span>
+  );
+}
+
 export function money(v: number | null | undefined): string {
   if (v == null) return "—";
   return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });

@@ -13,6 +13,15 @@
   --crit: #dc2626;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
   --radius: 10px;
+
+  /* Ledger header + column bands, matching the owner's spreadsheet. Kept as
+     translucent washes so they sit on top of zebra striping and hover. */
+  --head-1: #1f3864;   /* group band  */
+  --head-2: #2f4f7f;   /* column labels */
+  --band-sq:   rgba(14, 165, 233, .07);
+  --band-cash: rgba(34, 197, 94, .11);
+  --band-inv:  rgba(234, 179, 8, .14);
+  --band-tot:  rgba(249, 115, 22, .10);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,6 +32,14 @@
     --text: #e6ebf2;
     --text-dim: #94a3b8;
     --shadow: none;
+    /* Same hues, dialled down — on a dark surface a wash reads much stronger
+       than it does on white. */
+    --head-1: #16273f;
+    --head-2: #1f3552;
+    --band-sq:   rgba(14, 165, 233, .10);
+    --band-cash: rgba(34, 197, 94, .10);
+    --band-inv:  rgba(234, 179, 8, .10);
+    --band-tot:  rgba(249, 115, 22, .09);
   }
 }
 
@@ -110,6 +127,43 @@ a:hover { text-decoration: underline; }
 .page-title { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
 .page-sub { color: var(--text-dim); margin: 0 0 22px; max-width: 900px; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+/* Title + its "i" affordance, for pages that trade the description paragraph
+   for a hover. The title keeps its own bottom margin at zero so the row
+   doesn't inherit the paragraph's spacing. */
+.title-row { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.title-row .page-title { margin: 0; }
+
+/* ── Hover "i" ─────────────────────────────────────────────────────────── */
+.info-tip { position: relative; display: inline-flex; cursor: help; }
+.info-tip .i {
+  display: grid; place-items: center; width: 18px; height: 18px;
+  border-radius: 50%; border: 1.5px solid var(--text-dim); color: var(--text-dim);
+  font-size: 11px; font-weight: 800; font-style: italic; line-height: 1;
+}
+.info-tip:hover .i, .info-tip:focus-within .i { border-color: var(--brand); color: var(--brand); }
+.info-tip .tip {
+  display: none; position: absolute; top: calc(100% + 8px); left: -4px;
+  width: 340px; padding: 10px 12px; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(16,24,40,.16);
+  font-size: 12.5px; font-weight: 400; line-height: 1.5; color: var(--text-dim);
+  white-space: normal;
+}
+.info-tip:hover .tip, .info-tip:focus-within .tip { display: block; }
+
+/* ── Compact totals strip ─────────────────────────────────────────────────
+   The same figures the four stat cards carried, in about a third of the
+   height — on a table-first page the numbers are context, not the headline. */
+.sum-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 10px 4px; margin-bottom: 12px;
+}
+.sum { display: flex; align-items: baseline; gap: 8px; padding: 0 18px; flex: 1; min-width: 170px; }
+.sum + .sum { border-left: 1px solid var(--border); }
+.sum .l { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); }
+.sum .v { font-size: 17px; font-weight: 700; margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* Cards */
 .grid { display: grid; gap: 16px; }
@@ -140,9 +194,11 @@ tbody tr:last-child td { border-bottom: none; }
    Frozen header + frozen identity columns (DATE / EVENT / EVENT TYPE), so a
    value 20 columns to the right still tells you which event it belongs to.
    Scrolls in both axes inside its own viewport, like a spreadsheet. */
-/* Taller scroll viewport so at least ~10 rows are visible before scrolling
-   (was 100vh-300px, which showed only a handful on shorter laptops). */
-.table-wrap.sheet { max-height: calc(100vh - 210px); overflow: auto; }
+/* Fill whatever the page chrome above leaves. The subtrahend tracks that
+   chrome: page padding + title row + two filter rows + the totals strip.
+   Trimming the description paragraph and the four stat cards down to one
+   slim strip is what let this grow — keep them in sync if that changes. */
+.table-wrap.sheet { max-height: calc(100vh - 232px); overflow: auto; }
 
 /* Cell backgrounds must be opaque — sticky cells slide over other cells.
    Setting the background on every td lets zebra/hover cover sticky ones too. */
@@ -156,20 +212,30 @@ tbody tr:last-child td { border-bottom: none; }
    words instead of "Square: Net Sales (Card)".
    Row 2 sticks BELOW row 1, so its offset is row 1's height — both are fixed
    here so the two stay locked together. */
-.sheet thead th { position: sticky; z-index: 3; }
-.sheet thead tr:first-child > th { top: 0; height: 22px; }
-.sheet thead tr:nth-child(2) > th { top: 22px; }
-/* Identity columns rowspan both header rows, so they anchor at the top. */
-.sheet thead tr:first-child > th.stick { top: 0; }
+/* Every header cell is navy — including the rowspan-2 ones (Paid? / Why this
+   amount / the frozen identity block), which sit in row 1 and would otherwise
+   fall back to the pale global `th` background and break the band. */
+.sheet thead th { position: sticky; z-index: 3; background: var(--head-2); color: #fff; }
+.sheet thead tr:first-child > th { top: 0; }
+.sheet thead tr:nth-child(2) > th { top: var(--grp-h); }
 
-/* The group band: quiet, uppercase, and clearly subordinate to the labels
-   under it — it names a block, it isn't a column of its own. */
-.sheet thead th.grp {
+/* Header band, modelled on the owner's spreadsheet: solid navy, white type.
+   A dark header makes the pale column tints below it read as deliberate
+   groups rather than as highlighting.
+
+   The height here is load-bearing, not cosmetic: row 2 is stuck at exactly
+   --grp-h, so if this row rendered any taller the two would overlap while
+   scrolling. Padding is zeroed and line-height pinned to the same value so
+   the height is exact rather than font-dependent (box-sizing is border-box
+   globally, so the border is included). Change the two together. */
+.sheet { --grp-h: 26px; }
+.sheet thead tr:first-child > th.grp {
   font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--brand-ink);
-  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2));
-  text-align: center; border-bottom: 1px solid var(--border);
-  padding-top: 4px; padding-bottom: 4px;
+  text-transform: uppercase; color: #fff;
+  background: var(--head-1);
+  text-align: center; border-bottom: 1px solid var(--head-2);
+  height: var(--grp-h); line-height: var(--grp-h);
+  padding-top: 0; padding-bottom: 0;
 }
 
 /* Frozen identity columns.
@@ -216,16 +282,32 @@ tbody tr:last-child td { border-bottom: none; }
    should land first (headers' underline, the totals row, key money). */
 .sheet thead tr:nth-child(2) > th, .sheet thead th.stick {
   font-weight: 700;
-  color: var(--text);
-  border-bottom: 2px solid var(--brand);
+  color: #fff;
+  background: var(--head-2);
+  border-bottom: none;
   font-size: 11.5px;
 }
+.sheet thead th.stick > .cell { color: #fff; }
 /* Column-group separators. Marked with an explicit class rather than
    nth-child so reordering a column can't silently move the lines onto the
    wrong ones (and so the same class works in head, body, and footer). */
 .sheet .sep { border-left: 1px solid var(--border); }
+.sheet thead .sep { border-left: 1px solid rgba(255,255,255,.22); }
 /* Check / Invoice — the sheet's headline money column. */
 .sheet tbody td.key { font-weight: 700; }
+
+/* ── Column colour bands ──────────────────────────────────────────────────
+   Copied from how the owner colour-codes the spreadsheet: each block of
+   related figures gets its own wash, so you can tell at a glance whether a
+   number is card, cash, invoiced, or a computed total — without reading up
+   to the header.
+   These are painted as a full-bleed inset shadow rather than a background,
+   so the zebra striping and row hover underneath still show through the
+   alpha instead of fighting the tint for specificity. */
+.sheet td.g-sq   { box-shadow: inset 0 0 0 999px var(--band-sq); }
+.sheet td.g-cash { box-shadow: inset 0 0 0 999px var(--band-cash); }
+.sheet td.g-inv  { box-shadow: inset 0 0 0 999px var(--band-inv); }
+.sheet td.g-tot  { box-shadow: inset 0 0 0 999px var(--band-tot); }
 /* Totals: the row the eye should find — brand-tinted, heavy top rule. */
 .sheet tfoot td {
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
@@ -308,11 +390,12 @@ tbody tr:hover td.actions { background: var(--surface-2); }
    easy to read and obviously clickable at the smaller size. */
 .toolbar .btn, .toolbar .select, .toolbar .input,
 .topbar .btn, .topbar .select {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 7px 10px;
+  padding: 6px 9px;
   color: var(--text);
 }
+.toolbar { gap: 6px; margin-bottom: 10px; }
 .toolbar .select, .toolbar .input { border-color: var(--border); }
 .toolbar .select:hover, .toolbar .input:hover, .toolbar .btn:hover { border-color: var(--brand); }
 .toolbar .select:focus, .toolbar .input:focus {
