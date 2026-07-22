@@ -322,6 +322,41 @@ export default function Dashboard() {
         </div>
       ) : null}
 
+      {/* Latest run overall — shown regardless of the date picker, so the most
+          recent run's details are always here even when it processed events
+          dated on another day (or was an all-dates / single-event run). Hidden
+          when the date-scoped block above already covers that same run. */}
+      {stats.last_run &&
+        (!stats.date_run?.last || stats.date_run.last.id !== stats.last_run.id) && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            borderColor: stats.last_run.status === "failed" ? "var(--crit)" : undefined,
+          }}
+        >
+          <div className="flex between">
+            <strong style={stats.last_run.status === "failed" ? { color: "var(--crit)" } : undefined}>
+              Latest run · #{stats.last_run.id} · {stats.last_run.status}
+            </strong>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {stats.last_run.trigger} · {stats.last_run.target_date || "all dates"}
+              {stats.last_run.finished_at &&
+                ` · ${new Date(stats.last_run.finished_at).toLocaleString()}`}
+            </span>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            Most recent pipeline run — independent of the date selected above.
+          </div>
+          <RunEventBreakdown
+            runId={stats.last_run.id}
+            from="/"
+            fromLabel="Dashboard"
+            compact
+          />
+        </div>
+      )}
+
       {targetDate && stats.total_events === 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <strong>No events processed for {targetDate} yet.</strong>
