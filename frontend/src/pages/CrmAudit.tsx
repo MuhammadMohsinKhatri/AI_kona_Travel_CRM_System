@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CrmAuditResponse } from "../api/client";
 import { AuditDetail, Badge, Empty, Loading } from "../components/ui";
@@ -150,6 +150,7 @@ export default function CrmAudit() {
                   >
                     {e.summary}
                     <AuditDetail detail={e.detail} />
+                    <ErrorDiagnostic detail={e.detail} />
                   </td>
                   <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                     {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
@@ -161,5 +162,43 @@ export default function CrmAudit() {
         </div>
       )}
     </>
+  );
+}
+
+/** For an `error` audit row, a collapsible dump of the exact request body we
+ *  sent to KonaOS and the raw response — the evidence for diagnosing a
+ *  server-side 500 (which returns no field detail of its own). Renders
+ *  nothing unless the diagnostic fields are present. Click to expand; the
+ *  <pre> is selectable so it can be copied out. */
+function ErrorDiagnostic({ detail }: { detail: Record<string, unknown> | null | undefined }) {
+  if (!detail) return null;
+  const attempted = detail.attempted_payload;
+  const response = detail.konaos_response;
+  if (attempted === undefined && response === undefined) return null;
+
+  const pre: CSSProperties = {
+    marginTop: 6, padding: 8, background: "var(--surface-2)", border: "1px solid var(--border)",
+    borderRadius: 8, fontSize: 11.5, lineHeight: 1.45, maxHeight: 260, overflow: "auto",
+    whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text)",
+  };
+
+  return (
+    <details style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+      <summary style={{ cursor: "pointer", color: "var(--text-dim)", fontSize: 12 }}>
+        Show diagnostic (what we sent + KonaOS response)
+      </summary>
+      {response !== undefined && (
+        <>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>KonaOS response:</div>
+          <pre style={pre}>{String(response)}</pre>
+        </>
+      )}
+      {attempted !== undefined && (
+        <>
+          <div className="muted" style={{ fontSize: 11.5 }}>Request body we sent:</div>
+          <pre style={pre}>{JSON.stringify(attempted, null, 2)}</pre>
+        </>
+      )}
+    </details>
   );
 }

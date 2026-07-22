@@ -1314,12 +1314,27 @@ class KonaosClient:
         )
         
         if response.status_code != 200:
-            error_text = response.text[:500] if hasattr(response, 'text') else str(response)
-            raise httpx.HTTPStatusError(
-                f"KonaOS API error {response.status_code}: {error_text}",
+            full_body = response.text if hasattr(response, "text") else str(response)
+            # DIAGNOSTIC (2026-07-22): this endpoint 500s server-side for some
+            # events (seen on selling / pending). KonaOS's 500 body is generic
+            # ("internal server error"), so the useful evidence is the EXACT
+            # body WE sent — captured here (logging only, the request is
+            # unchanged) and attached to the exception so the pipeline can
+            # surface it on CRM Activity for a working-vs-failing diff. Safe to
+            # remove once the offending field is identified.
+            attempted = _js_safe(update_payload)
+            print(f"[UPDATE_EVENT_FAIL] event={event_id} status={response.status_code}", flush=True)
+            print(f"[UPDATE_EVENT_FAIL] konaos_response={full_body[:2000]}", flush=True)
+            print(f"[UPDATE_EVENT_FAIL] attempted_body={json.dumps(attempted)[:8000]}", flush=True)
+            err = httpx.HTTPStatusError(
+                f"KonaOS API error {response.status_code}: {full_body[:500]}",
                 request=response.request,
-                response=response
+                response=response,
             )
+            # Ride-along attributes the pipeline reads into the audit detail.
+            err.attempted_payload = attempted          # type: ignore[attr-defined]
+            err.konaos_response = full_body            # type: ignore[attr-defined]
+            raise err
         response.raise_for_status()
         result = response.json()
         # Diagnostic info so callers can show/confirm nothing was silently

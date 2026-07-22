@@ -99,8 +99,19 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         # event is visible there alongside the successful writes — not only in
         # the raw run log. This is the row a "why didn't this sync?" question
         # gets answered from.
+        detail = {"phase": phase, "error": str(exc)}
+        # DIAGNOSTIC: if the CRM client attached the exact body it PUT and the
+        # raw KonaOS response (see KonaosClient.update_event), carry them into
+        # the audit detail so a failing event can be diffed against a working
+        # one from the CRM Activity page — no SSH needed.
+        attempted = getattr(exc, "attempted_payload", None)
+        konaos_response = getattr(exc, "konaos_response", None)
+        if attempted is not None:
+            detail["attempted_payload"] = attempted
+        if konaos_response is not None:
+            detail["konaos_response"] = str(konaos_response)[:4000]
         _audit(db, event, "error", _error_summary(phase, exc),
-               detail={"phase": phase, "error": str(exc)}, run_id=run.id)
+               detail=detail, run_id=run.id)
         db.commit()
         items.remove(item)
 

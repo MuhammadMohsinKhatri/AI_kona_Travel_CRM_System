@@ -309,3 +309,44 @@ def test_update_event_strips_readonly_invoice_status():
     assert "invoiceStatus" not in sent
     assert sent["invoiceAmount"] == 275.0
     assert sent["businessName"] == "Ev"  # required-field fallback still applies
+
+
+def test_update_event_failure_attaches_diagnostic():
+    """On a KonaOS 500 the raised error carries the exact body we sent and the
+    raw response, so the pipeline can surface them on CRM Activity for a
+    failing-vs-working diff (the 500 body itself has no field detail)."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.konaos.client import KonaosClient
+
+    async def scenario():
+        kc = KonaosClient()
+        kc.session_key = "test"
+        fetched = {"id": "E1", "name": "Ev", "businessName": "Biz", "clientId": None}
+
+        async def fake_request(method, endpoint, **kw):
+            class R:
+                status_code = 200 if method == "GET" else 500
+                text = ('{}' if method == "GET"
+                        else '{"general":[{"messageCode":"main.internalServerError"}]}')
+                request = None
+                response = None
+                def json(self):
+                    return fetched
+                def raise_for_status(self):
+                    pass
+            return R()
+
+        with patch.object(kc, "_make_request", side_effect=fake_request):
+            try:
+                await kc.update_event("E1", ccAmount=100.0, taxPercent=0.06)
+                raise AssertionError("expected update_event to raise on 500")
+            except Exception as exc:  # noqa: BLE001
+                await kc.close()
+                return exc
+
+    exc = asyncio.run(scenario())
+    assert getattr(exc, "attempted_payload", None) is not None
+    assert exc.attempted_payload["ccAmount"] == 100.0
+    assert "internalServerError" in getattr(exc, "konaos_response", "")
