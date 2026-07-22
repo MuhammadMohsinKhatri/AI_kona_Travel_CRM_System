@@ -1247,51 +1247,50 @@ class KonaosClient:
         if not update_payload.get("businessName"):
             update_payload["businessName"] = update_payload.get("name") or "Kona Ice Event"
 
-        # CRITICAL: the GET and PUT DTOs use DIFFERENT field names for
-        # equipment/staff assignment — reads return eventAssetsDtoList /
-        # eventStaffsDtoList, but the update endpoint expects eventAssetsList /
-        # eventStaffList (confirmed against the KonaOS API contract). Since
-        # update_payload started as a copy of the GET response, those
-        # write-shaped keys are always absent here — without this mapping the
-        # "ensure arrays are lists" defaulting below fills them with [], which
-        # KonaOS reads as "unassign everything," silently clearing the event's
-        # equipment/staff on every single update_event call. Map the real data
-        # across first; an explicit kwargs override (a deliberate reassignment)
-        # is left untouched since update_payload already reflects it by now.
-        if update_payload.get("eventAssetsList") is None:
-            update_payload["eventAssetsList"] = existing_event.get("eventAssetsDtoList") or []
-        if update_payload.get("eventStaffList") is None:
-            update_payload["eventStaffList"] = existing_event.get("eventStaffsDtoList") or []
+        # CORRECTED 2026-07-22 (superseding the previous fix, which was wrong):
+        # eventAssetsList / eventStaffList / eventTemplatesDtoList /
+        # itemsDtoList / tags / eventBannerFiles are NOT how this endpoint
+        # reads or writes equipment/staff/etc — a real captured KonaOS
+        # response (spec/openapi-devtools-spec.json in the API-contract repo)
+        # shows ALL SIX of these are ALWAYS `null` on a genuine GET, right
+        # alongside the real data under eventAssetsDtoList/eventStaffsDtoList.
+        # This endpoint simply doesn't manage assignment through these keys.
+        #
+        # The 2026-07-21 incident had TWO bugs layered:
+        #  1. The old "ensure arrays are lists" block defaulted these to `[]`
+        #     when None. An EMPTY ARRAY here — unlike null/absent — is read
+        #     by KonaOS as "explicitly clear," wiping real equipment/staff.
+        #  2. The very next fix (since corrected) tried to preserve them by
+        #     echoing the real eventAssetsDtoList/eventStaffsDtoList data into
+        #     these keys. That's the wrong shape for whatever schema this
+        #     endpoint expects here, and KonaOS's validator flat-out rejects
+        #     the request with main.invalidJsonError — breaking every event
+        #     sync (verified: a 2026-07-15 run 400'd on every update_event
+        #     call for events with any equipment/staff).
+        #
+        # The fix proven safe by direct precedent (dropping the read-only
+        # invoiceStatus key above, verified against production): never send
+        # these six keys at all. Equipment/staff assignment is untouched by
+        # this endpoint either way — dropping them is a pure no-op for
+        # assignment, and avoids both the wipe and the 400.
+        for field in ("eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
+                      "itemsDtoList", "tags", "eventBannerFiles"):
+            update_payload.pop(field, None)
 
-        # Ensure arrays are lists (not None)
-        array_fields = ["eventTemplatesDtoList", "eventAssetsList", "eventStaffList",
-                       "itemsDtoList", "tags", "eventBannerFiles"]
-        for field in array_fields:
-            if update_payload.get(field) is None:
-                update_payload[field] = []
-
-        # SAFETY NET (2026-07-21 incident): this must never be able to send an
-        # empty equipment/staff list for an event that actually has some
-        # assigned, unless the caller explicitly asked to change it. The
-        # mapping above should make this unreachable — if it ever fires, a
-        # later edit broke the mapping and this stops the wipe cold instead of
-        # silently unassigning a real truck/kiosk/staff member in production.
-        existing_equipment_count = len(existing_event.get("eventAssetsDtoList") or [])
-        existing_staff_count = len(existing_event.get("eventStaffsDtoList") or [])
-        new_equipment_count = len(update_payload.get("eventAssetsList") or [])
-        new_staff_count = len(update_payload.get("eventStaffList") or [])
-        if new_equipment_count == 0 and existing_equipment_count > 0 and "eventAssetsList" not in kwargs:
-            raise RuntimeError(
-                f"update_event({event_id}): refusing to send an empty eventAssetsList — "
-                f"the live event has {existing_equipment_count} asset(s) assigned. "
-                "This would silently unassign all equipment; aborting the PUT."
-            )
-        if new_staff_count == 0 and existing_staff_count > 0 and "eventStaffList" not in kwargs:
-            raise RuntimeError(
-                f"update_event({event_id}): refusing to send an empty eventStaffList — "
-                f"the live event has {existing_staff_count} staff member(s) assigned. "
-                "This would silently unassign all staff; aborting the PUT."
-            )
+        # SAFETY NET: these six keys must never reach the request body as a
+        # list — an empty list is exactly what causes KonaOS to wipe a real
+        # assignment, and this endpoint has no legitimate use for sending
+        # them at all (see above). If a future edit reintroduces one as a
+        # list, fail loudly instead of risking a repeat of the incident.
+        for field in ("eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
+                      "itemsDtoList", "tags", "eventBannerFiles"):
+            if isinstance(update_payload.get(field), list):
+                raise RuntimeError(
+                    f"update_event({event_id}): {field} must never be sent as a list — "
+                    "KonaOS treats an empty list here as 'clear the assignment.' "
+                    "This endpoint doesn't manage assignment through this key at all; "
+                    "drop it instead of populating it."
+                )
 
         # Ensure string fields are strings (not None) - common required fields
         string_fields_defaults = {
@@ -1319,10 +1318,14 @@ class KonaosClient:
         result = response.json()
         # Diagnostic counts so callers can log confirmation that nothing was
         # silently emptied — prefixed with "_" per this codebase's convention
-        # for internal fields riding alongside a real API response.
+        # for internal fields riding alongside a real API response. These are
+        # the pre-write counts, reported as "preserved" because this endpoint
+        # never touches assignment at all now (the six keys above are always
+        # dropped) — so whatever existed before this call is guaranteed to
+        # still be there after it.
         if isinstance(result, dict):
-            result["_equipment_preserved"] = new_equipment_count
-            result["_staff_preserved"] = new_staff_count
+            result["_equipment_preserved"] = len(existing_event.get("eventAssetsDtoList") or [])
+            result["_staff_preserved"] = len(existing_event.get("eventStaffsDtoList") or [])
             result["_fields_updated"] = sorted(kwargs.keys())
         return result
 

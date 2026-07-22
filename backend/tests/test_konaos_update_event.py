@@ -1,12 +1,25 @@
-"""Regression test for the equipment/staff wipe bug: KonaOS's read and write
-DTOs use different field names for equipment/staff assignment
-(eventAssetsDtoList/eventStaffsDtoList on GET vs eventAssetsList/eventStaffList
-on PUT). update_event's read-modify-write must map the real data across
-instead of letting the "ensure arrays are lists" defaulting fill it with []
-(which KonaOS reads as "unassign everything")."""
+"""Regression tests for the equipment/staff wipe bug (2026-07-21) AND its
+first attempted fix, which was itself wrong (2026-07-22 correction).
+
+A real captured KonaOS response (spec/openapi-devtools-spec.json in the API-
+contract repo) shows eventAssetsList / eventStaffList / eventTemplatesDtoList /
+itemsDtoList / tags / eventBannerFiles are ALWAYS null on a genuine GET,
+alongside the real data under eventAssetsDtoList/eventStaffsDtoList — this
+endpoint doesn't manage assignment through those keys at all. The original bug
+was defaulting them to `[]` (KonaOS reads an empty list as "clear the
+assignment"). The first fix instead populated them with the real GET-shaped
+data, which is the wrong shape for whatever this endpoint expects and made
+KonaOS reject the whole request (main.invalidJsonError) on every event with
+any equipment/staff assigned. The correct fix, proven by the same precedent as
+the already-working invoiceStatus drop: never send these six keys at all."""
 import asyncio
 
 from app.konaos.client import KonaosClient
+
+DROPPED_FIELDS = (
+    "eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
+    "itemsDtoList", "tags", "eventBannerFiles",
+)
 
 
 class _FakeResponse:
@@ -22,83 +35,62 @@ class _FakeResponse:
         pass
 
 
-def test_update_event_preserves_equipment_and_staff_assignment():
+def _run_update(existing, **kwargs):
     kc = KonaosClient()
+    captured = {}
+
+    async def fake_get_event_details(event_id, deleted=None):
+        return dict(existing)
+
+    async def fake_make_request(method, path, json=None, **_kw):
+        captured["payload"] = json
+        return _FakeResponse({"success": True})
+
+    kc.get_event_details = fake_get_event_details
+    kc._make_request = fake_make_request
+
+    result = asyncio.run(kc.update_event(existing["id"], **kwargs))
+    return captured["payload"], result
+
+
+def test_update_event_never_sends_the_six_always_null_fields_with_real_assignment():
+    """An event with real equipment + staff assigned must not have those
+    keys touched at all — dropped, not echoed, not emptied."""
     existing = {
-        "id": "evt-1",
-        "name": "Test Event",
-        "businessName": "Test Biz",
-        # GET-shaped keys — this is what a real KonaOS event detail carries.
+        "id": "evt-1", "name": "Test Event", "businessName": "Test Biz",
         "eventAssetsDtoList": [{"assetId": "KEV1", "assetName": "KEV1"}],
         "eventStaffsDtoList": [{"staffId": "s1", "firstName": "Jane"}],
     }
-    captured = {}
+    payload, result = _run_update(existing, ccAmount=100.0)
 
-    async def fake_get_event_details(event_id, deleted=None):
-        return dict(existing)
-
-    async def fake_make_request(method, path, json=None, **kwargs):
-        captured["payload"] = json
-        return _FakeResponse({"success": True})
-
-    kc.get_event_details = fake_get_event_details
-    kc._make_request = fake_make_request
-
-    asyncio.run(kc.update_event("evt-1", ccAmount=100.0))
-
-    payload = captured["payload"]
-    # The write-shaped keys must carry the real assignment across, not [].
-    assert payload["eventAssetsList"] == existing["eventAssetsDtoList"]
-    assert payload["eventStaffList"] == existing["eventStaffsDtoList"]
+    for field in DROPPED_FIELDS:
+        assert field not in payload, f"{field} must be absent from the request body"
     # Financial kwargs still merge in as before.
     assert payload["ccAmount"] == 100.0
+    # Diagnostic counts reflect what existed pre-write (guaranteed untouched).
+    assert result["_equipment_preserved"] == 1
+    assert result["_staff_preserved"] == 1
 
 
-def test_update_event_respects_explicit_asset_override():
-    """A caller deliberately reassigning equipment (passing eventAssetsList
-    explicitly) must not be overridden by the GET-shaped data."""
-    kc = KonaosClient()
+def test_update_event_never_sends_them_when_truly_unassigned_either():
+    """No equipment/staff on either side — still absent, not an empty list."""
+    existing = {"id": "evt-3", "name": "Bare Event", "businessName": "Biz"}
+    payload, result = _run_update(existing, ccAmount=5.0)
+
+    for field in DROPPED_FIELDS:
+        assert field not in payload
+    assert result["_equipment_preserved"] == 0
+    assert result["_staff_preserved"] == 0
+
+
+def test_update_event_strips_even_an_explicit_kwargs_override():
+    """This endpoint doesn't manage assignment through these keys at all —
+    an explicit attempt to set eventAssetsList is stripped just like any
+    other value, not treated as a deliberate reassignment to honor."""
     existing = {
-        "id": "evt-2",
-        "name": "Test Event 2",
-        "businessName": "Test Biz 2",
+        "id": "evt-2", "name": "Test Event 2", "businessName": "Test Biz 2",
         "eventAssetsDtoList": [{"assetId": "KEV1", "assetName": "KEV1"}],
     }
-    captured = {}
+    payload, _ = _run_update(existing, eventAssetsList=[{"assetId": "KEV9"}])
 
-    async def fake_get_event_details(event_id, deleted=None):
-        return dict(existing)
-
-    async def fake_make_request(method, path, json=None, **kwargs):
-        captured["payload"] = json
-        return _FakeResponse({"success": True})
-
-    kc.get_event_details = fake_get_event_details
-    kc._make_request = fake_make_request
-
-    asyncio.run(kc.update_event("evt-2", eventAssetsList=[{"assetId": "KEV9"}]))
-
-    assert captured["payload"]["eventAssetsList"] == [{"assetId": "KEV9"}]
-
-
-def test_update_event_defaults_to_empty_when_truly_unassigned():
-    """An event with no equipment/staff on either side stays an empty list,
-    not a KeyError or None."""
-    kc = KonaosClient()
-    existing = {"id": "evt-3", "name": "Bare Event", "businessName": "Biz"}
-    captured = {}
-
-    async def fake_get_event_details(event_id, deleted=None):
-        return dict(existing)
-
-    async def fake_make_request(method, path, json=None, **kwargs):
-        captured["payload"] = json
-        return _FakeResponse({"success": True})
-
-    kc.get_event_details = fake_get_event_details
-    kc._make_request = fake_make_request
-
-    asyncio.run(kc.update_event("evt-3", ccAmount=5.0))
-
-    assert captured["payload"]["eventAssetsList"] == []
-    assert captured["payload"]["eventStaffList"] == []
+    assert "eventAssetsList" not in payload
