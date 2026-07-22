@@ -5,6 +5,14 @@ import { Loading, RunEventBreakdown, StepList, money } from "../components/ui";
 
 type RunPhase = "idle" | "running" | "done";
 
+// Values must match the classifier's EVENT_TYPE output exactly.
+const RUN_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "selling", label: "Selling" },
+  { value: "invoice", label: "Invoice" },
+  { value: "hybrid", label: "Hybrid" },
+  { value: "minimum guarantee", label: "Minimum guarantee" },
+];
+
 /** Today in America/New_York — the business's day, not the browser's. */
 function todayNY(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -22,6 +30,9 @@ export default function Dashboard() {
   const [result, setResult] = useState<PipelineRun | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [dryRun, setDryRun] = useState<boolean | null>(null);
+  // Optional event-type filter for the run — empty = all types (whole day).
+  // Values match the classifier's EVENT_TYPE output exactly.
+  const [runTypes, setRunTypes] = useState<string[]>([]);
   // Set when the user sends a running pipeline to the background — the poll
   // loop must then stop touching state, or the "done" modal would pop back
   // up minutes later over whatever they're doing.
@@ -73,7 +84,10 @@ export default function Dashboard() {
     setPhase("running");
     setResult(null);
     try {
-      const res = await api.runPipeline(targetDate || undefined);
+      const res = await api.runPipeline({
+        targetDate: targetDate || undefined,
+        eventTypes: runTypes,
+      });
       // Poll while the run executes in the background worker — each poll
       // refreshes the live step list rendered in the modal. The modal is only
       // a viewer: dismissing it leaves the run going on the server.
@@ -148,13 +162,55 @@ export default function Dashboard() {
               <>
                 <span className="spinner sm" /> &nbsp;Running…
               </>
-            ) : targetDate ? (
-              `▶ Run for ${targetDate}`
-            ) : (
+            ) : !targetDate ? (
               "▶ Pick a date to run"
+            ) : runTypes.length ? (
+              `▶ Run ${targetDate} · ${runTypes.length} type${runTypes.length > 1 ? "s" : ""}`
+            ) : (
+              `▶ Run for ${targetDate}`
             )}
           </button>
         </div>
+      </div>
+
+      {/* Optional run scope: limit the run to specific event types. Empty =
+          whole day (all types). Type is resolved by classification, so a
+          filtered run still classifies the day, then processes only these. */}
+      <div className="type-filter" role="group" aria-label="Run scope by event type">
+        <span className="muted" style={{ fontSize: 12 }}>Run scope:</span>
+        <button
+          type="button"
+          className={"chip" + (runTypes.length === 0 ? " on" : "")}
+          onClick={() => setRunTypes([])}
+          title="Process every event on the date"
+        >
+          All types
+        </button>
+        {RUN_TYPE_OPTIONS.map((opt) => {
+          const on = runTypes.includes(opt.value);
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className={"chip" + (on ? " on" : "")}
+              aria-pressed={on}
+              onClick={() =>
+                setRunTypes((prev) =>
+                  prev.includes(opt.value)
+                    ? prev.filter((t) => t !== opt.value)
+                    : [...prev, opt.value]
+                )
+              }
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+        {runTypes.length > 0 && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            — others on {targetDate} will be classified then skipped
+          </span>
+        )}
       </div>
 
       {/* Server invoice mode — make dry-run visible instead of a surprise. */}

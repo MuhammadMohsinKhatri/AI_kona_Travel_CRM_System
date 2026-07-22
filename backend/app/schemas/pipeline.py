@@ -11,6 +11,8 @@ class PipelineRunOut(BaseModel):
     status: str
     trigger: str
     target_date: Optional[str] = None
+    filter_event_types: Optional[list[str]] = None
+    filter_event_ids: Optional[list[str]] = None
     events_fetched: int
     events_processed: int
     events_skipped: int

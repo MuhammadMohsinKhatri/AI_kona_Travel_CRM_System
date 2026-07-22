@@ -118,12 +118,20 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
     try:
         # ── PHASE 1: FETCH ──────────────────────────────────────────────────
         progress.set("fetch", "running")
-        from_ms, to_ms = (
-            _date_bounds_ms(run.target_date) if run.target_date else (None, None)
-        )
-        summaries = crm.list_events(from_ms=from_ms, to_ms=to_ms)
+        if run.filter_event_ids:
+            # Specific-event run: process exactly these CRM ids (date-independent).
+            # The clean phase fetches each in full via crm.get_event.
+            summaries = [{"id": str(eid)} for eid in run.filter_event_ids]
+            note(f"Specific-event run — {len(summaries)} event id(s) requested")
+        else:
+            from_ms, to_ms = (
+                _date_bounds_ms(run.target_date) if run.target_date else (None, None)
+            )
+            summaries = crm.list_events(from_ms=from_ms, to_ms=to_ms)
+            note(f"Fetched {len(summaries)} events from CRM")
         run.events_fetched = len(summaries)
-        note(f"Fetched {len(summaries)} events from CRM")
+        if run.filter_event_types:
+            note(f"Type filter active — only processing: {', '.join(run.filter_event_types)}")
         progress.set("fetch", "done", f"{len(summaries)} events")
 
         # ── PHASE 2: CLEAN & GATE ───────────────────────────────────────────
@@ -210,6 +218,29 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         if total_tok:
             classify_detail += f" · {total_tok:,} tok · ${run.ai_cost_usd:.3f}"
         progress.set("classify", "done", classify_detail)
+
+        # ── TYPE FILTER ─────────────────────────────────────────────────────
+        # EVENT_TYPE is only known after classification, so a "selling only"
+        # (etc.) run classifies everything on the date, then drops the events
+        # whose type wasn't selected — marking them skipped so the run summary
+        # shows exactly what was set aside and why.
+        if run.filter_event_types:
+            wanted = {t.strip().lower() for t in run.filter_event_types}
+            type_filtered = 0
+            for item in list(items):
+                etype = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
+                if etype not in wanted:
+                    run.events_skipped += 1
+                    type_filtered += 1
+                    reason = f"filtered out — {etype or 'unknown'} not in selected types ({', '.join(sorted(wanted))})"
+                    note(f"[{item['crm_id']}] skipped — {reason}")
+                    _upsert_event(db, run, item["raw"], item["cleaned"],
+                                  classification=item["classification"],
+                                  status="skipped", status_reason=reason)
+                    db.commit()
+                    items.remove(item)
+            if type_filtered:
+                note(f"Type filter: {type_filtered} event(s) set aside, {len(items)} match")
 
         # ── PHASE 4: SQUARE RECONCILIATION ──────────────────────────────────
         progress.set("square", "running")

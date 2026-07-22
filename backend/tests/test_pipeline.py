@@ -100,6 +100,56 @@ def test_crm_write_failure_is_recorded_on_crm_activity():
         db.close()
 
 
+def test_run_scoped_to_specific_event_ids():
+    """A specific-event run processes only the given CRM ids, date-independent."""
+    db = SessionLocal()
+    try:
+        run = PipelineRun(status="running", trigger="test",
+                          filter_event_ids=["EVT-1003"])
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        run_pipeline(db, run)
+
+        assert run.status == "completed"
+        assert run.events_fetched == 1  # only the one requested id was fetched
+        touched = db.query(Event).filter(Event.run_id == run.id).all()
+        assert {e.crm_event_id for e in touched} == {"EVT-1003"}
+    finally:
+        db.close()
+
+
+def test_run_filtered_by_event_type():
+    """A type-filtered run classifies the whole date but only fully processes
+    the selected EVENT_TYPE(s); the rest are marked skipped with a reason."""
+    db = SessionLocal()
+    try:
+        run = PipelineRun(status="running", trigger="test",
+                          filter_event_types=["selling"])
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        run_pipeline(db, run)
+
+        assert run.status == "completed"
+        processed = db.query(Event).filter(
+            Event.run_id == run.id, Event.status == "processed"
+        ).all()
+        # Everything that fully processed is a selling event.
+        assert processed, "expected at least one selling event to process"
+        assert all(e.event_type == "selling" for e in processed)
+        # At least one non-selling event was set aside by the type filter.
+        type_skipped = db.query(Event).filter(
+            Event.run_id == run.id, Event.status == "skipped",
+            Event.status_reason.like("filtered out%"),
+        ).all()
+        assert type_skipped, "expected non-selling events to be filtered out"
+    finally:
+        db.close()
+
+
 def test_full_pipeline_runs_end_to_end():
     db = SessionLocal()
     try:
