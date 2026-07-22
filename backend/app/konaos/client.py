@@ -1247,7 +1247,7 @@ class KonaosClient:
         if not update_payload.get("businessName"):
             update_payload["businessName"] = update_payload.get("name") or "Kona Ice Event"
 
-        # CORRECTED 2026-07-22 (superseding the previous fix, which was wrong):
+        # CORRECTED 2026-07-22 #2 (superseding the previous two attempts):
         # eventAssetsList / eventStaffList / eventTemplatesDtoList /
         # itemsDtoList / tags / eventBannerFiles are NOT how this endpoint
         # reads or writes equipment/staff/etc — a real captured KonaOS
@@ -1256,26 +1256,32 @@ class KonaosClient:
         # alongside the real data under eventAssetsDtoList/eventStaffsDtoList.
         # This endpoint simply doesn't manage assignment through these keys.
         #
-        # The 2026-07-21 incident had TWO bugs layered:
-        #  1. The old "ensure arrays are lists" block defaulted these to `[]`
-        #     when None. An EMPTY ARRAY here — unlike null/absent — is read
-        #     by KonaOS as "explicitly clear," wiping real equipment/staff.
-        #  2. The very next fix (since corrected) tried to preserve them by
-        #     echoing the real eventAssetsDtoList/eventStaffsDtoList data into
-        #     these keys. That's the wrong shape for whatever schema this
-        #     endpoint expects here, and KonaOS's validator flat-out rejects
-        #     the request with main.invalidJsonError — breaking every event
-        #     sync (verified: a 2026-07-15 run 400'd on every update_event
-        #     call for events with any equipment/staff).
+        # Three states have now been tried for these six keys:
+        #  1. (pre-2026-07-21) Defaulted to `[]` when None. KonaOS reads an
+        #     EMPTY ARRAY as "explicitly clear," wiping real equipment/staff.
+        #  2. (2026-07-21 fix, reverted) Populated with the real
+        #     eventAssetsDtoList/eventStaffsDtoList data. Wrong shape —
+        #     KonaOS 400'd main.invalidJsonError on every event with any
+        #     equipment/staff assigned.
+        #  3. (2026-07-22 fix #1, reverted) Dropped the keys entirely
+        #     (absent from the body) — mirroring the proven-safe invoiceStatus
+        #     precedent. But the SAME captured spec shows these six keys are
+        #     in the parent Event object's "required" list — i.e. KonaOS's
+        #     own system NEVER omits them, only ever sends them present-but-
+        #     null. A completely missing key is a shape KonaOS never
+        #     produces itself, and every update_event call in the next run
+        #     500'd with main.internalServerError (a different failure mode
+        #     than the 400 above — consistent with a server-side crash on a
+        #     required-but-absent field, e.g. an unguarded map lookup).
         #
-        # The fix proven safe by direct precedent (dropping the read-only
-        # invoiceStatus key above, verified against production): never send
-        # these six keys at all. Equipment/staff assignment is untouched by
-        # this endpoint either way — dropping them is a pure no-op for
-        # assignment, and avoids both the wipe and the 400.
+        # The one state not yet tried, and the one that exactly matches what
+        # KonaOS's own GET always returns: key PRESENT, value explicit null.
+        # Structurally this can never be an empty list (satisfies the safety
+        # net below) and is the most conservative choice — literally what
+        # their system round-trips as "no change" on every read.
         for field in ("eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
                       "itemsDtoList", "tags", "eventBannerFiles"):
-            update_payload.pop(field, None)
+            update_payload[field] = None
 
         # SAFETY NET: these six keys must never reach the request body as a
         # list — an empty list is exactly what causes KonaOS to wipe a real
@@ -1289,7 +1295,7 @@ class KonaosClient:
                     f"update_event({event_id}): {field} must never be sent as a list — "
                     "KonaOS treats an empty list here as 'clear the assignment.' "
                     "This endpoint doesn't manage assignment through this key at all; "
-                    "drop it instead of populating it."
+                    "send explicit null instead of populating it."
                 )
 
         # Ensure string fields are strings (not None) - common required fields
