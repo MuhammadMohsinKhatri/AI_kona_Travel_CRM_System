@@ -230,6 +230,35 @@ def test_konaos_json_body_never_contains_nan():
     assert s == '{"a":null,"b":[1.0,null],"c":{"d":null,"ok":2}}'
 
 
+def test_list_events_filters_by_run_id(db):
+    """The Runs page's per-run breakdown scopes events by run_id — including
+    skipped and errored ones, not just processed — so a run's failures and
+    skips are visible in one place."""
+    from app.api.routes.events import list_events
+
+    run_a = PipelineRun(status="completed", trigger="manual")
+    run_b = PipelineRun(status="completed", trigger="manual")
+    db.add_all([run_a, run_b])
+    db.commit()
+    db.add_all([
+        Event(crm_event_id="A1", event_name="proc", status="processed", run_id=run_a.id),
+        Event(crm_event_id="A2", event_name="skip", status="skipped",
+              status_reason="cancelled", run_id=run_a.id),
+        Event(crm_event_id="A3", event_name="err", status="error",
+              error="KonaOS API error 500", run_id=run_a.id),
+        Event(crm_event_id="B1", event_name="other", status="processed", run_id=run_b.id),
+    ])
+    db.commit()
+
+    page = list_events(db=db, _=None, page=1, page_size=200, run_id=run_a.id)
+    ids = {e.crm_event_id for e in page.items}
+    assert ids == {"A1", "A2", "A3"}  # run_a only, all statuses
+    assert page.total == 3
+    # the errored row still carries its failure text for the breakdown
+    err = next(e for e in page.items if e.crm_event_id == "A3")
+    assert err.error == "KonaOS API error 500"
+
+
 def test_deleting_run_does_not_touch_events(db):
     run = PipelineRun(status="completed", trigger="manual")
     db.add(run)

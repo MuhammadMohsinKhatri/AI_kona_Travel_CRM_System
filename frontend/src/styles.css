@@ -272,6 +272,10 @@ pre.json {
   line-height: 1.5;
 }
 .section-title { font-weight: 700; margin: 22px 0 10px; font-size: 15px; }
+.run-ev { padding: 8px 12px; cursor: pointer; border-top: 1px solid var(--border); }
+.run-ev:first-child { border-top: none; }
+.run-ev:hover { background: var(--surface); }
+.run-ev-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .muted { color: var(--text-dim); }
 .right { text-align: right; }
 .flex { display: flex; gap: 10px; align-items: center; }

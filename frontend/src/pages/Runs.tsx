@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, Page, PipelineRun } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading, StepList } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, RunEventBreakdown, StepList } from "../components/ui";
 
 /** Run history — and the live view for runs executing in the worker.
  *
@@ -120,11 +120,63 @@ export default function Runs() {
           {selected.error && (
             <p style={{ color: "var(--crit)" }}>{selected.error}</p>
           )}
-          <pre className="json" style={{ marginTop: 10 }}>
-            {(selected.log || []).join("\n") || "(no log yet)"}
-          </pre>
+
+          <RunEventBreakdown runId={selected.id} />
+
+          <RunLog lines={selected.log ?? []} />
         </div>
       )}
+    </>
+  );
+}
+
+/** Readable, color-coded run log — the same lines as the raw text, but with
+ *  the ISO timestamp shortened to a local time and each line tinted by what
+ *  it means (red = error, amber = skipped/protected, green = accepted/created/
+ *  synced) so the story of the run is scannable without parsing text. */
+function RunLog({ lines }: { lines: string[] }) {
+  if (!lines.length)
+    return (
+      <>
+        <div className="section-title">Run log</div>
+        <p className="muted">(no log yet)</p>
+      </>
+    );
+
+  const tint = (msg: string): string | undefined => {
+    if (/\bERROR\b|failed|error \d{3}/i.test(msg)) return "var(--crit)";
+    if (/skipped|PROTECTED|filtered out/i.test(msg)) return "var(--warn)";
+    if (/accepted|created|synced|updated|completed/i.test(msg)) return "var(--ok)";
+    return undefined;
+  };
+
+  return (
+    <>
+      <div className="section-title">Run log</div>
+      <div
+        style={{
+          background: "var(--surface-2)", border: "1px solid var(--border)",
+          borderRadius: "var(--radius)", padding: "10px 12px", marginTop: 6,
+          fontFamily: "var(--font-mono, monospace)", fontSize: 12.5, lineHeight: 1.7,
+          maxHeight: 420, overflowY: "auto",
+        }}
+      >
+        {lines.map((line, i) => {
+          const sp = line.indexOf(" ");
+          const ts = sp > 0 ? line.slice(0, sp) : "";
+          const msg = sp > 0 ? line.slice(sp + 1) : line;
+          const d = ts ? new Date(ts) : null;
+          const time = d && !isNaN(d.getTime())
+            ? d.toLocaleTimeString(undefined, { hour12: false })
+            : "";
+          return (
+            <div key={i} style={{ display: "flex", gap: 10, color: tint(msg) }}>
+              <span className="muted" style={{ flex: "none", opacity: 0.75 }}>{time}</span>
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg}</span>
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

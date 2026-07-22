@@ -8,6 +8,7 @@ const ACTION_LABELS: Record<string, string> = {
   invoice_deleted: "Invoice deleted",
   invoice_skipped: "Invoice skipped",
   event_updated: "Event updated",
+  error: "Error",
 };
 
 /** Structured, filterable record of every write our system has made to
@@ -73,8 +74,9 @@ export default function CrmAudit() {
       <h1 className="page-title">CRM Activity</h1>
       <p className="page-sub">
         Every write our system has made to KonaOS — event field updates and invoice
-        created/deleted/skipped decisions. This is the audit trail for "what did your
-        system change, and when."
+        created/deleted/skipped decisions — plus any <strong>errors</strong> where a write
+        failed and why. This is the audit trail for "what did your system change (or try
+        to change), and when." Filter to <em>Error</em> to see just the failures.
       </p>
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -128,7 +130,10 @@ export default function CrmAudit() {
                   onClick={() => e.event_id && navigate(`/events/${e.event_id}`, {
                     state: { from: location.pathname + location.search, label: "CRM Activity" },
                   })}
-                  style={{ cursor: e.event_id ? "pointer" : "default" }}
+                  style={{
+                    cursor: e.event_id ? "pointer" : "default",
+                    borderLeft: e.action === "error" ? "3px solid var(--crit)" : undefined,
+                  }}
                 >
                   <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{e.event_date || "—"}</td>
                   <td>
@@ -138,7 +143,10 @@ export default function CrmAudit() {
                   <td><Badge kind={e.action}>{ACTION_LABELS[e.action] || e.action}</Badge></td>
                   <td
                     title={JSON.stringify(e.detail, null, 2)}
-                    style={{ whiteSpace: "normal", minWidth: 280, maxWidth: 460, fontSize: 13 }}
+                    style={{
+                      whiteSpace: "normal", minWidth: 280, maxWidth: 460, fontSize: 13,
+                      color: e.action === "error" ? "var(--crit)" : undefined,
+                    }}
                   >
                     {e.summary}
                     <AuditDetail detail={e.detail} />
