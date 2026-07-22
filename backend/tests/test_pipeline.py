@@ -37,10 +37,17 @@ def test_error_summary_is_human_readable():
     failed, in plain language — not just echo the raw exception."""
     from app.core.pipeline import _error_summary
 
-    s = _error_summary("invoice", RuntimeError(
+    # Financial-sync failures (selling/MG events never create an invoice) must
+    # say "syncing", never "creating the invoice".
+    s = _error_summary("sync", RuntimeError(
         'KonaOS API error 500: {"messageCode":"main.internalServerError"}'))
-    assert "syncing financials" in s.lower()
+    assert "syncing" in s.lower()
+    assert "invoice" not in s.lower()
     assert "500" in s
+
+    # Invoice-creation failures (invoice/hybrid only) name the invoice draft.
+    s_inv = _error_summary("invoice", RuntimeError("boom"))
+    assert "invoice draft" in s_inv.lower()
 
     s2 = _error_summary("square", RuntimeError("connection timed out"))
     assert "Square reconciliation" in s2
@@ -88,7 +95,10 @@ def test_crm_write_failure_is_recorded_on_crm_activity():
         assert len(audit) == 1
         assert "Failed while" in audit[0].summary
         assert "500" in audit[0].summary or "internal server" in audit[0].summary.lower()
-        assert audit[0].detail.get("phase") == "invoice"
+        # EVT-1003 is a selling event → it never creates an invoice, so the
+        # failing operation is the financial sync, labelled "sync" (not "invoice").
+        assert audit[0].detail.get("phase") == "sync"
+        assert "invoice" not in audit[0].summary.lower()
 
         # The raw run log ends with a human-readable roll-up that names the
         # errored event under an ERRORED section.

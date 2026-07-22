@@ -310,6 +310,11 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         crm_synced = 0
         for i, item in enumerate(list(items), 1):
             progress.counter("invoice", i, len(items))
+            # Which sub-operation is running, so a failure is labelled truthfully.
+            # Selling/MG events never create an invoice (build_invoice_payload
+            # returns None for them) — only the financial sync runs — so an
+            # error there must say "syncing", not "creating the invoice".
+            phase_of_failure = "invoice"
             try:
                 payload = invoice_builder.build_invoice_payload(
                     item["merged"], item["cleaned"], item["raw"]
@@ -372,6 +377,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 # everything else on the event is preserved.
                 event_type = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
                 if event_type != "invoice":
+                    phase_of_failure = "sync"  # past invoice creation now
                     sq_bd = (item.get("square") or {}).get("breakdown") or {}
                     calc = item["calc"]
                     cls = item["classification"]
@@ -415,7 +421,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                         )
                 db.commit()
             except Exception as exc:  # noqa: BLE001
-                drop_errored(items, item, exc, "invoice")
+                drop_errored(items, item, exc, phase_of_failure)
         invoice_detail = f"{run.invoices_created} drafts"
         if crm_synced:
             invoice_detail += f" · {crm_synced} CRM events updated"
@@ -658,7 +664,10 @@ _PHASE_LABELS = {
     "classify": "AI classification",
     "square": "Square reconciliation",
     "calculate": "invoice calculation",
-    "invoice": "creating the invoice / syncing financials to KonaOS",
+    # Invoice creation only ever runs for invoice/hybrid events; selling/MG
+    # events never create an invoice, so their failures are labelled "sync".
+    "invoice": "creating the invoice draft in KonaOS",
+    "sync": "syncing financial actuals to the KonaOS event",
     "alerts": "checking alerts",
     "report": "updating the ledger",
 }
