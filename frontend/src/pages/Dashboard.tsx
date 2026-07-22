@@ -53,12 +53,17 @@ export default function Dashboard() {
   // A run for this date is executing in the worker (manual, scheduled, or one
   // sent to the background) — keep the banner and tiles fresh until it ends.
   const runningForDate = stats?.date_run?.running ?? null;
+  // date_run.running only ever reflects the CURRENTLY SELECTED date — a run
+  // for a different date (e.g. you're viewing "today" while a run for
+  // yesterday is still going) would otherwise show nothing at all. last_run
+  // is global (not date-scoped), so it catches that case too.
+  const systemRunning = stats?.last_run?.status === "running" ? stats.last_run : null;
   useEffect(() => {
-    if (!runningForDate) return;
+    if (!runningForDate && !systemRunning) return;
     const t = setInterval(() => load(targetDate, true), 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runningForDate?.id, targetDate]);
+  }, [runningForDate?.id, systemRunning?.id, targetDate]);
 
   const [runError, setRunError] = useState("");
 
@@ -170,6 +175,29 @@ export default function Dashboard() {
       {runError && (
         <div className="card" style={{ marginBottom: 16, borderColor: "var(--crit)" }}>
           <strong style={{ color: "var(--crit)" }}>Couldn't start the run:</strong> {runError}
+        </div>
+      )}
+      {/* A run is active somewhere in the system, but not for the date
+          currently on screen — without this you'd see nothing at all and
+          could easily conclude (wrongly) that nothing is running. */}
+      {systemRunning && !runningForDate && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--accent)" }}>
+          <span className="spinner sm" />{" "}
+          <strong>
+            Run #{systemRunning.id} is processing {systemRunning.target_date || "all dates"} right now
+          </strong>
+          <span className="muted">
+            {" "}· {systemRunning.trigger} run — you're currently viewing {targetDate}.
+          </span>{" "}
+          {systemRunning.target_date && systemRunning.target_date !== targetDate && (
+            <button className="btn" style={{ marginLeft: 8 }}
+              onClick={() => setTargetDate(systemRunning.target_date!)}>
+              Switch to {systemRunning.target_date}
+            </button>
+          )}
+          <button className="btn" style={{ marginLeft: 8 }} onClick={() => navigate("/runs")}>
+            Watch live
+          </button>
         </div>
       )}
       {runningForDate ? (
