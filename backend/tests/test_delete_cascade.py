@@ -311,6 +311,93 @@ def test_update_event_strips_readonly_invoice_status():
     assert sent["businessName"] == "Ev"  # required-field fallback still applies
 
 
+def test_update_event_reasserts_equipment_in_minimal_shape():
+    """The financial-sync PUT must re-assert the event's real equipment in the
+    proven n8n shape — eventAssetsList = [{"assetId": …}] populated from
+    eventAssetsDtoList — and send the other five list keys as []. Sending them
+    all as null 500s KonaOS for selling/pending events; the empty eventAssetsList
+    of the pre-2026-07-21 code wiped equipment."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.konaos.client import KonaosClient
+
+    async def scenario():
+        kc = KonaosClient()
+        kc.session_key = "test"
+        fetched = {
+            "id": "E1", "name": "Ev", "businessName": "Biz",
+            "eventAssetsDtoList": [
+                {"assetId": "A1", "assetName": "Truck 1"},
+                {"assetId": "A2", "assetName": "Kiosk"},
+            ],
+            "eventStaffsDtoList": [{"userId": "U1", "firstName": "Sam"}],
+        }
+        sent = {}
+
+        async def fake_request(method, endpoint, **kw):
+            class R:
+                status_code = 200
+                text = "{}"
+                def json(self):
+                    return fetched
+                def raise_for_status(self):
+                    pass
+            if method != "GET":
+                sent.update(kw.get("json") or {})
+            return R()
+
+        with patch.object(kc, "_make_request", side_effect=fake_request):
+            await kc.update_event("E1", ccAmount=100.0, taxPercent=0.06)
+        await kc.close()
+        return sent
+
+    sent = asyncio.run(scenario())
+    assert sent["eventAssetsList"] == [{"assetId": "A1"}, {"assetId": "A2"}]
+    for empty_field in ("eventStaffList", "eventTemplatesDtoList", "itemsDtoList",
+                        "tags", "eventBannerFiles"):
+        assert sent[empty_field] == []
+
+
+def test_update_event_refuses_to_wipe_equipment():
+    """If the re-assert can't recover any assetId while the event clearly has
+    equipment, the PUT must fail loudly instead of sending an empty
+    eventAssetsList (which KonaOS reads as 'clear the equipment')."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.konaos.client import KonaosClient
+
+    async def scenario():
+        kc = KonaosClient()
+        kc.session_key = "test"
+        # Asset present but assetId missing (simulated shape drift).
+        fetched = {"id": "E1", "businessName": "Biz",
+                   "eventAssetsDtoList": [{"assetName": "Truck 1"}]}
+
+        async def fake_request(method, endpoint, **kw):
+            class R:
+                status_code = 200
+                text = "{}"
+                def json(self):
+                    return fetched
+                def raise_for_status(self):
+                    pass
+            return R()
+
+        with patch.object(kc, "_make_request", side_effect=fake_request):
+            try:
+                await kc.update_event("E1", ccAmount=100.0)
+                return None
+            except RuntimeError as e:
+                return str(e)
+            finally:
+                await kc.close()
+
+    msg = asyncio.run(scenario())
+    assert msg is not None and "empty eventAssetsList" in msg
+
+
 def test_update_event_failure_attaches_diagnostic():
     """On a KonaOS 500 the raised error carries the exact body we sent and the
     raw response, so the pipeline can surface them on CRM Activity for a

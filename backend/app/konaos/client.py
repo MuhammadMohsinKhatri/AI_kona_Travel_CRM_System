@@ -1247,56 +1247,48 @@ class KonaosClient:
         if not update_payload.get("businessName"):
             update_payload["businessName"] = update_payload.get("name") or "Kona Ice Event"
 
-        # CORRECTED 2026-07-22 #2 (superseding the previous two attempts):
-        # eventAssetsList / eventStaffList / eventTemplatesDtoList /
-        # itemsDtoList / tags / eventBannerFiles are NOT how this endpoint
-        # reads or writes equipment/staff/etc — a real captured KonaOS
-        # response (spec/openapi-devtools-spec.json in the API-contract repo)
-        # shows ALL SIX of these are ALWAYS `null` on a genuine GET, right
-        # alongside the real data under eventAssetsDtoList/eventStaffsDtoList.
-        # This endpoint simply doesn't manage assignment through these keys.
+        # CORRECTED 2026-07-22 #3 — match the PROVEN-WORKING n8n body.
         #
-        # Three states have now been tried for these six keys:
-        #  1. (pre-2026-07-21) Defaulted to `[]` when None. KonaOS reads an
-        #     EMPTY ARRAY as "explicitly clear," wiping real equipment/staff.
-        #  2. (2026-07-21 fix, reverted) Populated with the real
-        #     eventAssetsDtoList/eventStaffsDtoList data. Wrong shape —
-        #     KonaOS 400'd main.invalidJsonError on every event with any
-        #     equipment/staff assigned.
-        #  3. (2026-07-22 fix #1, reverted) Dropped the keys entirely
-        #     (absent from the body) — mirroring the proven-safe invoiceStatus
-        #     precedent. But the SAME captured spec shows these six keys are
-        #     in the parent Event object's "required" list — i.e. KonaOS's
-        #     own system NEVER omits them, only ever sends them present-but-
-        #     null. A completely missing key is a shape KonaOS never
-        #     produces itself, and every update_event call in the next run
-        #     500'd with main.internalServerError (a different failure mode
-        #     than the 400 above — consistent with a server-side crash on a
-        #     required-but-absent field, e.g. an unguarded map lookup).
+        # History of the six list keys (eventAssetsList / eventStaffList /
+        # eventTemplatesDtoList / itemsDtoList / tags / eventBannerFiles):
+        #  1. (pre-2026-07-21) None → `[]` for all. KonaOS reads eventAssetsList
+        #     `[]` as "clear equipment" → the 2026-07-21 equipment wipe.
+        #  2. (reverted) eventAssetsList populated with the FULL
+        #     eventAssetsDtoList objects → 400 main.invalidJsonError (wrong shape).
+        #  3. (reverted) keys dropped entirely → 500 main.internalServerError.
+        #  4. (reverted) all six sent as explicit `null` → STILL 500s for
+        #     selling/pending events (what this replaces).
         #
-        # The one state not yet tried, and the one that exactly matches what
-        # KonaOS's own GET always returns: key PRESENT, value explicit null.
-        # Structurally this can never be an empty list (satisfies the safety
-        # net below) and is the most conservative choice — literally what
-        # their system round-trips as "no change" on every read.
-        for field in ("eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
+        # The legacy n8n "update event3" node — the body that ran nightly in
+        # production for months — sends `eventAssetsList: [{"assetId": <id>}]`
+        # (populated, MINIMAL shape) and lets the other five default to `[]`.
+        # Since that body wrote nightly WITHOUT wiping staff, an empty list is
+        # only destructive for eventAssetsList (equipment); it is a harmless
+        # no-op for the other five. So the safe, proven body is:
+        #   • eventAssetsList → the event's REAL current equipment, re-asserted
+        #     in the minimal {"assetId": …} shape (never empty when the event
+        #     has equipment — that is the wipe),
+        #   • the other five → [].
+        assets = existing_event.get("eventAssetsDtoList") or []
+        asset_ids = [a.get("assetId") for a in assets if isinstance(a, dict) and a.get("assetId")]
+        update_payload["eventAssetsList"] = [{"assetId": aid} for aid in asset_ids]
+        for field in ("eventStaffList", "eventTemplatesDtoList",
                       "itemsDtoList", "tags", "eventBannerFiles"):
-            update_payload[field] = None
+            update_payload[field] = []
 
-        # SAFETY NET: these six keys must never reach the request body as a
-        # list — an empty list is exactly what causes KonaOS to wipe a real
-        # assignment, and this endpoint has no legitimate use for sending
-        # them at all (see above). If a future edit reintroduces one as a
-        # list, fail loudly instead of risking a repeat of the incident.
-        for field in ("eventAssetsList", "eventStaffList", "eventTemplatesDtoList",
-                      "itemsDtoList", "tags", "eventBannerFiles"):
-            if isinstance(update_payload.get(field), list):
-                raise RuntimeError(
-                    f"update_event({event_id}): {field} must never be sent as a list — "
-                    "KonaOS treats an empty list here as 'clear the assignment.' "
-                    "This endpoint doesn't manage assignment through this key at all; "
-                    "send explicit null instead of populating it."
-                )
+        # SAFETY NET (the 2026-07-21 lesson, inverted for the new shape): never
+        # send an EMPTY eventAssetsList for an event that actually has
+        # equipment — that is exactly the state KonaOS reads as "clear it."
+        # If the re-assert above produced nothing while the event has assets,
+        # something is wrong (shape drift in eventAssetsDtoList) — fail loudly
+        # rather than silently wipe.
+        if assets and not update_payload["eventAssetsList"]:
+            raise RuntimeError(
+                f"update_event({event_id}): refusing to send an empty eventAssetsList "
+                f"for an event that has {len(assets)} asset(s) assigned — this would "
+                "clear the equipment (the 2026-07-21 wipe). eventAssetsDtoList shape "
+                "may have changed; do not proceed until the assetId re-assert is fixed."
+            )
 
         # Ensure string fields are strings (not None) - common required fields
         string_fields_defaults = {
