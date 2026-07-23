@@ -150,11 +150,14 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Ports 80/443 on this VPS are owned by another ingress (Traefik, fronting
+      # oneclick). To coexist, konaice serves plain HTTP on its own host port.
+      # App is reachable at http://<vps-ip>:${WEB_PORT:-8081}
+      - "${WEB_PORT:-8081}:80"
     environment:
-      # ":80" = plain HTTP on the VPS IP; set DOMAIN=your-domain.com for auto-HTTPS
-      DOMAIN: ${DOMAIN:-:80}
+      # Caddy listens on container :80 (plain HTTP). TLS/domain is not used here
+      # because we're behind a distinct host port, not the 80/443 ingress.
+      DOMAIN: ":80"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
