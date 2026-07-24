@@ -173,10 +173,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Lead CTA — the ledger is the screen owners live in, so it's the first
-          thing offered under the title, and again lower down after the stats. */}
-      <FinancialsCTA stats={stats} />
-
       {/* Optional run scope: limit the run to specific event types. Empty =
           whole day (all types). Type is resolved by classification, so a
           filtered run still classifies the day, then processes only these. */}
@@ -216,6 +212,10 @@ export default function Dashboard() {
           </span>
         )}
       </div>
+
+      {/* Lead CTA — kept below the run controls so the Run button and its
+          "Run scope" chips stay together, and again lower down after the stats. */}
+      <FinancialsCTA stats={stats} />
 
       {/* Server invoice mode — make dry-run visible instead of a surprise. */}
       {dryRun === true && (
