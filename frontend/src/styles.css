@@ -56,6 +56,14 @@ a:hover { text-decoration: underline; }
 
 /* Layout */
 .layout { display: flex; min-height: 100vh; }
+
+/* ── Mobile top bar + drawer backdrop ──────────────────────────────────────
+   Both are display:none on desktop and only switch on under the mobile
+   breakpoint (see the media query at the foot of this file). Declared here so
+   the desktop layout is unaffected. */
+.mobile-bar { display: none; }
+.drawer-backdrop { display: none; }
+
 .sidebar {
   width: 220px;
   background: var(--surface);
@@ -168,6 +176,37 @@ a:hover { text-decoration: underline; }
 .stat .label { color: var(--text-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .stat .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
 .stat .value.small { font-size: 20px; }
+
+/* ── Dashboard → Event Financials CTA ─────────────────────────────────────
+   A single brand-tinted banner that stands out from the pale stat cards, so
+   the ledger (the screen owners live in) is one obvious tap from the
+   dashboard. Whole banner is clickable; the button is the visual affordance. */
+.fin-cta {
+  margin-top: 16px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 18px 20px; border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--brand), var(--brand-ink));
+  color: #fff; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(14, 165, 233, .28);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.fin-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(14, 165, 233, .36); }
+.fin-cta:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.fin-cta-icon { font-size: 30px; line-height: 1; flex: none; }
+.fin-cta-body { flex: 1; min-width: 180px; }
+.fin-cta-title { font-size: 17px; font-weight: 800; letter-spacing: .01em; }
+.fin-cta-sub { font-size: 13px; line-height: 1.5; margin-top: 3px; color: rgba(255,255,255,.92); }
+.fin-cta-sub strong { color: #fff; }
+/* Solid white pill on the coloured banner — reads as the primary action. */
+.fin-cta-btn {
+  background: #fff; color: var(--brand-ink);
+  border-color: #fff; font-weight: 700; white-space: nowrap; flex: none;
+}
+.fin-cta-btn:hover { background: #fff; }
+@media (max-width: 768px) {
+  .fin-cta { padding: 16px; gap: 12px; }
+  .fin-cta-btn { flex: 1 1 100%; text-align: center; }
+}
 
 /* Table */
 table { width: 100%; border-collapse: collapse; }
@@ -568,3 +607,134 @@ code.inline {
 @media (max-width: 700px) { .glossary { grid-template-columns: 1fr; gap: 2px 0; } }
 .glossary dt { font-weight: 700; }
 .glossary dd { margin: 0; color: var(--text-dim); line-height: 1.55; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — tablet & phone
+   The desktop layout above is the source of truth; everything here is an
+   override for narrow viewports. Two breakpoints:
+     • ≤ 1024px  tablet: relax the grids and the wide-page padding.
+     • ≤ 768px   phone:  sidebar becomes an off-canvas drawer, single column
+                         everywhere, chrome shrinks, tables stay scroll-boxed.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tablet ─────────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .content { padding: 22px 22px; }
+  .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid.cols-3 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Phone ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* The drawer floats above the page rather than pushing it, so the layout
+     column can go back to a plain block that fills the width. */
+  .layout { display: block; min-height: 100vh; }
+
+  /* Fixed top bar with the hamburger. Everything below it is offset by its
+     height so nothing hides underneath. */
+  .mobile-bar {
+    display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 45;
+    height: 54px; padding: 0 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .hamburger {
+    display: grid; place-items: center;
+    width: 40px; height: 40px; flex: none;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--text);
+    cursor: pointer; padding: 0;
+  }
+  .hamburger:hover { background: var(--surface-2); }
+  .hamburger-icon { font-size: 18px; line-height: 1; }
+  .mobile-title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 15px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mobile-title .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--brand); flex: none;
+  }
+
+  /* The sidebar is now an off-canvas drawer: fixed, full height, slid off to
+     the left until .drawer-open. It ignores the desktop collapse state — on a
+     phone it is always the full-label drawer. */
+  .sidebar {
+    position: fixed; top: 0; left: 0; z-index: 60;
+    width: 264px; max-width: 84vw; height: 100vh; height: 100dvh;
+    padding: 18px 14px;
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    box-shadow: 2px 0 16px rgba(16, 24, 40, .18);
+    overflow-y: auto;
+  }
+  .layout.drawer-open .sidebar { transform: translateX(0); }
+  /* On the phone drawer the labels must always show, whatever the stored
+     desktop collapse preference was. */
+  .layout.collapsed .sidebar { width: 264px; padding: 18px 14px; }
+  .layout.collapsed .nav-label,
+  .layout.collapsed .brand-name,
+  .layout.collapsed .sidebar-user { display: inline; }
+  .layout.collapsed .nav-link,
+  .layout.collapsed .sign-out { justify-content: flex-start; padding-left: 12px; padding-right: 12px; gap: 10px; }
+  .layout.collapsed .brand { justify-content: flex-start; }
+  /* The desktop collapse toggle makes no sense inside the drawer. */
+  .sidebar-toggle { display: none; }
+
+  /* Backdrop dims the page while the drawer is open. */
+  .drawer-open .drawer-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 55;
+    background: rgba(10, 15, 22, .5);
+  }
+
+  /* Larger tap targets in the drawer. */
+  .sidebar .nav-link { padding: 12px; font-size: 15px; }
+  .sidebar .brand { font-size: 15px; }
+
+  /* Content fills the width; comfortable phone padding. */
+  .content, .content.wide { padding: 16px 14px; max-width: none; }
+
+  /* Everything that was a multi-column grid collapses to one column. */
+  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
+  .result-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Page header: stack the title and its action controls instead of forcing
+     them onto one squeezed row. */
+  .topbar { flex-direction: column; align-items: stretch; gap: 12px; }
+  .run-controls { flex-wrap: wrap; }
+  .run-controls .btn { flex: 1 1 auto; }
+  .page-title { font-size: 20px; }
+  .page-sub { margin-bottom: 16px; }
+
+  /* Toolbars/filter bars already wrap; make their controls comfortable to tap
+     and let inputs grow to the row width. */
+  .toolbar { gap: 8px; }
+  .toolbar .input, .toolbar .select { flex: 1 1 140px; min-width: 0; }
+
+  /* Key/value detail grids read better stacked than as a cramped 2-col grid. */
+  .kv { grid-template-columns: 1fr; gap: 2px 0; }
+  .kv .k { margin-top: 8px; }
+  .kv .k:first-child { margin-top: 0; }
+
+  /* Sheet ledger: it already scrolls in its own box; give it more of the
+     viewport height now that the page chrome is taller/looser. */
+  .table-wrap.sheet { max-height: calc(100vh - 210px); }
+
+  /* Modals & login fill the small screen sensibly. */
+  .modal { width: 100%; max-width: calc(100vw - 28px); }
+  .overlay { padding: 14px; }
+  .login-wrap { padding: 20px; }
+  .login-card { width: 100%; max-width: 380px; }
+
+  /* Toasts shouldn't hug a phone edge. */
+  .toast { left: 16px; right: 16px; bottom: 16px; text-align: center; }
+}
+
+/* ── Small phone ────────────────────────────────────────────────────────── */
+@media (max-width: 420px) {
+  .result-grid { grid-template-columns: 1fr; }
+  .page-title { font-size: 18px; }
+  .content, .content.wide { padding: 14px 12px; }
+}

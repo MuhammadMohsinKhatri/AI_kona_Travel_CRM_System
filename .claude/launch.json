@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--host", "--port", "5199", "--strictPort"],
+      "port": 5199,
+      "autoPort": false,
+      "cwd": "frontend"
+    }
+  ]
+}

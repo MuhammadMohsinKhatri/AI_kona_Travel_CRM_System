@@ -431,6 +431,33 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Primary CTA — the Event Financials ledger is the page owners spend the
+          most time in, so surface it prominently from the dashboard rather than
+          leaving it as one nav item among many. */}
+      <div
+        className="fin-cta"
+        role="link"
+        tabIndex={0}
+        onClick={() => navigate("/financials")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate("/financials"); }
+        }}
+        title="Open the Event Financials ledger"
+      >
+        <div className="fin-cta-icon">💰</div>
+        <div className="fin-cta-body">
+          <div className="fin-cta-title">Event Financials ledger</div>
+          <div className="fin-cta-sub">
+            Every event's card, cash, and invoiced totals in one spreadsheet-style view
+            {stats.total_invoices > 0 && (
+              <> — <strong>{money(stats.invoiced_amount)}</strong> across{" "}
+              {stats.total_invoices} invoice{stats.total_invoices === 1 ? "" : "s"}</>
+            )}.
+          </div>
+        </div>
+        <span className="btn fin-cta-btn">Open Event Financials →</span>
+      </div>
+
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
           <div className="section-title" style={{ marginTop: 0 }}>Events by event type</div>

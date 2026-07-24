@@ -27,16 +27,44 @@ const WIDE_ROUTES = ["/financials", "/crm-activity", "/runs"];
 
 const STORAGE_KEY = "sidebar-collapsed";
 
+/** Short label for the mobile top bar — the full product name is far too long
+ *  to fit in a 375px header next to the hamburger. */
+function currentTitle(pathname: string): string {
+  const all = [...links, ...bottomLinks];
+  const match = all
+    .filter((l) => (l.to === "/" ? pathname === "/" : pathname.startsWith(l.to)))
+    .sort((a, b) => b.to.length - a.to.length)[0];
+  return match?.label ?? "Menu";
+}
+
 export default function Layout() {
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(STORAGE_KEY) === "1"
   );
+  // Off-canvas drawer state, used only on the mobile layout. Desktop ignores
+  // it entirely (the sidebar is always in-flow there).
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
+
+  // Any navigation closes the drawer — otherwise it would sit open over the
+  // page you just navigated to on a phone.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll while the drawer is open so the page behind it doesn't
+  // scroll under the finger.
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileOpen]);
 
   const isWide = WIDE_ROUTES.some((r) => pathname.startsWith(r));
 
@@ -46,6 +74,7 @@ export default function Layout() {
       to={l.to}
       end={l.end}
       title={l.label}
+      onClick={() => setMobileOpen(false)}
       className={({ isActive }) => "nav-link" + (isActive ? " active" : "")}
     >
       <span className="nav-icon">{l.icon}</span>
@@ -54,7 +83,36 @@ export default function Layout() {
   );
 
   return (
-    <div className={"layout" + (collapsed ? " collapsed" : "")}>
+    <div
+      className={
+        "layout" + (collapsed ? " collapsed" : "") + (mobileOpen ? " drawer-open" : "")
+      }
+    >
+      {/* Mobile-only top bar. Hidden on desktop via CSS. It carries the
+          hamburger (the only way to reach the nav on a phone) and the current
+          page's short name so you always know where you are. */}
+      <header className="mobile-bar">
+        <button
+          className="hamburger"
+          onClick={() => setMobileOpen((o) => !o)}
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
+        >
+          <span className="hamburger-icon">{mobileOpen ? "✕" : "☰"}</span>
+        </button>
+        <div className="mobile-title">
+          <span className="dot" />
+          <span>{currentTitle(pathname)}</span>
+        </div>
+      </header>
+
+      {/* Backdrop behind the open drawer — tapping it closes the menu. */}
+      <div
+        className="drawer-backdrop"
+        onClick={() => setMobileOpen(false)}
+        aria-hidden="true"
+      />
+
       <aside className="sidebar">
         <div className="brand">
           <span className="dot" />
