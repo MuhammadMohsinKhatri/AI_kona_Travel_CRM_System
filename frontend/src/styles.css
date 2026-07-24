@@ -722,6 +722,23 @@ code.inline {
      viewport height now that the page chrome is taller/looser. */
   .table-wrap.sheet { max-height: calc(100vh - 210px); }
 
+  /* The frozen identity block (DATE + EVENT + EVENT TYPE) is ~410px wide —
+     wider than a phone screen. Left-frozen, it permanently covers the viewport,
+     so scrolling right never reveals the data columns (the reported bug).
+     Unfreeze the columns HORIZONTALLY on mobile: the sheet then scrolls as one
+     and every column is reachable. The header still freezes to the top while
+     you scroll down (vertical stick kept via `top`), just not to the left. */
+  .sheet td.stick { position: static; }
+  .sheet thead th.stick { left: auto; }
+  .sheet .stick-3::before { display: none; }   /* frozen-block edge shadow */
+  /* Tighten the identity columns so more of the numbers fit per screen. The
+     totals label (colSpan 3) is narrowed to match their new combined width so
+     the footer stays aligned with the columns above it. */
+  .sheet .stick-1 > .cell { width: 68px; }
+  .sheet .stick-2 > .cell { width: 150px; }
+  .sheet .stick-3 > .cell { width: 116px; }
+  .sheet tfoot td.stick-span > .cell { width: 334px; }  /* 68 + 150 + 116 */
+
   /* Modals & login fill the small screen sensibly. */
   .modal { width: 100%; max-width: calc(100vw - 28px); }
   .overlay { padding: 14px; }

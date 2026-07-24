@@ -3,6 +3,15 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
 import { Badge, BulkDeleteButton, DeleteButton, Empty, InfoTip, Loading, money } from "../components/ui";
 
+/** Today in America/New_York — the business's day, not the browser's. Matches
+ *  the Dashboard so both screens agree on what "today" is. */
+function todayNY(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
  *  Postgres and are upserted by every pipeline run.
  *
@@ -46,12 +55,15 @@ export default function Financials() {
   useEffect(() => {
     api.financialMonths().then((ms) => {
       setMonths(ms);
-      // Only default to the most recent month on a completely fresh visit —
-      // never override filters already present in the URL (e.g. restored
-      // from "← Financials" after viewing an event).
-      const hasAnyDateFilter = month || fromDate || toDate;
-      if (ms.length && !hasAnyDateFilter) updateParams({ month: ms[0] });
     }).catch(() => { /* surfaced by the list fetch below */ });
+    // Default the ledger to TODAY on a completely fresh visit — never show the
+    // whole dataset by default, and never override filters already present in
+    // the URL (e.g. restored from "← Financials" after viewing an event).
+    const hasAnyDateFilter = month || fromDate || toDate;
+    if (!hasAnyDateFilter) {
+      const today = todayNY();
+      updateParams({ from_date: today, to_date: today });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

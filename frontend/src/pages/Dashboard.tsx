@@ -173,6 +173,10 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Lead CTA — the ledger is the screen owners live in, so it's the first
+          thing offered under the title, and again lower down after the stats. */}
+      <FinancialsCTA stats={stats} />
+
       {/* Optional run scope: limit the run to specific event types. Empty =
           whole day (all types). Type is resolved by classification, so a
           filtered run still classifies the day, then processes only these. */}
@@ -431,32 +435,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Primary CTA — the Event Financials ledger is the page owners spend the
-          most time in, so surface it prominently from the dashboard rather than
-          leaving it as one nav item among many. */}
-      <div
-        className="fin-cta"
-        role="link"
-        tabIndex={0}
-        onClick={() => navigate("/financials")}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate("/financials"); }
-        }}
-        title="Open the Event Financials ledger"
-      >
-        <div className="fin-cta-icon">💰</div>
-        <div className="fin-cta-body">
-          <div className="fin-cta-title">Event Financials ledger</div>
-          <div className="fin-cta-sub">
-            Every event's card, cash, and invoiced totals in one spreadsheet-style view
-            {stats.total_invoices > 0 && (
-              <> — <strong>{money(stats.invoiced_amount)}</strong> across{" "}
-              {stats.total_invoices} invoice{stats.total_invoices === 1 ? "" : "s"}</>
-            )}.
-          </div>
-        </div>
-        <span className="btn fin-cta-btn">Open Event Financials →</span>
-      </div>
+      <FinancialsCTA stats={stats} />
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">
@@ -479,6 +458,41 @@ export default function Dashboard() {
           onViewRun={() => { dismissed.current = true; navigate("/runs"); }}
         />
       )}
+    </div>
+  );
+}
+
+/** Brand-tinted banner that sends the user straight to the Event Financials
+ *  ledger — the screen owners spend the most time in. Rendered twice on the
+ *  dashboard (lead, under the title; and again after the stat tiles). The whole
+ *  banner is a link; when there's invoice data it also carries a live figure so
+ *  it doubles as a glanceable stat. */
+function FinancialsCTA({ stats }: { stats: DashboardStats }) {
+  const navigate = useNavigate();
+  const go = () => navigate("/financials");
+  return (
+    <div
+      className="fin-cta"
+      role="link"
+      tabIndex={0}
+      onClick={go}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+      }}
+      title="Open the Event Financials ledger"
+    >
+      <div className="fin-cta-icon">💰</div>
+      <div className="fin-cta-body">
+        <div className="fin-cta-title">Event Financials ledger</div>
+        <div className="fin-cta-sub">
+          Every event's card, cash, and invoiced totals in one spreadsheet-style view
+          {stats.total_invoices > 0 && (
+            <> — <strong>{money(stats.invoiced_amount)}</strong> across{" "}
+            {stats.total_invoices} invoice{stats.total_invoices === 1 ? "" : "s"}</>
+          )}.
+        </div>
+      </div>
+      <span className="btn fin-cta-btn">Open Event Financials →</span>
     </div>
   );
 }
