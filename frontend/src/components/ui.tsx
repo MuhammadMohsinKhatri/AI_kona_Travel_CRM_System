@@ -162,6 +162,40 @@ export function Empty({ text }: { text: string }) {
   return <div className="loading">{text}</div>;
 }
 
+/** Prev/Next pager for the paginated list endpoints. Keeps long tables short —
+ *  the page shows one page_size worth of rows, and you step through the rest
+ *  instead of scrolling. Buttons disable at the ends. */
+export function Pager({
+  page, pageSize, total, onPage,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, total);
+  return (
+    <div className="flex between" style={{ marginTop: 12, alignItems: "center" }}>
+      <span className="muted" style={{ fontSize: 12.5 }}>
+        {first}–{last} of {total}
+      </span>
+      <div className="flex" style={{ gap: 8 }}>
+        <button className="btn" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          ← Prev
+        </button>
+        <span className="muted" style={{ fontSize: 12.5, alignSelf: "center" }}>
+          Page {page} of {pages}
+        </span>
+        <button className="btn" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Plain-language summary of what happened to every event a run touched —
  *  grouped into Errored / Skipped / Processed so anyone can read, at a glance,
  *  which events failed and why, which were skipped and why, and which went

@@ -81,7 +81,8 @@ export const api = {
         event_ids: opts.eventIds?.length ? opts.eventIds : null,
       }),
     }),
-  runs: () => request<Page<PipelineRun>>("/api/pipeline/runs"),
+  runs: (params: Record<string, string> = {}) =>
+    request<Page<PipelineRun>>("/api/pipeline/runs?" + new URLSearchParams(params)),
   run: (id: number) => request<PipelineRun>(`/api/pipeline/runs/${id}`),
   deleteRun: (id: number) =>
     request<void>(`/api/pipeline/runs/${id}`, { method: "DELETE" }),

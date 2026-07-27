@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, Page, PipelineRun } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading, RunEventBreakdown, StepList } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, Pager, RunEventBreakdown, StepList } from "../components/ui";
 
 /** Run history — and the live view for runs executing in the worker.
  *
@@ -8,15 +8,19 @@ import { Badge, DeleteButton, Empty, Loading, RunEventBreakdown, StepList } from
  *  the Dashboard popup is only a viewer. This page is where you re-attach:
  *  while any run is "running" the table auto-refreshes, and selecting a
  *  running run shows its live phase list + log. */
+const PAGE_SIZE = 10;
+
 export default function Runs() {
   const [data, setData] = useState<Page<PipelineRun> | null>(null);
   const [selected, setSelected] = useState<PipelineRun | null>(null);
+  const [page, setPage] = useState(1);
 
-  const reload = () => api.runs().then(setData);
+  const reload = () =>
+    api.runs({ page: String(page), page_size: String(PAGE_SIZE) }).then(setData);
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [page]);
 
   const anyRunning = (data?.items ?? []).some((r) => r.status === "running");
 
@@ -25,7 +29,7 @@ export default function Runs() {
     if (!anyRunning) return;
     const t = setInterval(reload, 3000);
     return () => clearInterval(t);
-  }, [anyRunning]);
+  }, [anyRunning, page]);
 
   // The list payload is summary-only; the detail endpoint carries the live
   // progress steps. Poll it while the selected run is still executing.
@@ -118,6 +122,15 @@ export default function Runs() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {data && data.total > 0 && (
+        <Pager
+          page={data.page}
+          pageSize={data.page_size}
+          total={data.total}
+          onPage={(p) => { setSelected(null); setPage(p); }}
+        />
       )}
 
       {selected && (
