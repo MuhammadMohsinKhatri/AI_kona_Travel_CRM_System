@@ -12,6 +12,38 @@ function todayNY(): string {
   }).format(new Date());
 }
 
+/** Break a KonaOS wall-clock ISO string ("2026-07-26T10:00:00-04:00") into
+ *  parts WITHOUT going through Date() — the leading value is already
+ *  America/New_York local time, so Date() would shift it by the viewer's
+ *  offset. The tz suffix (if any) is intentionally ignored. */
+function wallParts(iso?: string | null) {
+  if (!iso) return null;
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d, hh, mm] = m;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  let h = Number(hh);
+  const ap = h >= 12 ? "p" : "a";
+  h = h % 12 || 12;
+  return { date: `${y}-${mo}-${d}`, time: `${h}:${mm}${ap}`, short: `${months[Number(mo) - 1]} ${Number(d)}` };
+}
+
+/** Compact start–end for the Date column, sitting under the event date.
+ *  Same calendar day → a time range ("10:00a–2:00p"); spans days → dates with
+ *  times ("Jul 26 10:00a – Jul 27 2:00p"); only one end known → just that one.
+ *  Empty string when neither is known (sheet-imported placeholders). */
+function fmtRange(start?: string | null, end?: string | null): string {
+  const s = wallParts(start);
+  const e = wallParts(end);
+  if (s && e) {
+    return s.date === e.date
+      ? `${s.time}–${e.time}`
+      : `${s.short} ${s.time} – ${e.short} ${e.time}`;
+  }
+  const one = s || e;
+  return one ? one.time : "";
+}
+
 /** The financial ledger — replaces the monthly Google Sheet. Rows live in
  *  Postgres and are upserted by every pipeline run.
  *
@@ -321,7 +353,16 @@ export default function Financials() {
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.id} onClick={() => navigate(`/events/${r.event_id}`, { state: { from: location.pathname + location.search, label: "Event Financials" } })}>
-                    <td className="stick stick-1"><div className="cell" style={{ fontWeight: 700 }}>{r.event_date || "—"}</div></td>
+                    <td className="stick stick-1">
+                      <div className="cell">
+                        <div style={{ fontWeight: 700 }}>{r.event_date || "—"}</div>
+                        {fmtRange(r.event_started, r.event_ended) && (
+                          <div className="muted" style={{ fontSize: 10.5, fontWeight: 500 }}>
+                            {fmtRange(r.event_started, r.event_ended)}
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td className="stick stick-2" title={r.event_name}>
                       <div className="cell">
                         <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>

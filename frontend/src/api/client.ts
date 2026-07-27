@@ -230,6 +230,10 @@ export interface FinancialRow {
   awaiting_cash?: boolean;
   minimum_required?: number;
   event_date: string | null;
+  /** Wall-clock ISO start/end from the event's cleaned payload (null for
+   *  sheet-imported placeholders that never went through the pipeline). */
+  event_started: string | null;
+  event_ended: string | null;
   event_name: string;
   event_code: string | null;
   brand: string;

@@ -276,10 +276,10 @@ tbody tr:last-child td { border-bottom: none; }
    data deserves the horizontal room. Long names/models ellipsize and the
    full text is on hover (title=). left offsets are cumulative widths. */
 .sheet .stick-1 { left: 0; }
-.sheet .stick-1 > .cell { width: 86px; }
-.sheet .stick-2 { left: 86px; }
+.sheet .stick-1 > .cell { width: 118px; }   /* wide enough for the date + a time range under it */
+.sheet .stick-2 { left: 118px; }
 .sheet .stick-2 > .cell { width: 194px; }
-.sheet .stick-3 { left: 280px; }
+.sheet .stick-3 { left: 312px; }            /* 118 + 194 */
 .sheet .stick-3 > .cell { width: 130px; }
 /* Shadow marks where the frozen block ends — only while scrolled right. */
 .sheet .stick-3::before {
@@ -299,7 +299,7 @@ tbody tr:last-child td { border-bottom: none; }
 .sheet tfoot td.stick { z-index: 5; }
 /* Totals label spans the three frozen columns — pin the whole block. */
 .sheet tfoot td.stick-span { left: 0; }
-.sheet tfoot td.stick-span > .cell { width: 410px; }  /* 86 + 194 + 130 */
+.sheet tfoot td.stick-span > .cell { width: 442px; }  /* 118 + 194 + 130 */
 /* Numbers align on the decimal — makes columns scannable at a glance. */
 .sheet td.right, .sheet tfoot td.right { font-variant-numeric: tabular-nums; }
 
@@ -734,10 +734,10 @@ code.inline {
   /* Tighten the identity columns so more of the numbers fit per screen. The
      totals label (colSpan 3) is narrowed to match their new combined width so
      the footer stays aligned with the columns above it. */
-  .sheet .stick-1 > .cell { width: 68px; }
+  .sheet .stick-1 > .cell { width: 100px; }   /* fits the date + a time range under it */
   .sheet .stick-2 > .cell { width: 150px; }
   .sheet .stick-3 > .cell { width: 116px; }
-  .sheet tfoot td.stick-span > .cell { width: 334px; }  /* 68 + 150 + 116 */
+  .sheet tfoot td.stick-span > .cell { width: 366px; }  /* 100 + 150 + 116 */
 
   /* Modals & login fill the small screen sensibly. */
   .modal { width: 100%; max-width: calc(100vw - 28px); }

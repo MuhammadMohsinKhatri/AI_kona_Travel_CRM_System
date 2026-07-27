@@ -168,9 +168,27 @@ def list_entries(
         r[0] for r in db.query(FinancialEntry.event_type).distinct().all() if r[0]
     ]
 
+    # Event start/end times live in the event's cleaned payload, not the ledger
+    # row. Bulk-load them for the rows in hand (one query, keyed by event id) so
+    # the Date column can show the event's time range without an N+1 lookup per
+    # row. Sheet-imported placeholders have no cleaned data, so these stay null
+    # and the UI just shows the date on its own.
+    event_ids = {e.event_id for e in items}
+    ev_times: dict[int, tuple[Optional[str], Optional[str]]] = {}
+    if event_ids:
+        for eid, cleaned in (
+            db.query(Event.id, Event.cleaned).filter(Event.id.in_(event_ids)).all()
+        ):
+            cl = cleaned or {}
+            ev_times[eid] = (cl.get("EVENT_STARTED"), cl.get("EVENT_ENDED"))
+
     def row(e: FinancialEntry) -> dict:
+        started, ended = ev_times.get(e.event_id, (None, None))
         return {
             "id": e.id, "event_id": e.event_id, "event_date": e.event_date,
+            # Wall-clock ISO start/end from the event's cleaned payload, so the
+            # Date column can show the event's time range under the date.
+            "event_started": started, "event_ended": ended,
             "event_name": e.event_name, "event_code": e.event_code, "brand": e.brand,
             "final_status": e.final_status, "event_type": e.event_type,
             "billing_model": e.billing_model, "units_served": e.units_served,
