@@ -21,17 +21,23 @@ determine the financially correct EVENT_TYPE.
 | Type              | When to Use                          | Key Signals                                              |
 |-------------------|--------------------------------------|----------------------------------------------------------|
 | Invoice           | Host/org pays all servings directly  | invoice, send invoice, charge them, host pays, PO, check |
-| Selling           | Guests pay individually at event     | selling, open selling, guests pay, Square, cash onsite   |
+| Selling           | Guests pay individually at event     | selling, open selling, guests pay, cash onsite per person |
 | Minimum Guarantee | Host guarantees a minimum amount     | minimum guarantee, min guarantee, host covers shortfall  |
 | Hybrid            | Host pays base + guests pay extras   | host pays base, guests pay for extras/overage            |
 | undefined         | Cannot be determined                 | —                                                        |
 
 **Critical rule — WHO pays Kona/Tom's directly?**
 
-  HOST pays (invoice, card, check from the org):
+Payment INSTRUMENT is not payer IDENTITY. A card reader, Square terminal, or
+"paid at event" tells you HOW money moved, never WHO moved it. A host settling
+their bill on the truck's terminal is still Invoice. Never infer "guests paid"
+from the presence of a terminal — decide payer identity from who the notes say
+owes the money, then treat the instrument as a separate question.
+
+  HOST pays (invoice, card, check from the org — including on a terminal at the event):
     → Invoice or Minimum Guarantee
 
-  GUESTS pay individually at the event (Square, cash per person):
+  GUESTS pay individually at the event (each guest buying their own):
     → Selling or Hybrid
 
   HOST pays a base AND guests pay extras:
@@ -53,6 +59,36 @@ Example:
    If they DID NOT MEET 40 Konas, still charge them $125 minimum."
   → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_FIXED_PACKAGE
   → BASE_AMOUNT: 125, UNITS_INCLUDED_IN_BASE: 40, RATE_PER_SERVING: 3 (only if >40 served)
+
+This rule is about the STRUCTURE, not the wording. Any phrasing that puts a floor
+under a host charge triggers it — "total minimum of $X", "minimum of $X", "at
+least $X", "$X minimum plus tax". The word "minimum" next to a host charge does
+NOT make an event a Minimum Guarantee. A real MG is the host backstopping the
+truck's GUEST sales; a floor under the host's own bill is an Invoice.
+
+Base fee + per-serving, with a floor:
+  "$99 plus the cost of the amount of Kona's we serve (total minimum of $150 plus tax)",
+  cup price $4, 23 served
+  → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_BASE_FEE_PLUS_SERVINGS
+  → BASE_AMOUNT: 99, RATE_PER_SERVING: 4, UNITS_SERVED_TOTAL: 23,
+    MINIMUM_FLAT_AMOUNT: 150 (recorded; the floor does not bind because
+    99 + 23×4 = 191 already exceeds 150)
+  → NOT HYBRID_SELLING_PLUS_MIN_GUARANTEE, and NOT a bare $150
+
+**Every stated dollar term must do work.**
+Before committing to a billing model, check that each dollar figure the notes
+state has a role in it. If a stated amount plays no part in your chosen model,
+the model is WRONG — go back to STEP 1. Acknowledging a figure in the NOTE while
+leaving it out of the math is the error this catches.
+  "$99 plus the cost of what we serve (total minimum of $150)" — a model that
+  bills a flat $150 uses neither the $99 nor the per-serving cost. Two stated
+  terms doing nothing = wrong model.
+
+**The booking form's EVENT TYPE field is a strong prior.**
+When a note field declares "EVENT TYPE Invoice" (or Selling, etc.), that is the
+office's own classification. Override it only on explicit contrary evidence in
+the notes — not on an inference, and never on the mere presence of a terminal or
+Square device. If you override it, the NOTE must say which words justified it.
 
 ### EVENT_TYPE OUTPUT NORMALIZATION
 
@@ -225,7 +261,28 @@ HYBRID_SELLING_PLUS_MIN_GUARANTEE
 Guests pay Kona/Tom's directly via Square/cash; host covers shortfall if sales fall below guarantee.
 Extract: MINIMUM_AMOUNT_PER_HOUR or MINIMUM_FLAT_AMOUNT, TOTAL_EVENT_HOURS, UNITS_SERVED_TOTAL, RATE_PER_SERVING, SQUARE_USED, SQUARE_DEVICE_CONFIDENCE
 
-Use when: Square or cash present AND host covers any shortfall.
+Use when: there is POSITIVE evidence that GUESTS paid individually AND the host
+covers any shortfall.
+
+A terminal, card reader, or Square device being used is NOT that evidence. The
+same reader takes one host payment or fifty guest payments — the instrument says
+nothing about who paid. Requiring only "Square present" here would make every
+card-paying host a selling event.
+
+Positive evidence guests paid individually:
+  "guests paid", "each guest paid", "attendees bought", "sold to guests",
+  "open selling", "guests tapped", a per-guest retail price with no host charge
+Evidence the HOST paid (→ Invoice, NOT this model):
+  "paid in full", "client paid", "they paid", "paid the invoice/total/balance",
+  or ANY note field stating a host charge ("$X plus the cost of what we serve",
+  "host pays", "send invoice")
+  "paid in full" describes ONE settlement closing ONE bill. Twenty-three separate
+  guest purchases have no "full" to pay.
+
+When the notes state a host charge AND a payment was taken at the event, the
+default is that the HOST settled that charge at the event. Do not reinterpret a
+stated host charge as guest sales.
+
 Do NOT use when the host is the one paying by card/check directly — that is Invoice.
 
 UNDEFINED

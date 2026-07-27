@@ -1,6 +1,6 @@
 {
   "name": "Base fee plus per-serving, with a minimum floor that does not bind",
-  "confirmed": false,
+  "confirmed": true,
   "why": [
     "Live event dated 2026-07-26. Classified HYBRID_SELLING_PLUS_MIN_GUARANTEE,",
     "which bills the host only the SHORTFALL against a minimum, producing a",
@@ -12,8 +12,15 @@
     "Reading the notes literally: 99 + (23 x 4) = 191. The $150 floor does not",
     "bind because 191 > 150. So the subtotal should be $191.00, not $150.00 —",
     "an under-bill of $41.00 before tax and fee.",
-    "UNCONFIRMED — flip 'confirmed' to true only once the finance owner signs off",
-    "on the $191 reading. See open_questions."
+    "CONFIRMED by the finance owner: 'in notes it is invoice'.",
+    "Root cause was the prompt, not the model. The HYBRID_SELLING_PLUS_MIN_GUARANTEE",
+    "section said 'Use when: Square or cash present AND host covers any shortfall'.",
+    "The driver's 'terminal 6' satisfied 'Square present' and 'total minimum of",
+    "$150' satisfied the rest, so the model matched the rule exactly. The adjacent",
+    "'do NOT use when the host pays by card' exclusion was unactionable, because",
+    "nothing told the model how to decide WHO paid — and the Selling signal table",
+    "listed 'Square' outright, pushing it toward guests.",
+    "See open_questions."
   ],
   "open_questions": [
     "Does 'paid in full terminal 6' mean the host settled the full amount on the",
@@ -50,10 +57,12 @@
     "DELIVERY_FEE": 0
   },
   "expect": {
+    "EVENT_TYPE": "invoice",
     "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS",
     "BASE_AMOUNT": 99,
     "RATE_PER_SERVING": 4,
     "UNITS_SERVED_TOTAL": 23,
+    "MINIMUM_FLAT_AMOUNT": 150,
     "TAXABLE": "YES",
     "PAYMENT_METHOD": "CREDIT_CARD"
   },
