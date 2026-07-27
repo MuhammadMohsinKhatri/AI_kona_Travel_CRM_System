@@ -1,0 +1,51 @@
+{
+  "name": "Fixed package priced on the allotment, quoted all-in",
+  "confirmed": true,
+  "why": [
+    "Live regression, event dated 2026-07-24, confirmed by the finance owner.",
+    "BASE_AMOUNT came back 1072 = 536 served x $2, instead of 1200 = the 600-cup",
+    "allotment x $2. A fixed package is priced on the allotment and does not",
+    "shrink when fewer are served.",
+    "Separately, the admin's opening '(no extra taxes or fees)' was read as",
+    "PRICE_IS_ALL_IN FALSE, so 6% tax and a 4% fee were layered on a quote that",
+    "had already ruled them out. Billed $1,179.20; should have been $1,200.00.",
+    "Contact phone and the second address were redacted here; neither affects",
+    "classification."
+  ],
+  "cleaned": {
+    "DATE": "2026-07-24",
+    "EVENT_STARTED": "2026-07-24T12:00:00-04:00",
+    "EVENT_ENDED": "2026-07-24T14:00:00-04:00",
+    "EVENT_NAME": "Summer camp — 600 cup package",
+    "BUSINESS_NAME": "Summer camp — 600 cup package",
+    "EVENT_TYPE": "Invoice",
+    "FINAL_EVENT_STATUS": "Completed",
+    "EVENT_NOTES_HTML": "EVENT TYPE Invoice ATTENDEES 600 SERVE / KEEP COUNT 600 9oz yellow cups INCLUDE  ADD'L INSTRUCTION PARKING call me when you arrive at the campus - [phone redacted] Go to next location around 1:30 at [address redacted] (the oldest boys group will be at the pool campus which is a 5 minute drive away) PAYMENT School will be paying - send invoice after",
+    "ADMIN_NOTES": "(no extra taxes or fees). This price includes up to 600 9oz Kona Ice cups and Star-K certification. Our cost is $2 per cup, so the cost for 600 Kona's would come to $1,200",
+    "DRIVER_NOTES": "Served 536 Konas. Send invoice.",
+    "LOCATION_NOTES": "",
+    "EQUIPMENT": "KEV6 (SK)",
+    "EVENT_SALES": 1072,
+    "NET_EVENT_SALES": 1072,
+    "BALANCE": 0,
+    "SALES_TAX": 0,
+    "TIP_AMOUNT": 0,
+    "DELIVERY_FEE": 0
+  },
+  "expect": {
+    "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+    "BASE_AMOUNT": 1200,
+    "UNITS_INCLUDED_IN_BASE": 600,
+    "UNITS_SERVED_TOTAL": 536,
+    "RATE_PER_SERVING": 0,
+    "PRICE_IS_ALL_IN": "TRUE",
+    "TAXABLE": "YES"
+  },
+  "expect_invoice": {
+    "SUBTOTAL": 1200.0,
+    "OVERAGE_UNITS": 0,
+    "SALES_TAX": 0.0,
+    "CC_FEE": 0.0,
+    "FINAL_INVOICE_AMOUNT": 1200.0
+  }
+}
