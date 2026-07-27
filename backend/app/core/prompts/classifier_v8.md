@@ -117,6 +117,21 @@ RATE_PER_SERVING: only if actual servings exceeded UNITS_INCLUDED_IN_BASE AND ov
 Use when notes say: "charge $Y minimum unless N+ servings at $X each"
   BASE_AMOUNT = $Y, UNITS_INCLUDED_IN_BASE = N, RATE_PER_SERVING = $X (overage only)
 
+BASE_AMOUNT is a FIXED price for the WHOLE included allotment. It never scales
+with how many were actually served — serving fewer than UNITS_INCLUDED_IN_BASE
+does NOT reduce it.
+When the package price is expressed as a per-cup figure for the included count
+rather than a stated lump sum, BASE_AMOUNT = per-cup price × UNITS_INCLUDED_IN_BASE
+(the full allotment), NEVER × UNITS_SERVED_TOTAL. This holds even when the
+per-cup figure is described as "our cost" — for a fixed package that per-cup ×
+allotment IS the price.
+  "Includes up to 600 cups; $2 per cup, so 600 cups = $1,200", 536 served
+    → UNITS_INCLUDED_IN_BASE: 600, UNITS_SERVED_TOTAL: 536,
+      BASE_AMOUNT: 1200 (600 × $2 — NOT 536 × $2 = 1072)
+Never fall back to a servings-based sales figure (CRM/Square "system sales",
+or served × per-cup) as BASE_AMOUNT for a fixed package: that number tracks
+servings, but the package price is fixed on the included allotment.
+
 INVOICE_HOURLY
 Client pays by time.
 Extract: TOTAL_EVENT_HOURS, HOURLY_RATE

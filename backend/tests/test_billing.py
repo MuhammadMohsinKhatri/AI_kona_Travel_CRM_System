@@ -39,6 +39,23 @@ def test_fixed_package_overage_only_when_exceeded():
     assert calc["SUBTOTAL"] == 170.0
 
 
+def test_fixed_package_does_not_shrink_when_under_served():
+    # "Includes up to 600 cups; $2/cup, so 600 = $1,200"; only 536 served.
+    # A fixed package is priced on the ALLOTMENT, not on servings — the host
+    # owes the full $1,200, never 536 × $2 = $1,072.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
+        "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
+        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    }, waive_cc_fee=True)
+    assert calc["OVERAGE_UNITS"] == 0
+    assert calc["SUBTOTAL"] == 1200.0
+    assert calc["SALES_TAX"] == 72.0  # 6% of 1200
+    assert calc["CC_FEE"] == 0.0
+    assert calc["FINAL_INVOICE_AMOUNT"] == 1272.0
+
+
 def test_hourly_bills_overage_above_included_allowance():
     # $295/hr, 1 hour, includes 60 Konas, $4 each additional; 100 served.
     # 1×295 + (100−60)×4 = 295 + 160 = 455.
