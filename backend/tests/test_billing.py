@@ -42,18 +42,35 @@ def test_fixed_package_overage_only_when_exceeded():
 def test_fixed_package_does_not_shrink_when_under_served():
     # "Includes up to 600 cups; $2/cup, so 600 = $1,200"; only 536 served.
     # A fixed package is priced on the ALLOTMENT, not on servings — the host
-    # owes the full $1,200, never 536 × $2 = $1,072.
+    # owes the full $1,200, never 536 × $2 = $1,072. Under-serving the
+    # allotment is not a discount, and it is not negative overage either.
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
+        "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
+        "TAXABLE": "YES",
+    })
+    assert calc["OVERAGE_UNITS"] == 0
+    assert calc["OVERAGE_REVENUE"] == 0.0
+    assert calc["SUBTOTAL"] == 1200.0
+
+
+def test_fixed_package_all_in_bills_the_package_price_flat():
+    # Same event, with the admin's "(no extra taxes or fees)" honoured:
+    # PRICE_IS_ALL_IN suppresses both the 6% tax and the 4% fee, so the host
+    # is billed the package price exactly — $1,200, not $1,272 or $1,179.20.
     calc = calculate_invoice({
         "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
         "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
-    }, waive_cc_fee=True)
-    assert calc["OVERAGE_UNITS"] == 0
+        "PRICE_IS_ALL_IN": "TRUE",
+    })
     assert calc["SUBTOTAL"] == 1200.0
-    assert calc["SALES_TAX"] == 72.0  # 6% of 1200
+    assert calc["SALES_TAX"] == 0.0
     assert calc["CC_FEE"] == 0.0
-    assert calc["FINAL_INVOICE_AMOUNT"] == 1272.0
+    assert calc["FINAL_INVOICE_AMOUNT"] == 1200.0
+    assert calc["CHECK_INVOICE_AMOUNT_CALC"] == 1200.0
 
 
 def test_hourly_bills_overage_above_included_allowance():

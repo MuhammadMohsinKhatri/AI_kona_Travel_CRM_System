@@ -733,3 +733,20 @@ for something that merely describes what the included servings can be
 Set "TRUE" only when the notes state the quoted total ALREADY includes tax and/or
 the processing fee ("$310 all-in", "tax included", "out the door $X"). When TRUE,
 the backend adds NO tax or 4% fee on top. Default "FALSE" (tax + fee are added).
+
+Also set "TRUE" when the notes rule OUT anything being added on top. The price
+is what the client pays either way, so both phrasings mean the same thing here:
+  "no extra taxes or fees"     → PRICE_IS_ALL_IN: "TRUE"
+  "no additional taxes"        → PRICE_IS_ALL_IN: "TRUE"
+  "nothing added on top"       → PRICE_IS_ALL_IN: "TRUE"
+  "flat $X, no fees"           → PRICE_IS_ALL_IN: "TRUE"
+This wording counts even when it appears as a parenthetical or aside anywhere in
+any note field, and even when the words "tax exempt" never appear — it is a
+statement about the price, not about the client's tax status. Search all three
+note fields for it.
+  Admin: "(no extra taxes or fees). This price includes up to 600 9oz cups …
+   $2 per cup, so 600 Kona's would come to $1,200", 536 served
+    → BILLING_MODEL: INVOICE_FIXED_PACKAGE, BASE_AMOUNT: 1200,
+      UNITS_INCLUDED_IN_BASE: 600, UNITS_SERVED_TOTAL: 536,
+      PRICE_IS_ALL_IN: "TRUE"
+    → billed: $1,200 flat (no 6% tax, no 4% fee)
