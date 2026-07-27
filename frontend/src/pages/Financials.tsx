@@ -283,46 +283,39 @@ export default function Financials() {
               in view while you scroll. Showing them twice cost ~70px of
               height that the rows use better. */}
 
-          {/* Columns are grouped under a header band so each label can be one
-              or two words — that, plus the full-width page, is what keeps this
-              readable without scrolling sideways for a screen and a half.
-              DATE / EVENT / TYPE stay frozen on the left, and the header and
-              totals rows are pinned, so a figure 15 columns over still tells
-              you which event it belongs to. */}
+          {/* Flat single-row header with the full sheet-style column names, as
+              on the owner's spreadsheet. DATE / EVENT / EVENT TYPE stay frozen
+              on the left, and the header and totals rows are pinned, so a
+              figure 15 columns over still tells you which event it belongs to.
+              Column-group tints stay on the body cells (g-sq / g-cash / …). */}
           <div className="table-wrap sheet">
             <table style={{ whiteSpace: "nowrap" }}>
               <thead>
                 <tr>
-                  <th className="stick stick-1" rowSpan={2}><div className="cell">Date</div></th>
-                  <th className="stick stick-2" rowSpan={2}><div className="cell">Event</div></th>
-                  <th className="stick stick-3" rowSpan={2}><div className="cell">Type &amp; billing</div></th>
-                  <th className="grp g-sq sep" colSpan={6}>Card sales (Square)</th>
-                  <th className="grp g-cash sep" colSpan={3}>Cash</th>
-                  <th className="grp g-inv sep" colSpan={2}>Invoiced / prepaid</th>
-                  <th className="grp g-tot sep" colSpan={7}>Event totals</th>
-                  <th className="sep" rowSpan={2}>Paid?</th>
-                  <th rowSpan={2}>Why this amount</th>
-                  <th className="actions" rowSpan={2}></th>
-                </tr>
-                <tr>
-                  <th className="right sep">Gross</th>
-                  <th className="right">Discounts</th>
-                  <th className="right">Net (card)</th>
-                  <th className="right">Card tax</th>
-                  <th className="right">Tips</th>
-                  <th className="right">Fee 4%</th>
-                  <th className="right sep">Collected</th>
-                  <th className="right">Tax</th>
-                  <th className="right">Before tax</th>
-                  <th className="right sep">Check / invoice</th>
-                  <th className="right">Deposit</th>
+                  <th className="stick stick-1"><div className="cell">DATE</div></th>
+                  <th className="stick stick-2"><div className="cell">EVENT</div></th>
+                  <th className="stick stick-3"><div className="cell">EVENT TYPE</div></th>
+                  <th className="right sep">Square: Gross Sales</th>
+                  <th className="right">Square: Discounts</th>
+                  <th className="right">Square: Net Sales (Card)</th>
+                  <th className="right">Square: Card Tax</th>
+                  <th className="right">Square: Tips (Card)</th>
+                  <th className="right">Square: CC Fee (4%)</th>
+                  <th className="right sep">Cash Collected</th>
+                  <th className="right">Cash Tax</th>
+                  <th className="right">Cash Pre-Tax</th>
+                  <th className="right sep">Check / Invoice</th>
+                  <th className="right">Deposit / Prepay</th>
                   <th className="sep">Taxable?</th>
-                  <th className="right">Collected</th>
-                  <th className="right">Sales tax</th>
+                  <th className="right">Event Sales - Collected</th>
+                  <th className="right">Sales Tax Amount</th>
                   <th className="right">Sales $</th>
-                  <th className="right">Giveback</th>
-                  <th className="right">Net sales</th>
-                  <th className="right">Location fee</th>
+                  <th className="right">Giveback Amount</th>
+                  <th className="right">Net Event Sales</th>
+                  <th className="right">Location Fee</th>
+                  <th className="sep">Paid?</th>
+                  <th>Why this amount</th>
+                  <th className="actions"></th>
                 </tr>
               </thead>
               <tbody>

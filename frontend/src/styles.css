@@ -306,7 +306,7 @@ tbody tr:last-child td { border-bottom: none; }
 /* ── Sheet visual language: ink + dim ink + ONE brand accent ──────────────
    Data stays in text colors; the brand blue appears only where the eye
    should land first (headers' underline, the totals row, key money). */
-.sheet thead tr:nth-child(2) > th, .sheet thead th.stick {
+.sheet thead tr:last-child > th, .sheet thead th.stick {
   font-weight: 700;
   color: #fff;
   background: var(--head-2);
