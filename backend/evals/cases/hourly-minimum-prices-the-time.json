@@ -1,0 +1,68 @@
+{
+  "name": "Hourly minimum prices the time, servings not added on top",
+  "confirmed": true,
+  "why": [
+    "Kiddie Academy - Roland Park, 2026-07-25. Confirmed by the finance owner:",
+    "actual amount $275.00, event type Invoice, and the $250 is the PER HOUR",
+    "billing model -- 'The minimum for 1 hour will be $250'.",
+    "Three wrong readings before this. INVOICE_BASE_FEE_PLUS_SERVINGS treated the",
+    "$250 as a base fee and added servings: $316 -> $347.60. INVOICE_HOURLY added",
+    "servings on top of the hour: $338. MIN_GUARANTEE_HOURLY got $250 by luck but",
+    "would have DEFERRED the invoice forever, so the school was never billed.",
+    "Correct: INVOICE_HOURLY, HOURLY_RATE 250, TOTAL_EVENT_HOURS 1 (from the event's",
+    "own 11:00-12:00 times), RATE_PER_SERVING 0. Billed 1 x 250 = $250, +6% tax $15,",
+    "+4% card fee $10 = $275.",
+    "Servings are NOT billed on top: the notes price the hour, not the hour plus",
+    "every cup. The '$3 kiddie / $4 small' figures are reference pricing for what",
+    "the hour covers. Nothing is derived or invented -- an earlier attempt set",
+    "UNITS_INCLUDED_IN_BASE = 250/4 = 62.5 so a package model would produce $250,",
+    "and that fabricated quantity reached the client's invoice.",
+    "EVENT_TYPE is pinned to invoice because the notes declare 'EVENT TYPE Invoice'.",
+    "The declared field is authoritative and is now enforced in code."
+  ],
+  "open_questions": [
+    "The notes quote two per-cup prices ($3 kiddie / $4 small) that this model does",
+    "not bill, so the dead-terms gate may flag them as stated-but-unused. That is a",
+    "hold for review, not a wrong invoice -- and it is arguably the right prompt:",
+    "someone should confirm the per-cup prices are reference-only for this booking."
+  ],
+  "cleaned": {
+    "DATE": "2026-07-25",
+    "EVENT_STARTED": "2026-07-25T11:00:00-04:00",
+    "EVENT_ENDED": "2026-07-25T12:00:00-04:00",
+    "EVENT_NAME": "Kiddie Academy - Roland Park",
+    "BUSINESS_NAME": "Kiddie Academy - Roland Park",
+    "EVENT_TYPE": "Invoice",
+    "FINAL_EVENT_STATUS": "Completed",
+    "EVENT_NOTES_HTML": "EVENT TYPE Invoice ATTENDEES  SERVE & KEEP COUNT 12oz green cups ADD'L INSTRUCTION INCLUDE  PARKING We will show you where to park. It will either be our front of the academy or right on the side of the building TAXABLE Yes PAYMENT School will be paying - send invoice after",
+    "ADMIN_NOTES": "Teach our drivers to inform us if the client paid or we need to send them an invoice  $3 \"kiddie\" Kona's or our $4 \"small\" Kona's / The minimum for 1 hour will be $250",
+    "DRIVER_NOTES": "22 green cups sold; send invoice.",
+    "LOCATION_NOTES": "",
+    "EQUIPMENT": "KEV6 (SK)",
+    "EVENT_SALES": 0,
+    "NET_EVENT_SALES": 0,
+    "BALANCE": 0,
+    "SALES_TAX": 0,
+    "TIP_AMOUNT": 0,
+    "DELIVERY_FEE": 0
+  },
+  "expect": {
+    "EVENT_TYPE": "invoice",
+    "BILLING_MODEL": "INVOICE_HOURLY",
+    "HOURLY_RATE": 250,
+    "TOTAL_EVENT_HOURS": 1,
+    "RATE_PER_SERVING": 0,
+    "BASE_AMOUNT": 0,
+    "UNITS_INCLUDED_IN_BASE": 0,
+    "TAXABLE": "YES"
+  },
+  "expect_invoice": {
+    "SUBTOTAL": 250.0,
+    "HOURLY_REVENUE": 250.0,
+    "OVERAGE_UNITS": 0,
+    "OVERAGE_REVENUE": 0.0,
+    "SALES_TAX": 15.0,
+    "CC_FEE": 10.0,
+    "FINAL_INVOICE_AMOUNT": 275.0
+  }
+}

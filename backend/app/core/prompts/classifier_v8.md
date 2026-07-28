@@ -78,14 +78,17 @@ owes the money, then treat the instrument as a separate question.
     This holds whether guests paid by card or cash. It is never Hybrid.
       "sell to guests with the $295 minimum" → MIN_GUARANTEE_FLAT, 295
 
-  (b) The HOST is buying the servings and the minimum floors THEIR OWN bill. No
-      guest selling anywhere in the notes:
-    → Invoice, NEVER MG. Put the figure in MINIMUM_FLAT_AMOUNT and let it floor the
-      host's bill — see "A base fee ADDS. A minimum REPLACES." below.
+  (b) The HOST is buying the time or the servings and the minimum applies to THEIR
+      OWN bill. No guest selling anywhere in the notes:
+    → Invoice, NEVER MG.
+      A minimum stated PER N HOURS prices the time → INVOICE_HOURLY.
       "$3 kiddie or $4 small / The minimum for 1 hour will be $250" together with
       "School will be paying - send invoice after"
-        → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_PER_SERVING,
-          RATE_PER_SERVING: 4, MINIMUM_FLAT_AMOUNT: 250
+        → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_HOURLY,
+          HOURLY_RATE: 250, TOTAL_EVENT_HOURS: 1, RATE_PER_SERVING: 0
+        → billed 1 × 250 = $250
+      A flat minimum for the whole event goes in MINIMUM_FLAT_AMOUNT and floors the
+      bill instead — see "A base fee ADDS. A minimum REPLACES." below.
 
   The test: does the minimum have SALES to count against it? An MG minimum is
   backstopped by the truck's guest sales. A floor on a host's own purchase has
@@ -267,17 +270,25 @@ Extract: TOTAL_EVENT_HOURS, HOURLY_RATE
 Requires a price stated PER HOUR — "$295 per hour", "$X/hr", "$X an hour", "$X for
 each hour". The figure must SCALE with time.
 
-A MINIMUM that merely mentions a duration is NOT an hourly rate:
-  "The minimum for 1 hour will be $250"
-    → a $250 FLOOR for the event. Nothing there says a second hour costs another
-      $250, and nothing says servings are billed ON TOP of it.
-    → INVOICE_FIXED_PACKAGE with BASE_AMOUNT: 250 (see the minimum-charge rule in
-      STEP 1), NEVER INVOICE_HOURLY.
-    → billing it hourly and then adding servings gave 1×250 + 22×4 = $338 on an
-      event whose actual total was $250 + tax.
+A minimum stated FOR A NUMBER OF HOURS *is* this model. "The minimum for 1 hour
+will be $250" prices the time:
+  → HOURLY_RATE: 250, TOTAL_EVENT_HOURS: 1  (from the event's own start/end times)
+  → RATE_PER_SERVING: 0 unless the notes say servings are charged IN ADDITION
+  → billed: 1 × 250 = $250
 
-The test: would a 2-hour event cost double? If the notes do not say so, the figure
-is not an hourly rate — it is a floor or a package price.
+  Servings are NOT added on top here. The notes price the hour, not the hour plus
+  every cup — adding them gave 1×250 + 22×4 = $338 on an event whose actual total
+  was $250 + tax. Per-cup figures quoted alongside ("$3 kiddie or $4 small") are
+  reference pricing for what the hour covers, not a separate charge.
+
+  Only bill servings on top when the notes state an allowance and an extra rate:
+  "$295/hour includes up to 60 Konas, additional $4 each" — there
+  UNITS_INCLUDED_IN_BASE is a real number someone agreed to.
+
+The test for whether a figure is hourly at all: would a 2-hour booking cost double?
+"the minimum for 1 hour will be $250" scales that way — two hours, two minimums.
+A flat "total minimum of $150" for the whole event does not, and belongs in
+MINIMUM_FLAT_AMOUNT instead.
 Also extract UNITS_SERVED_TOTAL and RATE_PER_SERVING if stated.
 When the hourly rate includes a per-hour serving allowance ("$295/hour, each hour includes up to 60 12oz Konas, additional Konas $4 each"), also extract UNITS_INCLUDED_IN_BASE = the allowance per hour × TOTAL_EVENT_HOURS (e.g. 60/hour × 2 hours = 120). Only servings beyond UNITS_INCLUDED_IN_BASE are billed at RATE_PER_SERVING (the overage).
   "$295/hr, includes 60 Konas/hr, $4 each additional", 1-hour event, 100 served

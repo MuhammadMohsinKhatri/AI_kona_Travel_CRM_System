@@ -91,6 +91,49 @@ def test_gallery_tower_becomes_a_flat_minimum_guarantee():
     assert calculate_invoice(cls)["SUBTOTAL"] == 295.0
 
 
+def test_the_declared_event_type_in_the_notes_wins():
+    """Kiddie Academy: the notes declare "EVENT TYPE Invoice" and the classifier
+    returned "minimum guarantee". The declared field is the office's own
+    classification and is now enforced in code, because leaving it to the model's
+    judgement lost the argument every time — a terminal mention gave Hybrid, the
+    word "minimum" gave Minimum Guarantee.
+    """
+    cleaned = {
+        "EVENT_NOTES_HTML": (
+            "EVENT TYPE Invoice ATTENDEES  SERVE & KEEP COUNT 12oz green cups "
+            "TAXABLE Yes PAYMENT School will be paying - send invoice after"
+        ),
+        "ADMIN_NOTES": "The minimum for 1 hour will be $250",
+        "DRIVER_NOTES": "22 green cups sold; send invoice.",
+    }
+    cls = _normalize_classification(
+        {"EVENT_TYPE": "minimum guarantee", "BILLING_MODEL": "MIN_GUARANTEE_HOURLY",
+         "MINIMUM_AMOUNT_PER_HOUR": 250, "TOTAL_EVENT_HOURS": 1},
+        cleaned,
+    )
+    assert cls["EVENT_TYPE"] == "invoice"
+    # The model's own answer is kept for the audit trail rather than discarded.
+    assert cls["EVENT_TYPE_CLASSIFIED"] == "minimum guarantee"
+
+
+def test_a_declared_type_that_already_matches_is_left_untouched():
+    cleaned = {"EVENT_NOTES_HTML": "EVENT TYPE Invoice TAXABLE Yes"}
+    cls = _normalize_classification(
+        {"EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_HOURLY"}, cleaned)
+    assert cls["EVENT_TYPE"] == "invoice"
+    assert "EVENT_TYPE_CLASSIFIED" not in cls
+
+
+def test_no_declared_type_leaves_the_classifier_in_charge():
+    """Not every event's notes carry the field; when it is absent the model's
+    answer stands."""
+    cls = _normalize_classification(
+        {"EVENT_TYPE": "selling", "BILLING_MODEL": "SELLING_OPEN"},
+        {"ADMIN_NOTES": "Open selling event.", "EVENT_NOTES_HTML": ""},
+    )
+    assert cls["EVENT_TYPE"] == "selling"
+
+
 def test_normalization_leaves_an_approved_model_alone():
     cls = _normalize_classification({
         "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_HOURLY",

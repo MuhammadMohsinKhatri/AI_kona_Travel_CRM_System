@@ -208,7 +208,9 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     rule_classified += 1
                 else:
                     classification = classifier.classify(item["cleaned"])
-                item["classification"] = _normalize_classification(classification)
+                item["classification"] = _normalize_classification(
+                    classification, item["cleaned"]
+                )
                 usage = item["classification"].get("_usage") or {}
                 run.ai_prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
                 run.ai_completion_tokens += int(usage.get("completion_tokens", 0) or 0)
@@ -957,7 +959,28 @@ def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Opt
     return start, end
 
 
-def _normalize_classification(cls: dict[str, Any]) -> dict[str, Any]:
+def _declared_event_type(cleaned: dict[str, Any] | None) -> str:
+    """The EVENT_TYPE the booking form itself declares, or "" if absent.
+
+    Read deterministically out of the notes rather than left to the classifier's
+    judgement. Every event-type error so far has been the model overriding this
+    field on an inference — a terminal mention gave Hybrid, the word "minimum"
+    gave Minimum Guarantee — on notes that plainly named the payer.
+    """
+    if not cleaned:
+        return ""
+    from app.core.invariants import _form_field, _notes_text
+
+    declared = _form_field(_notes_text(cleaned), r"EVENT\s*TYPE").strip().lower()
+    for candidate in ("minimum guarantee", "invoice", "selling", "hybrid"):
+        if declared.startswith(candidate):
+            return candidate
+    return ""
+
+
+def _normalize_classification(
+    cls: dict[str, Any], cleaned: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Deterministic post-rules on top of the classifier's output.
 
     Selling events settle at the truck via Square — when the classifier fell
@@ -982,6 +1005,17 @@ def _normalize_classification(cls: dict[str, Any]) -> dict[str, Any]:
         # label on the retired model, and it drives invoice/ledger routing.
         if canonical.startswith("MIN_GUARANTEE") and event_type == "hybrid":
             cls["EVENT_TYPE"] = "minimum guarantee"
+
+    # The booking form's declared EVENT TYPE wins. Determined here in code rather
+    # than trusted to the classifier, which has overridden it on an inference every
+    # time. When the declared type and the billing model disagree the pre-invoice
+    # gate raises a CRITICAL and holds the event, so a genuinely mis-declared form
+    # (Gallery Tower's notes say "Selling" on a real minimum guarantee) surfaces for
+    # a person instead of being silently mis-billed either way.
+    declared = _declared_event_type(cleaned)
+    if declared and declared != str(cls.get("EVENT_TYPE") or "").strip().lower():
+        cls["EVENT_TYPE_CLASSIFIED"] = cls.get("EVENT_TYPE")  # keep for the audit
+        cls["EVENT_TYPE"] = declared
     return cls
 
 
