@@ -100,16 +100,33 @@ def test_mg_shortfall_invoice_includes_the_location_fee():
     assert calc["SUBTOTAL"] == 275.0   # 200 shortfall + 75 location fee
 
 
-def test_mg_falls_back_to_the_full_minimum_while_cash_is_unknown():
-    """Before cash is counted, sales are incomplete and a shortfall computed
-    from them would be far too large.
+def test_mg_still_credits_known_card_sales_while_cash_is_unknown():
+    """Card sales come from Square and are known as soon as the event
+    reconciles; only counted CASH is outstanding. So the provisional figure must
+    subtract the card take.
 
-    The pipeline defers MG invoices for exactly this reason, so this value
-    should never reach a real invoice — but the fallback must be the safe
-    direction (bill the minimum) rather than a wrong shortfall.
+    This is still the safe direction: cash can only ever reduce the shortfall
+    further, so minimum - card is the MOST the host could owe and can never
+    under-bill. It is simply a far tighter bound than the whole minimum, which
+    discarded every dollar of reconciled card revenue.
+
+    The pipeline defers MG invoices while cash is outstanding either way, so this
+    value never reaches a client.
     """
     calc = _mg(minimum=500, card=300, cash=0, known=False)
-    assert calc["SUBTOTAL"] == 500.0
+    assert calc["SUBTOTAL"] == 200.0   # was 500.0 — the $300 card take was ignored
+
+
+def test_mg_provisional_figure_is_zero_once_card_alone_covers_the_minimum():
+    """If the card take already clears the bar, no amount of uncounted cash can
+    create a shortfall — so there is nothing provisional to show."""
+    calc = _mg(minimum=500, card=520, cash=0, known=False)
+    assert calc["SUBTOTAL"] == 0.0
+
+
+def test_mg_provisional_figure_never_charges_a_bare_location_fee():
+    calc = _mg(minimum=500, card=520, cash=0, known=False, location_fee=75)
+    assert calc["SUBTOTAL"] == 0.0
 
 
 # ── Cash overrides ──────────────────────────────────────────────────────────

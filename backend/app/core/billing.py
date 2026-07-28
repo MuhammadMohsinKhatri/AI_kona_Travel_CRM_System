@@ -89,16 +89,30 @@ def _mg_subtotal(event: dict[str, Any], minimum_required: float, location_fee: f
     clear the bar ~6% more easily than an exempt one, for no defensible
     reason.
 
-    ``ACTUAL_SALES_KNOWN`` is the guard that makes this safe. Cash is counted
-    after the event, so until it is posted the sales figure is incomplete and
-    a shortfall computed from it would be far too large. In that case fall
-    back to the full minimum — but the pipeline defers the invoice entirely
-    for exactly this reason, so that value should never reach a real invoice.
-    """
-    if not event.get("ACTUAL_SALES_KNOWN"):
-        return minimum_required + location_fee
+    ``ACTUAL_SALES_KNOWN`` reports whether COUNTED CASH has been posted, not
+    whether anything is known — card sales come from Square and are known as
+    soon as the event reconciles. So while cash is outstanding the figure is
+    provisional, but it should still subtract the card take: cash can only ever
+    reduce the shortfall further, so ``minimum - card`` is the MOST the host
+    could owe. That makes it a safe upper bound (it can never under-bill) and a
+    far tighter one than the whole minimum.
 
-    actual_sales = _num(event.get("ACTUAL_CARD_SALES")) + _num(event.get("ACTUAL_CASH_PRE_TAX"))
+    Returning the untouched minimum here used to discard every dollar of known
+    card revenue — a $295 minimum against $48 of reconciled card sales read as
+    $295 owed instead of $247.
+
+    Either way the pipeline DEFERS the invoice while cash is outstanding, so a
+    provisional figure is a display value and never reaches a client.
+    """
+    card_sales = _num(event.get("ACTUAL_CARD_SALES"))
+
+    if not event.get("ACTUAL_SALES_KNOWN"):
+        provisional = max(0.0, minimum_required - card_sales)
+        # Same rule as below: a location fee rides along with a shortfall but
+        # never creates a charge on its own.
+        return provisional + location_fee if provisional > 0 else 0.0
+
+    actual_sales = card_sales + _num(event.get("ACTUAL_CASH_PRE_TAX"))
     shortfall = max(0.0, minimum_required - actual_sales)
     # Minimum covered → nothing to invoice. The location fee rides along with
     # a shortfall but doesn't create an invoice on its own.
