@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.core import billing, event_cleaner, invoice_builder, notify, overrides
 from app.core.alerts import check_alerts
 from app.core.equipment import map_equipment
+from app.core.ledger import derive_sales_columns, host_billed_applies
 from app.integrations import factory
 from app.models import Alert, Event, FinancialEntry, Invoice, PipelineRun
 
@@ -1046,41 +1047,29 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
     # payment_method == "CHECK", which zeroed it out for e.g. a credit-card
     # invoice event even though the client was in fact billed that amount.
     event_type_lower = str(cls.get("EVENT_TYPE", "")).strip().lower()
-    entry.check_invoice = invoice_total if event_type_lower in ("invoice", "hybrid") else 0.0
+    # Every host-billed type, not just invoice/hybrid: a minimum-guarantee host
+    # is billed the shortfall, and that is a real Check / Invoice amount. Only
+    # selling events bill nothing (their revenue is the truck's own sales).
+    entry.check_invoice = invoice_total if host_billed_applies(event_type_lower) else 0.0
     entry.deposit = _num(cls.get("DEPOSIT_AMOUNT"))
     entry.taxable = taxable
     entry.giveback_amount = _num(calc.get("GIVEBACK_AMOUNT"))
     entry.location_fee = _num(cls.get("LOCATION_FEE"))
-    # Derived sales columns — formulas match the legacy monthly sheet:
-    #   Event Sales Collected (O) = net card + cash pre-tax
-    #   Sales Tax Amount (P)      = card tax + cash tax
-    #   Sales $ (Q)               = net card + card tax + tips + cash collected
-    #   Net Event Sales (S)       = Event Sales Collected − giveback
-    # Invoice events are host-billed with no at-truck collection: Event Sales
-    # Collected AND Net Event Sales both equal the Check / Invoice amount (the
-    # billed total). Other billed events with no at-event sale fall back to the
-    # invoiced sale (subtotal) rather than sitting at 0.
-    is_invoice_type = event_type_lower == "invoice"
-    if is_invoice_type:
-        billed = entry.check_invoice or invoice_total
-        entry.event_sales_collected = billed
-        # Sales Tax Amount = at-event card + cash tax only (0 for a pure invoice
-        # event); the invoice's own tax is already inside `billed`, so it must
-        # not be double-counted here.
-        entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
-        entry.sales_dollars = subtotal
-        entry.net_event_sales = billed
-    else:
-        entry.event_sales_collected = _r2(entry.square_net_card + entry.cash_pre_tax)
-        entry.sales_tax = _r2(entry.square_card_tax + entry.cash_tax)
-        entry.sales_dollars = _r2(
-            entry.square_net_card + entry.square_card_tax
-            + entry.square_tips_card + cash_collected
-        )
-        # No at-event sale but there is an invoiced amount → use the invoiced sale.
-        if entry.event_sales_collected == 0 and subtotal:
-            entry.event_sales_collected = subtotal
-        entry.net_event_sales = _r2(entry.event_sales_collected - entry.giveback_amount)
+    # Derived sales columns. One shared implementation with the sheet importer
+    # (app/core/ledger.py) — these were duplicated and had already drifted.
+    # Host-billed money is added for every event type except selling, so a
+    # hybrid row reflects both its guest sales and its invoiced base.
+    for column, value in derive_sales_columns(
+        event_type=event_type_lower,
+        square_net_card=entry.square_net_card,
+        square_card_tax=entry.square_card_tax,
+        square_tips_card=entry.square_tips_card,
+        cash_pre_tax=entry.cash_pre_tax,
+        cash_tax=entry.cash_tax,
+        billed_amount=entry.check_invoice or invoice_total,
+        giveback_amount=entry.giveback_amount,
+    ).items():
+        setattr(entry, column, value)
     # workflow
     entry.paid = str(cls.get("PAID_STATUS") or "").upper() in ("TRUE", "PAID", "YES", "1")
     # staff

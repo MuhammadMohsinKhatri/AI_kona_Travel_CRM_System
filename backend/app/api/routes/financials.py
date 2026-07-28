@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core import overrides as ov
+from app.core.ledger import derive_sales_columns
 from app.db.base import get_db
 from app.konaos.router import verify_api_key
 from app.models import CrmAuditEntry, Event, FinancialEntry, PipelineRun, User
@@ -683,22 +684,20 @@ def import_sheet(
         for header, attr in SHEET_COLUMNS:
             if header in row:  # AI_* headers aren't in the sheet — skip them
                 setattr(entry, attr, _coerce(attr, row[header]))
-        # Billed events have no at-event sale, so the sheet leaves these two at
-        # 0 — match the pipeline rule (see _upsert_financial_entry):
-        #   invoice type → both = the Check / Invoice (billed) amount
-        #   other billed → fall back to the invoiced sale (subtotal)
-        etype = (entry.event_type or "").strip().lower()
-        if etype == "invoice":
-            billed = entry.check_invoice or entry.subtotal
-            entry.event_sales_collected = billed
-            entry.net_event_sales = billed
-        elif not entry.event_sales_collected and entry.subtotal:
-            entry.event_sales_collected = entry.subtotal
-            entry.net_event_sales = round(entry.subtotal - (entry.giveback_amount or 0.0), 2)
-        # Sales Tax Amount = at-event card + cash tax only. The legacy sheet put
-        # the invoice's own tax in this column for invoice rows; override it so
-        # the column consistently means at-event tax (0 for a pure invoice).
-        entry.sales_tax = round((entry.square_card_tax or 0.0) + (entry.cash_tax or 0.0), 2)
+        # Recompute the derived sales columns through the same function the
+        # pipeline uses, so an imported row and a pipeline-written row for the
+        # same event agree.
+        for column, value in derive_sales_columns(
+            event_type=entry.event_type or "",
+            square_net_card=entry.square_net_card or 0.0,
+            square_card_tax=entry.square_card_tax or 0.0,
+            square_tips_card=entry.square_tips_card or 0.0,
+            cash_pre_tax=entry.cash_pre_tax or 0.0,
+            cash_tax=entry.cash_tax or 0.0,
+            billed_amount=(entry.check_invoice or entry.invoice_total or 0.0),
+            giveback_amount=entry.giveback_amount or 0.0,
+        ).items():
+            setattr(entry, column, value)
         # The sheet has no brand column — stamp it so rows group under the brand.
         entry.brand = brand
         entry.source = "sheet"
