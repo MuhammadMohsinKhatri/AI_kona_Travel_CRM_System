@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     openai_input_cost_per_mtok: float = 0.25
     openai_output_cost_per_mtok: float = 2.0
 
+    # Pre-invoice consistency gate (app/core/invariants.py). When a check fails
+    # the event is held in needs_review and NO invoice is drafted, so a
+    # misclassification cannot reach a client. Set false to fall back to
+    # invoicing everything and treating violations as alerts only — the escape
+    # hatch if the checks ever start holding correct events in bulk, since this
+    # gate sits in front of billing and a bad rule would stall invoicing.
+    invoice_gate_enabled: bool = True
+
     # Telegram
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

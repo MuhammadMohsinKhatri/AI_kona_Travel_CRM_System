@@ -29,6 +29,7 @@ PIPELINE_STEPS: list[tuple[str, str]] = [
     ("classify", "AI classification"),
     ("square", "Square reconciliation"),
     ("calculate", "Calculate invoices"),
+    ("verify", "Verify before invoicing"),
     ("invoice", "Create invoice drafts"),
     ("alerts", "Check alerts & notify"),
     ("report", "Update monthly report"),
@@ -37,6 +38,14 @@ PIPELINE_STEPS: list[tuple[str, str]] = [
 
 def _brand_key(brand: str) -> str:
     return "tom" if "tom" in (brand or "").lower() else "kona"
+
+
+def _settings_gate_enabled() -> bool:
+    """Read at call time, not import time, so flipping the env var takes effect
+    on the next run rather than needing a rebuild."""
+    from app.config import settings as _s
+
+    return bool(getattr(_s, "invoice_gate_enabled", True))
 
 
 def _date_bounds_ms(date_str: str) -> tuple[Optional[int], Optional[int]]:
@@ -315,7 +324,62 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
         total_amount = sum(i["calc"].get("FINAL_INVOICE_AMOUNT", 0) for i in items)
         progress.set("calculate", "done", f"${total_amount:,.2f} calculated")
 
-        # ── PHASE 6: INVOICE DRAFTS ─────────────────────────────────────────
+        # ── PHASE 6: VERIFY BEFORE INVOICING ────────────────────────────────
+        # The classifier is an LLM and will be wrong sometimes. This is where a
+        # wrong reading is stopped from becoming a client's invoice: the checks
+        # run on the finished numbers but BEFORE anything is drafted, and any
+        # violation holds the event for a human instead.
+        #
+        # This has to run here rather than in the alerts phase, which happens
+        # AFTER invoicing — by then the draft exists in the CRM and is
+        # PROTECTED from replacement, so a corrected re-run cannot fix it and
+        # someone has to void it by hand.
+        from app.core.invariants import check_invariants
+
+        progress.set("verify", "running")
+        blocked_count = 0
+        for i, item in enumerate(list(items), 1):
+            progress.counter("verify", i, len(items))
+            try:
+                violations = check_invariants(
+                    item["cleaned"], item["classification"], item["calc"]
+                )
+                # Carried, not saved: _save_alerts replaces an event's alerts
+                # wholesale, so the alerts phase writes these together with the
+                # regular alert rules. Saving here would only get clobbered.
+                # With the gate off, violations still surface as alerts and
+                # needs_review — they just don't stop the draft.
+                item["violations"] = violations
+                item["gate_blocks"] = bool(violations) and _settings_gate_enabled()
+                if violations:
+                    blocked_count += 1 if item["gate_blocks"] else 0
+                    item["event"].status = "needs_review"
+                    for v in violations:
+                        note(f"[{item['crm_id']}] HELD — {v['issue']}")
+                    _audit(
+                        db, item["event"], "invoice_blocked",
+                        "Invoice held before drafting — "
+                        + "; ".join(v["issue"] for v in violations),
+                        detail={
+                            "billing_model": item["classification"].get("BILLING_MODEL"),
+                            "subtotal": item["calc"].get("SUBTOTAL"),
+                            "violations": violations,
+                        },
+                        run_id=run.id,
+                    )
+                    db.commit()
+            except Exception as exc:  # noqa: BLE001
+                drop_errored(items, item, exc, "verify")
+        flagged = sum(1 for i in items if i.get("violations"))
+        if not _settings_gate_enabled() and flagged:
+            verify_detail = f"{flagged} flagged — gate DISABLED, invoicing anyway"
+        elif blocked_count:
+            verify_detail = f"{blocked_count} held for review"
+        else:
+            verify_detail = "all checks passed"
+        progress.set("verify", "done", verify_detail)
+
+        # ── PHASE 7: INVOICE DRAFTS ─────────────────────────────────────────
         from app.config import settings as _settings
 
         dry_run = _settings.pipeline_dry_run
@@ -334,7 +398,13 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 # guaranteed minimum, so drafting one now — with cash still
                 # unknown and therefore 0 — would bill the host the entire
                 # minimum for an event that may well have covered it.
-                if (
+                if item.get("gate_blocks"):
+                    # Held by the verify phase. No draft, no CRM write — the
+                    # event sits in needs_review until a person resolves it.
+                    note(f"[{item['crm_id']}] invoice NOT created — held for review "
+                         f"({len(item['violations'])} consistency check(s) failed)")
+                    payload = None
+                elif (
                     overrides.is_min_guarantee(item["classification"].get("BILLING_MODEL"))
                     and not item["classification"].get("ACTUAL_SALES_KNOWN")
                 ):
@@ -480,9 +550,13 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
             progress.counter("alerts", i, len(items))
             try:
                 alert_result = check_alerts(item["merged"])
-                saved_alerts = _save_alerts(db, item["event"], alert_result["alerts"])
-                run.alerts_raised += len(alert_result["alerts"])
-                if alert_result["hasAlerts"]:
+                # Verify-phase violations are written here, in the one call that
+                # owns this event's alerts — _save_alerts replaces the whole set,
+                # so anything saved earlier would be deleted by this line.
+                all_alerts = (item.get("violations") or []) + alert_result["alerts"]
+                saved_alerts = _save_alerts(db, item["event"], all_alerts)
+                run.alerts_raised += len(all_alerts)
+                if all_alerts:
                     item["event"].status = "needs_review"
                     # One Telegram message per alert, each linking to its own
                     # page — a single digest can't be acted on from a phone.
