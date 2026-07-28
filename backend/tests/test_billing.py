@@ -55,6 +55,58 @@ def test_fixed_package_does_not_shrink_when_under_served():
     assert calc["SUBTOTAL"] == 1200.0
 
 
+def test_storing_the_overage_rate_is_inert_until_there_is_overage():
+    """Wayland Baptist 2026-07-25: "$295 60 cups, plus $4 for additional
+    servings", exactly 60 served.
+
+    The prompt used to zero RATE_PER_SERVING whenever no overage occurred, which
+    (a) made a stated $4 look like a dropped price to the pre-invoice gate, and
+    (b) silently under-billed if the count was later corrected upward. Recording
+    the rate is financially inert at 60/60 and correct at 70/60.
+    """
+    package = {
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 295,
+        "UNITS_INCLUDED_IN_BASE": 60, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    }
+    # Exactly the included count: the rate must not change the bill either way.
+    assert calculate_invoice(
+        {**package, "UNITS_SERVED_TOTAL": 60, "RATE_PER_SERVING": 0})["SUBTOTAL"] == 295.0
+    assert calculate_invoice(
+        {**package, "UNITS_SERVED_TOTAL": 60, "RATE_PER_SERVING": 4})["SUBTOTAL"] == 295.0
+
+    # Ten over: a stored 0 loses $40, which is the bug the old rule created.
+    assert calculate_invoice(
+        {**package, "UNITS_SERVED_TOTAL": 70, "RATE_PER_SERVING": 0})["SUBTOTAL"] == 295.0
+    assert calculate_invoice(
+        {**package, "UNITS_SERVED_TOTAL": 70, "RATE_PER_SERVING": 4})["SUBTOTAL"] == 335.0
+
+
+def test_recorded_overage_rate_does_not_trip_the_dead_terms_gate():
+    """The alert this fixes: with the rate recorded, the stated $4 does work and
+    the gate has nothing to report."""
+    from app.core.invariants import check_invariants
+
+    notes = {
+        "ADMIN_NOTES": "$295 60 12oz green servings, plus $4 for additional servings",
+        "DRIVER_NOTES": "Sold 60 green cups; send invoice.",
+        "EVENT_NOTES_HTML": (
+            "EVENT TYPE Invoice ATTENDEES 60 people  SERVE & KEEP COUNT 60 12oz "
+            "green cups TAXABLE Yes PAYMENT May pay by credit card or ask to "
+            "invoice w/ tax. If paying w CC, add 4% CC fee"
+        ),
+    }
+    classification = {
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BASE_AMOUNT": 295, "UNITS_INCLUDED_IN_BASE": 60,
+        "UNITS_SERVED_TOTAL": 60, "RATE_PER_SERVING": 4, "TAXABLE": "YES",
+        "PAYMENT_METHOD": "CHECK",
+    }
+    calc = calculate_invoice(classification)
+    assert calc["SUBTOTAL"] == 295.0
+    violations = check_invariants(notes, classification, calc)
+    assert not any("4.00" in v["issue"] for v in violations), violations
+
+
 def test_fixed_package_all_in_bills_the_package_price_flat():
     # Same event, with the admin's "(no extra taxes or fees)" honoured:
     # PRICE_IS_ALL_IN suppresses both the 6% tax and the 4% fee, so the host

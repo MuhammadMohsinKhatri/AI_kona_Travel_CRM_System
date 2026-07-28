@@ -1,0 +1,52 @@
+{
+  "name": "Fixed package with a stated overage rate that does not apply",
+  "confirmed": true,
+  "why": [
+    "Wayland Baptist Church - Community Outreach, 2026-07-25. Confirmed correct by",
+    "the finance owner: $295 package covering 60 cups, exactly 60 served, so the",
+    "$4 additional-serving rate does not apply and the invoice is $295 + tax.",
+    "The prompt used to zero RATE_PER_SERVING whenever no overage occurred. Two",
+    "problems with that: the stated $4 then looked like a dropped price to the",
+    "pre-invoice gate (raising a false HIGH alert on a correct event), and a",
+    "serving count later corrected to 70 would bill the 10 extras at $0 -- a",
+    "silent $40 under-bill.",
+    "RATE_PER_SERVING is now recorded whenever stated. It is financially inert",
+    "here because the backend applies it to max(0, served - included) = 0.",
+    "Contact phone redacted; it does not affect classification."
+  ],
+  "cleaned": {
+    "DATE": "2026-07-25",
+    "EVENT_STARTED": "2026-07-25T12:30:00-04:00",
+    "EVENT_ENDED": "2026-07-25T13:30:00-04:00",
+    "EVENT_NAME": "Wayland Baptist Church - Community Outreach",
+    "BUSINESS_NAME": "Wayland Baptist Church - Community Outreach",
+    "EVENT_TYPE": "Invoice",
+    "FINAL_EVENT_STATUS": "Completed",
+    "EVENT_NOTES_HTML": "EVENT TYPE Invoice ATTENDEES 60 people  SERVE & KEEP COUNT 60 12oz green cups INCLUDE  ADD'L INSTRUCTION requesting Lilly as server PARKING My number is [phone redacted] . You can call when you are on the way.  parked in the same location PAYMENT May pay by credit card or ask to invoice w/ tax. If paying w CC, add 4% CC fee (Multiply total by 1.04)",
+    "ADMIN_NOTES": "$295 60 12oz green servings, plus $4 for additional servings",
+    "DRIVER_NOTES": "Sold 60 green cups; send invoice. (other costumers paid on the M terminal.)",
+    "LOCATION_NOTES": "",
+    "EQUIPMENT": "KEV6 (SK)",
+    "EVENT_SALES": 0,
+    "NET_EVENT_SALES": 0,
+    "BALANCE": 0,
+    "SALES_TAX": 0,
+    "TIP_AMOUNT": 0,
+    "DELIVERY_FEE": 0
+  },
+  "expect": {
+    "EVENT_TYPE": "invoice",
+    "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+    "BASE_AMOUNT": 295,
+    "UNITS_INCLUDED_IN_BASE": 60,
+    "UNITS_SERVED_TOTAL": 60,
+    "RATE_PER_SERVING": 4,
+    "TAXABLE": "YES"
+  },
+  "expect_invoice": {
+    "SUBTOTAL": 295.0,
+    "OVERAGE_UNITS": 0,
+    "OVERAGE_REVENUE": 0.0,
+    "SALES_TAX": 17.7
+  }
+}

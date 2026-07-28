@@ -151,7 +151,20 @@ Example of INCORRECT use:
 INVOICE_FIXED_PACKAGE
 Fixed floor price covers a set number of servings; overage billed separately only if exceeded.
 Extract: BASE_AMOUNT, UNITS_INCLUDED_IN_BASE, UNITS_SERVED_TOTAL
-RATE_PER_SERVING: only if actual servings exceeded UNITS_INCLUDED_IN_BASE AND overage rate is stated. Otherwise 0.
+RATE_PER_SERVING: extract the overage rate WHENEVER it is stated, even if no
+overage actually occurred. Do not zero it just because servings came in at or
+under the included count — the backend multiplies it by
+`max(0, served - included)`, so it contributes nothing until there is genuine
+overage. Recording it keeps the price correct if the serving count is later
+corrected upward; zeroing it would bill those extra servings at $0.
+  "$295 for 60 cups, plus $4 for additional servings", 60 served
+    → BASE_AMOUNT: 295, UNITS_INCLUDED_IN_BASE: 60, UNITS_SERVED_TOTAL: 60,
+      RATE_PER_SERVING: 4  (billed: 295 + max(0, 60-60) x 4 = 295)
+
+Only an ADDITIONAL/OVERAGE rate goes here. A per-unit figure that merely derives
+the package price is NOT an overage rate:
+  "$2 per cup, so 600 Kona's would come to $1,200" → RATE_PER_SERVING: 0
+    (the $2 explains how $1,200 was reached; nothing is billed per serving)
 
 Use when notes say: "charge $Y minimum unless N+ servings at $X each"
   BASE_AMOUNT = $Y, UNITS_INCLUDED_IN_BASE = N, RATE_PER_SERVING = $X (overage only)
@@ -406,7 +419,7 @@ Extract numeric estimate from notes.
 
 ### RATE_PER_SERVING
 
-INVOICE_FIXED_PACKAGE only: extract rate only when actual servings exceeded UNITS_INCLUDED_IN_BASE AND overage rate is explicitly stated. Otherwise 0.
+INVOICE_FIXED_PACKAGE: extract the stated overage rate whenever the notes state one, whether or not servings exceeded UNITS_INCLUDED_IN_BASE — the backend applies it only to `max(0, served - included)`. Set 0 only when no additional-serving rate is stated at all, or when the per-unit figure merely derives the package price rather than pricing extras.
 
 All other models (INVOICE_PER_SERVING, INVOICE_BASE_FEE_PLUS_SERVINGS, MIN_GUARANTEE_HOURLY, MIN_GUARANTEE_FLAT, HYBRID_HOST_BASE_PLUS_GUEST_EXTRA):
 Extract from any note field. "Usually" or "typically" does not disqualify a rate.
