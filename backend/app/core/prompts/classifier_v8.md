@@ -78,6 +78,30 @@ Base fee + per-serving, with a floor:
     99 + 23×4 = 191 already exceeds 150)
   → NOT a minimum-guarantee model, and NOT a bare $150
 
+**A base fee ADDS. A minimum REPLACES.** This is the distinction that decides the
+model, and getting it backwards double-charges the floor:
+  "plus", "setup fee", "appearance fee", "$X plus $Y per serving"
+    → a base fee. It is ADDED to the per-serving total.
+  "minimum", "at least", "the minimum for N hours will be $X"
+    → a floor. It REPLACES the per-serving total whenever that total is lower.
+Never put an amount described as a minimum into INVOICE_BASE_FEE_PLUS_SERVINGS.
+That model adds BASE_AMOUNT on top of every serving charged, so a floor placed
+there gets billed twice over.
+
+Per-serving with a floor and NO separate base fee:
+  "$3 'kiddie' Kona's or our $4 'small' Kona's / The minimum for 1 hour will be $250",
+  22 kiddie cups served
+  → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_FIXED_PACKAGE
+  → BASE_AMOUNT: 250 (the floor), RATE_PER_SERVING: 3,
+    UNITS_INCLUDED_IN_BASE: 83.33   (= 250 / 3, the servings the floor already pays for)
+  → billed: 250 + max(0, 22 − 83.33) × 3 = $250
+    NOT 250 + (22 × 3) = $316 — that treats the floor as a base fee
+
+  UNITS_INCLUDED_IN_BASE = minimum ÷ rate is what makes the backend compute the
+  GREATER of the two. The floor holds until the servings earn more than it, then
+  the servings take over: 83 served → $250, 84 → $252, 100 → $300.
+  A fractional value is correct and expected here — do not round it.
+
 **Every stated dollar term must do work.**
 Before committing to a billing model, check that each dollar figure the notes
 state has a role in it. If a stated amount plays no part in your chosen model,

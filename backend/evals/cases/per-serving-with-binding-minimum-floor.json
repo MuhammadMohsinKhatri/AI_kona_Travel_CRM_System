@@ -1,0 +1,66 @@
+{
+  "name": "Per-serving with a minimum floor that DOES bind, no separate base fee",
+  "confirmed": true,
+  "why": [
+    "Kiddie Academy - Roland Park, 2026-07-25. Confirmed by the finance owner:",
+    "the actual amount is $275.00.",
+    "Billed $347.60 instead. The classifier chose INVOICE_BASE_FEE_PLUS_SERVINGS,",
+    "reading 'The minimum for 1 hour will be $250' as a base fee and stacking the",
+    "22 x $3 = $66 of servings on top: 250 + 66 = $316 subtotal.",
+    "A base fee ADDS; a minimum REPLACES. $250 is a floor, so the charge is the",
+    "GREATER of the floor and the per-serving total -- max(250, 66) = $250, then",
+    "+6% tax $15 +4% CC fee $10 = $275.00. Over-billed by $72.60.",
+    "Modelled as INVOICE_FIXED_PACKAGE with UNITS_INCLUDED_IN_BASE = 250/3 = the",
+    "servings the floor already pays for, which makes the engine compute the",
+    "greater of the two. The fractional value is correct, not a rounding error.",
+    "Contrast the 2026-07-26 case in base-plus-servings-with-minimum-floor.json:",
+    "there a base fee ('$99 plus...') AND a floor were both stated and the floor",
+    "did NOT bind. 'plus' means add; 'minimum' alone means floor.",
+    "UNITS_INCLUDED_IN_BASE is deliberately NOT pinned: 250/3 is a repeating",
+    "fraction and any value at or above the 22 served yields the same $250. The",
+    "SUBTOTAL assertion is the real check -- it can only come out at 250 if the",
+    "model set the included count high enough for the floor to hold."
+  ],
+  "open_questions": [
+    "The notes state two rates -- $3 'kiddie' and $4 'small'. The driver wrote",
+    "'22 green cups' without naming the size, so which rate applies is inferred.",
+    "It does not change this invoice (the floor binds either way, and 250/4 = 62.5",
+    "still exceeds 22), but the unused rate will trip the dead-terms gate, which",
+    "is the right outcome: a person should confirm the cup size."
+  ],
+  "cleaned": {
+    "DATE": "2026-07-25",
+    "EVENT_STARTED": "2026-07-25T11:00:00-04:00",
+    "EVENT_ENDED": "2026-07-25T12:00:00-04:00",
+    "EVENT_NAME": "Kiddie Academy - Roland Park",
+    "BUSINESS_NAME": "Kiddie Academy - Roland Park",
+    "EVENT_TYPE": "Invoice",
+    "FINAL_EVENT_STATUS": "Completed",
+    "EVENT_NOTES_HTML": "EVENT TYPE Invoice ATTENDEES  SERVE & KEEP COUNT 12oz green cups ADD'L INSTRUCTION INCLUDE  PARKING We will show you where to park. It will either be our front of the academy or right on the side of the building TAXABLE Yes PAYMENT School will be paying - send invoice after",
+    "ADMIN_NOTES": "Teach our drivers to inform us if the client paid or we need to send them an invoice  $3 \"kiddie\" Kona's or our $4 \"small\" Kona's / The minimum for 1 hour will be $250",
+    "DRIVER_NOTES": "22 green cups sold; send invoice.",
+    "LOCATION_NOTES": "",
+    "EQUIPMENT": "KEV6 (SK)",
+    "EVENT_SALES": 0,
+    "NET_EVENT_SALES": 0,
+    "BALANCE": 0,
+    "SALES_TAX": 0,
+    "TIP_AMOUNT": 0,
+    "DELIVERY_FEE": 0
+  },
+  "expect": {
+    "EVENT_TYPE": "invoice",
+    "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+    "BASE_AMOUNT": 250,
+    "RATE_PER_SERVING": 3,
+    "UNITS_SERVED_TOTAL": 22,
+    "TAXABLE": "YES"
+  },
+  "expect_invoice": {
+    "SUBTOTAL": 250.0,
+    "OVERAGE_UNITS": 0,
+    "SALES_TAX": 15.0,
+    "CC_FEE": 10.0,
+    "FINAL_INVOICE_AMOUNT": 275.0
+  }
+}

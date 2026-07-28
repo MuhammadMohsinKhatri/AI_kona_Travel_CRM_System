@@ -55,6 +55,43 @@ def test_fixed_package_does_not_shrink_when_under_served():
     assert calc["SUBTOTAL"] == 1200.0
 
 
+def test_a_minimum_floors_the_bill_it_does_not_add_to_it():
+    """Kiddie Academy - Roland Park, 2026-07-25: "$3 kiddie Kona's / The minimum
+    for 1 hour will be $250", 22 served. Confirmed correct total: $275.
+
+    A base fee ADDS; a minimum REPLACES. Treating the $250 floor as a base fee
+    billed 250 + (22 x 3) = $316 -> $347.60, over-billing by $72.60.
+
+    Modelling it as INVOICE_FIXED_PACKAGE with UNITS_INCLUDED_IN_BASE = 250/3
+    makes the engine compute max(floor, served x rate), which is the rule the
+    notes describe.
+    """
+    floored = {
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 250,
+        "RATE_PER_SERVING": 3, "UNITS_INCLUDED_IN_BASE": 250 / 3,
+        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    }
+    calc = calculate_invoice({**floored, "UNITS_SERVED_TOTAL": 22})
+    assert calc["SUBTOTAL"] == 250.0
+    assert calc["SALES_TAX"] == 15.0
+    assert calc["CC_FEE"] == 10.0
+    assert calc["FINAL_INVOICE_AMOUNT"] == 275.0
+
+    # The floor stops binding exactly where the servings out-earn it.
+    for served, expected in ((83, 250.0), (84, 252.0), (100, 300.0)):
+        assert calculate_invoice(
+            {**floored, "UNITS_SERVED_TOTAL": served})["SUBTOTAL"] == expected, served
+
+    # What the base-fee reading produced, kept as the counter-example.
+    wrong = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 250,
+        "RATE_PER_SERVING": 3, "UNITS_SERVED_TOTAL": 22,
+        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    })
+    assert wrong["SUBTOTAL"] == 316.0
+    assert wrong["FINAL_INVOICE_AMOUNT"] == 347.60
+
+
 def test_storing_the_overage_rate_is_inert_until_there_is_overage():
     """Wayland Baptist 2026-07-25: "$295 60 cups, plus $4 for additional
     servings", exactly 60 served.
