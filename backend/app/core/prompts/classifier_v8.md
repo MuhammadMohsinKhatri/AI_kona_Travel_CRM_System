@@ -44,8 +44,11 @@ owes the money, then treat the instrument as a separate question.
     → Hybrid
 
   HOST guarantees a minimum; guest sales count toward it; host covers shortfall:
-    → Minimum Guarantee (if host is invoiced for shortfall)
-    → Hybrid / HYBRID_SELLING_PLUS_MIN_GUARANTEE (if guests pay Kona/Tom's directly via Square/cash)
+    → Minimum Guarantee, ALWAYS — MIN_GUARANTEE_HOURLY if the minimum is stated
+      per hour, otherwise MIN_GUARANTEE_FLAT.
+    This holds whether guests paid at the truck or not. Guest sales counting
+    toward a host minimum is the definition of a minimum guarantee; it does not
+    make the event Hybrid.
 
 **Minimum charge pattern — always Invoice, never MG:**
 When notes say "charge $X per Kona if they buy N or more, otherwise charge $Y minimum":
@@ -73,7 +76,7 @@ Base fee + per-serving, with a floor:
   → BASE_AMOUNT: 99, RATE_PER_SERVING: 4, UNITS_SERVED_TOTAL: 23,
     MINIMUM_FLAT_AMOUNT: 150 (recorded; the floor does not bind because
     99 + 23×4 = 191 already exceeds 150)
-  → NOT HYBRID_SELLING_PLUS_MIN_GUARANTEE, and NOT a bare $150
+  → NOT a minimum-guarantee model, and NOT a bare $150
 
 **Every stated dollar term must do work.**
 Before committing to a billing model, check that each dollar figure the notes
@@ -253,21 +256,12 @@ RATE_PER_SERVING required when BASE_IS_FIXED_COMMITMENT = FALSE even if no overa
 RATE_PER_SERVING = 0 only when BASE_IS_FIXED_COMMITMENT = TRUE and no overage rate
 is stated in any note field.
 
-HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT
-Host pays partial per serving; guests pay the remainder.
-Extract: HOST_SUBSIDY_PER_SERVING, GUEST_RATE_PER_SERVING, UNITS_SERVED_TOTAL
+### DECIDING WHO PAID — applies to Selling and Minimum Guarantee alike
 
-HYBRID_SELLING_PLUS_MIN_GUARANTEE
-Guests pay Kona/Tom's directly via Square/cash; host covers shortfall if sales fall below guarantee.
-Extract: MINIMUM_AMOUNT_PER_HOUR or MINIMUM_FLAT_AMOUNT, TOTAL_EVENT_HOURS, UNITS_SERVED_TOTAL, RATE_PER_SERVING, SQUARE_USED, SQUARE_DEVICE_CONFIDENCE
-
-Use when: there is POSITIVE evidence that GUESTS paid individually AND the host
-covers any shortfall.
-
-A terminal, card reader, or Square device being used is NOT that evidence. The
-same reader takes one host payment or fifty guest payments — the instrument says
-nothing about who paid. Requiring only "Square present" here would make every
-card-paying host a selling event.
+A terminal, card reader, or Square device being used is NOT evidence of who
+paid. The same reader takes one host payment or fifty guest payments — the
+instrument says nothing about the payer. Treating "Square present" as proof of
+guest payment would make every card-paying host a selling event.
 
 Positive evidence guests paid individually:
   "guests paid", "each guest paid", "attendees bought", "sold to guests",
@@ -283,10 +277,53 @@ When the notes state a host charge AND a payment was taken at the event, the
 default is that the HOST settled that charge at the event. Do not reinterpret a
 stated host charge as guest sales.
 
-Do NOT use when the host is the one paying by card/check directly — that is Invoice.
+When the host is the one paying by card or check directly, it is Invoice — not
+Selling and not a Minimum Guarantee.
+
+---
+
+### THE BILLING MODEL LIST IS CLOSED
+
+These NINE are the only valid BILLING_MODEL values. They are exactly the
+"Predefined models" a person can pick on the New Event page:
+
+  INVOICE_PER_SERVING
+  INVOICE_BASE_FEE_PLUS_SERVINGS
+  INVOICE_FIXED_PACKAGE
+  INVOICE_HOURLY
+  SELLING_OPEN
+  SELLING_WITH_GIVEBACK
+  MIN_GUARANTEE_FLAT
+  MIN_GUARANTEE_HOURLY
+  HYBRID_HOST_BASE_PLUS_GUEST_EXTRA
+
+Never output any other value. Do not invent a model, do not combine two names,
+and do not emit a model you remember from elsewhere. If the pricing does not fit
+one of the nine, output UNDEFINED — that is the correct answer and a person will
+review it. A plausible-looking invented model prices the event by a rule the
+business never approved.
+
+Two names in particular are RETIRED. Never emit either:
+
+  HYBRID_SELLING_PLUS_MIN_GUARANTEE  → use MIN_GUARANTEE_HOURLY when an hourly
+    minimum is stated, otherwise MIN_GUARANTEE_FLAT. Guests paying at the truck
+    while the host guarantees a minimum IS a minimum-guarantee event; the truck's
+    sales count toward the minimum and the host owes the shortfall. That is what
+    MIN_GUARANTEE_* already means — there is nothing "hybrid" about it.
+      "sell to guests with the $295 minimum"
+        → EVENT_TYPE: minimum guarantee, BILLING_MODEL: MIN_GUARANTEE_FLAT,
+          MINIMUM_FLAT_AMOUNT: 295
+  HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT → use
+    HYBRID_HOST_BASE_PLUS_GUEST_EXTRA with BASE_IS_FIXED_COMMITMENT: FALSE when
+    the host pays per serving and guests pay the rest. If it genuinely does not
+    fit, output UNDEFINED rather than reviving this name.
+
+HYBRID is only ever HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: the host pays a base
+covering N servings and guests pay for servings beyond it. If an event is not
+that shape, it is not hybrid.
 
 UNDEFINED
-No pricing structure can be determined.
+No pricing structure can be determined. Prefer this over guessing.
 
 ---
 
@@ -371,7 +408,7 @@ Extract numeric estimate from notes.
 
 INVOICE_FIXED_PACKAGE only: extract rate only when actual servings exceeded UNITS_INCLUDED_IN_BASE AND overage rate is explicitly stated. Otherwise 0.
 
-All other models (INVOICE_PER_SERVING, INVOICE_BASE_FEE_PLUS_SERVINGS, MIN_GUARANTEE_HOURLY, MIN_GUARANTEE_FLAT, HYBRID_HOST_BASE_PLUS_GUEST_EXTRA, HYBRID_SELLING_PLUS_MIN_GUARANTEE):
+All other models (INVOICE_PER_SERVING, INVOICE_BASE_FEE_PLUS_SERVINGS, MIN_GUARANTEE_HOURLY, MIN_GUARANTEE_FLAT, HYBRID_HOST_BASE_PLUS_GUEST_EXTRA):
 Extract from any note field. "Usually" or "typically" does not disqualify a rate.
 
 When notes give base rate + discount:

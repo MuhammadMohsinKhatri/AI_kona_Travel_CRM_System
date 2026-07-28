@@ -18,7 +18,10 @@ from typing import Any
 TAX_RATE = 0.06
 CC_FEE_RATE = 0.04  # always applies to invoice/check/card payments
 
-# The 11 billing models the classifier can resolve.
+# The 9 billing models — the ONLY valid values. This list is the contract, and
+# it mirrors the "Predefined models" dropdown on the New Event page exactly
+# (frontend/src/pages/NewEvent.tsx). If a model cannot be picked by hand there,
+# the classifier must not invent it either.
 BILLING_MODELS = [
     "INVOICE_PER_SERVING",
     "INVOICE_BASE_FEE_PLUS_SERVINGS",
@@ -26,12 +29,44 @@ BILLING_MODELS = [
     "INVOICE_HOURLY",
     "SELLING_OPEN",
     "SELLING_WITH_GIVEBACK",
-    "MIN_GUARANTEE_HOURLY",
     "MIN_GUARANTEE_FLAT",
+    "MIN_GUARANTEE_HOURLY",
     "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
-    "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT",
-    "HYBRID_SELLING_PLUS_MIN_GUARANTEE",
 ]
+
+# Retired. Neither was ever selectable in the UI, and the classifier reaching for
+# them is how a selling event with a $295 minimum landed on a model nobody could
+# have chosen by hand.
+#
+# HYBRID_SELLING_PLUS_MIN_GUARANTEE was pure redundancy: it computed
+# `total_hours * min_hourly if min_hourly > 0 else min_flat` and handed that to
+# _mg_subtotal — precisely MIN_GUARANTEE_HOURLY when an hourly minimum is stated
+# and MIN_GUARANTEE_FLAT otherwise. It is normalized away below, so stored events
+# carrying it still price identically.
+#
+# HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT has no equivalent, so it is NOT
+# remapped — silently repricing it would invent a number. Its branch below still
+# computes the historical figure for already-stored events, and the pre-invoice
+# gate holds anything new that arrives on it.
+LEGACY_BILLING_MODELS = (
+    "HYBRID_SELLING_PLUS_MIN_GUARANTEE",
+    "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT",
+)
+
+
+def canonical_billing_model(model: Any, event: dict[str, Any] | None = None) -> str:
+    """Map a retired model onto its canonical equivalent where one provably exists.
+
+    Only HYBRID_SELLING_PLUS_MIN_GUARANTEE qualifies — the arithmetic is
+    identical, so this changes the label without changing a single invoice.
+    Everything else is returned unchanged (uppercased/stripped) for the gate to
+    judge.
+    """
+    name = str(model or "").upper().strip()
+    if name == "HYBRID_SELLING_PLUS_MIN_GUARANTEE":
+        per_hour = _num((event or {}).get("MINIMUM_AMOUNT_PER_HOUR"))
+        return "MIN_GUARANTEE_HOURLY" if per_hour > 0 else "MIN_GUARANTEE_FLAT"
+    return name
 
 
 def _num(v: Any) -> float:
@@ -119,7 +154,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     # AI-extracted from notes if the driver wrote it explicitly. Passed through.
     ai_mg_shortfall = _num(event.get("MG_SHORTFALL"))
 
-    billing_model = str(event.get("BILLING_MODEL") or "").upper().strip()
+    billing_model = canonical_billing_model(event.get("BILLING_MODEL"), event)
     payment_method = str(event.get("PAYMENT_METHOD") or "CHECK").upper().strip()
 
     taxable = str(event.get("TAXABLE") or "YES").upper() == "YES"
@@ -195,13 +230,12 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
             subtotal = (billable_units * rate_per_serving) + overage_revenue + location_fee
 
     elif billing_model == "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT":
+        # RETIRED — kept only so already-stored events recompute to the same
+        # figure they were originally billed. New events on this model are held
+        # by the pre-invoice gate rather than repriced onto a different one.
         host_amount = units_total * host_subsidy
         guest_amount = units_total * guest_rate
         subtotal = host_amount + guest_amount + location_fee
-
-    elif billing_model == "HYBRID_SELLING_PLUS_MIN_GUARANTEE":
-        minimum_required = total_hours * min_hourly if min_hourly > 0 else min_flat
-        subtotal = _mg_subtotal(event, minimum_required, location_fee)
 
     else:  # UNDEFINED / unrecognized
         subtotal = base_amount + location_fee

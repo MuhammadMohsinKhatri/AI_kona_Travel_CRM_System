@@ -258,10 +258,12 @@ class MockClassifier(Classifier):
             fm = re.search(r"\$(\d+)\s*flat|minimum guarantee \$(\d+)|\$(\d+)\s*minimum", admin)
             flat = next((g for g in (fm.groups() if fm else []) if g), None)
             c.EVENT_TYPE = "minimum guarantee"
-            if "square" in allnotes:
-                c.BILLING_MODEL = "HYBRID_SELLING_PLUS_MIN_GUARANTEE"
-            else:
-                c.BILLING_MODEL = "MIN_GUARANTEE_FLAT"
+            # Always MIN_GUARANTEE_FLAT. This used to emit the retired
+            # HYBRID_SELLING_PLUS_MIN_GUARANTEE whenever Square appeared in the
+            # notes — the exact fallacy that a terminal being used says something
+            # about who paid. Guest sales counting toward a host minimum IS a
+            # minimum guarantee, however the money arrived.
+            c.BILLING_MODEL = "MIN_GUARANTEE_FLAT"
             c.MINIMUM_FLAT_AMOUNT = float(flat) if flat else 0.0
             c.PAYMENT_METHOD = "CHECK"
             if not c.MINIMUM_FLAT_AMOUNT and c.MINIMUM_AMOUNT_PER_HOUR == 0:

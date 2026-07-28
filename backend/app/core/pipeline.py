@@ -964,11 +964,24 @@ def _normalize_classification(cls: dict[str, Any]) -> dict[str, Any]:
     back to the CHECK default because the notes had no payment language, the
     truthful default for a selling event is card. An explicit CASH (driver
     wrote it) is kept.
+
+    A retired billing model is also rewritten to its canonical equivalent, so
+    the stored classification says what the UI can actually express rather than
+    leaving the old label on the row. Only provably-identical mappings are
+    applied (see billing.canonical_billing_model), so no invoice moves.
     """
     event_type = str(cls.get("EVENT_TYPE", "")).strip().lower()
     method = str(cls.get("PAYMENT_METHOD", "")).strip().upper()
     if event_type == "selling" and method in ("", "CHECK"):
         cls["PAYMENT_METHOD"] = "CREDIT_CARD"
+
+    canonical = billing.canonical_billing_model(cls.get("BILLING_MODEL"), cls)
+    if canonical and canonical != str(cls.get("BILLING_MODEL") or "").upper().strip():
+        cls["BILLING_MODEL"] = canonical
+        # An MG model implies the event type too — "hybrid" was only ever a
+        # label on the retired model, and it drives invoice/ledger routing.
+        if canonical.startswith("MIN_GUARANTEE") and event_type == "hybrid":
+            cls["EVENT_TYPE"] = "minimum guarantee"
     return cls
 
 

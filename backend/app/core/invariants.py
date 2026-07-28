@@ -30,6 +30,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.billing import BILLING_MODELS
+
 # Two cents: money is rounded to 2dp upstream, and derived products
 # (rate x units) can land a hair off.
 _TOL = 0.02
@@ -171,6 +173,21 @@ def check_invariants(
 
     billing_model = str(classification.get("BILLING_MODEL") or "").upper().strip()
     event_type = str(classification.get("EVENT_TYPE") or "").strip().lower()
+
+    # ── a billing model nobody could have chosen by hand ─────────────────────
+    # The 9 in billing.BILLING_MODELS are the whole vocabulary — they mirror the
+    # New Event page's "Predefined models" dropdown. A retired or invented model
+    # means the event was priced by a rule the business never approved, so it
+    # must not reach an invoice.
+    if billing_model and billing_model not in BILLING_MODELS:
+        add(
+            f"Billing model '{billing_model}' is not one of the {len(BILLING_MODELS)} "
+            "approved models",
+            "Re-classify onto an approved model. The approved list is the "
+            "Predefined models dropdown on the New Event page; anything else is "
+            "either retired or invented.",
+            severity="CRITICAL",
+        )
 
     # ── the booking form disagrees with the classifier ───────────────────────
     # The form field is the office's own classification. It is not infallible,
