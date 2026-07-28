@@ -82,14 +82,23 @@ def test_a_minimum_floors_the_bill_it_does_not_add_to_it():
         assert calculate_invoice(
             {**floored, "UNITS_SERVED_TOTAL": served})["SUBTOTAL"] == expected, served
 
-    # What the base-fee reading produced, kept as the counter-example.
-    wrong = calculate_invoice({
+    # The two wrong readings this event has actually produced, kept as
+    # counter-examples. Both stack servings on top of a figure that was a floor.
+    as_base_fee = calculate_invoice({
         "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 250,
         "RATE_PER_SERVING": 3, "UNITS_SERVED_TOTAL": 22,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })
-    assert wrong["SUBTOTAL"] == 316.0
-    assert wrong["FINAL_INVOICE_AMOUNT"] == 347.60
+    assert as_base_fee["SUBTOTAL"] == 316.0
+    assert as_base_fee["FINAL_INVOICE_AMOUNT"] == 347.60
+
+    # "the minimum for 1 hour" read as $250/hour, plus 22 x $4 of servings.
+    as_hourly = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_HOURLY", "HOURLY_RATE": 250,
+        "TOTAL_EVENT_HOURS": 1, "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 22,
+        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    })
+    assert as_hourly["SUBTOTAL"] == 338.0
 
 
 def test_storing_the_overage_rate_is_inert_until_there_is_overage():

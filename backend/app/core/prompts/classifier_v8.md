@@ -211,6 +211,21 @@ servings, but the package price is fixed on the included allotment.
 INVOICE_HOURLY
 Client pays by time.
 Extract: TOTAL_EVENT_HOURS, HOURLY_RATE
+
+Requires a price stated PER HOUR — "$295 per hour", "$X/hr", "$X an hour", "$X for
+each hour". The figure must SCALE with time.
+
+A MINIMUM that merely mentions a duration is NOT an hourly rate:
+  "The minimum for 1 hour will be $250"
+    → a $250 FLOOR for the event. Nothing there says a second hour costs another
+      $250, and nothing says servings are billed ON TOP of it.
+    → INVOICE_FIXED_PACKAGE with BASE_AMOUNT: 250 (see the minimum-charge rule in
+      STEP 1), NEVER INVOICE_HOURLY.
+    → billing it hourly and then adding servings gave 1×250 + 22×4 = $338 on an
+      event whose actual total was $250 + tax.
+
+The test: would a 2-hour event cost double? If the notes do not say so, the figure
+is not an hourly rate — it is a floor or a package price.
 Also extract UNITS_SERVED_TOTAL and RATE_PER_SERVING if stated.
 When the hourly rate includes a per-hour serving allowance ("$295/hour, each hour includes up to 60 12oz Konas, additional Konas $4 each"), also extract UNITS_INCLUDED_IN_BASE = the allowance per hour × TOTAL_EVENT_HOURS (e.g. 60/hour × 2 hours = 120). Only servings beyond UNITS_INCLUDED_IN_BASE are billed at RATE_PER_SERVING (the overage).
   "$295/hr, includes 60 Konas/hr, $4 each additional", 1-hour event, 100 served
