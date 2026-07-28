@@ -151,6 +151,65 @@ def test_taxable_disagreement_is_held():
     assert any("TAXABLE Yes" in x["issue"] for x in v), _issues(v)
 
 
+KIDDIE_ACADEMY_NOTES = {
+    "EVENT_NOTES_HTML": (
+        "EVENT TYPE Invoice ATTENDEES  SERVE & KEEP COUNT 12oz green cups TAXABLE "
+        "Yes PAYMENT School will be paying - send invoice after"
+    ),
+    "ADMIN_NOTES": (
+        "Teach our drivers to inform us if the client paid or we need to send them "
+        'an invoice  $3 "kiddie" Kona\'s or our $4 "small" Kona\'s / The minimum '
+        "for 1 hour will be $250"
+    ),
+    "DRIVER_NOTES": "22 green cups sold; send invoice.",
+}
+
+
+def test_a_host_purchase_classified_as_a_minimum_guarantee_is_held():
+    """Kiddie Academy 2026-07-25 came back MIN_GUARANTEE_HOURLY. The subtotal was
+    coincidentally right, so nothing looked wrong — but MG events are deferred
+    until counted cash is posted, and on an invoice event no cash is ever posted.
+    The invoice would never have been drafted and the school never billed.
+
+    That silence is why this is CRITICAL: every other misclassification at least
+    produces a wrong number somebody can see.
+    """
+    v = _check(KIDDIE_ACADEMY_NOTES, {
+        "EVENT_TYPE": "minimum guarantee", "BILLING_MODEL": "MIN_GUARANTEE_HOURLY",
+        "MINIMUM_AMOUNT_PER_HOUR": 250, "TOTAL_EVENT_HOURS": 1,
+        "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 22, "TAXABLE": "YES",
+    })
+    assert any("never mention guests paying" in x["issue"] for x in v), _issues(v)
+    assert any(x["severity"] == "CRITICAL" for x in v), _issues(v)
+
+
+def test_the_correct_invoice_reading_of_that_event_passes():
+    """The same notes read correctly: per-serving with the minimum as a floor.
+    Nothing fabricated, and the gate has nothing to say."""
+    v = _check(KIDDIE_ACADEMY_NOTES, {
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_PER_SERVING",
+        "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 22,
+        "MINIMUM_FLAT_AMOUNT": 250, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    })
+    assert not any("guests paying" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_genuine_minimum_guarantee_is_not_held():
+    """Gallery Tower: "sell to guests with the $295 minimum". Guests DO pay, so the
+    minimum has sales counting against it and MG is correct. The check must not
+    fire here or it would block every real guarantee."""
+    notes = {
+        "ADMIN_NOTES": "Giveback percentage sell to guests with the $295 minimum",
+        "DRIVER_NOTES": "Used terminal M",
+        "EVENT_NOTES_HTML": "EVENT TYPE Selling ATTENDEES 80-100 people TAXABLE Yes",
+    }
+    v = _check(notes, {
+        "EVENT_TYPE": "minimum guarantee", "BILLING_MODEL": "MIN_GUARANTEE_FLAT",
+        "MINIMUM_FLAT_AMOUNT": 295, "TAXABLE": "YES",
+    })
+    assert not any("guests paying" in x["issue"] for x in v), _issues(v)
+
+
 def test_gate_kill_switch_is_wired_and_defaults_on():
     """The gate sits in front of billing, so a bad rule could stall invoicing.
     `invoice_gate_enabled=false` must fall back to alert-only without a rebuild."""

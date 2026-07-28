@@ -43,12 +43,32 @@ owes the money, then treat the instrument as a separate question.
   HOST pays a base AND guests pay extras:
     → Hybrid
 
-  HOST guarantees a minimum; guest sales count toward it; host covers shortfall:
-    → Minimum Guarantee, ALWAYS — MIN_GUARANTEE_HOURLY if the minimum is stated
-      per hour, otherwise MIN_GUARANTEE_FLAT.
-    This holds whether guests paid at the truck or not. Guest sales counting
-    toward a host minimum is the definition of a minimum guarantee; it does not
-    make the event Hybrid.
+  A minimum is stated. Which kind decides the whole event, so read carefully:
+
+  (a) The truck SELLS TO GUESTS and those sales count toward the minimum; the host
+      covers only the gap:
+    → Minimum Guarantee — MIN_GUARANTEE_HOURLY if the minimum is stated PER HOUR,
+      otherwise MIN_GUARANTEE_FLAT. The host owes the SHORTFALL, not the minimum.
+    This holds whether guests paid by card or cash. It is never Hybrid.
+      "sell to guests with the $295 minimum" → MIN_GUARANTEE_FLAT, 295
+
+  (b) The HOST is buying the servings and the minimum floors THEIR OWN bill. No
+      guest selling anywhere in the notes:
+    → Invoice, NEVER MG. Put the figure in MINIMUM_FLAT_AMOUNT and let it floor the
+      host's bill — see "A base fee ADDS. A minimum REPLACES." below.
+      "$3 kiddie or $4 small / The minimum for 1 hour will be $250" together with
+      "School will be paying - send invoice after"
+        → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_PER_SERVING,
+          RATE_PER_SERVING: 4, MINIMUM_FLAT_AMOUNT: 250
+
+  The test: does the minimum have SALES to count against it? An MG minimum is
+  backstopped by the truck's guest sales. A floor on a host's own purchase has
+  nothing counting toward it — the host simply owes at least that much.
+
+  Getting this wrong costs money in both directions. Choosing MG for a host
+  purchase means the pipeline DEFERS the invoice waiting for cash to be counted —
+  and on an invoice event no cash is ever posted, so the host is never billed at
+  all. Choosing Invoice for a real MG bills the whole minimum instead of the gap.
 
 **Minimum charge pattern — always Invoice, never MG:**
 When notes say "charge $X per Kona if they buy N or more, otherwise charge $Y minimum":
@@ -276,6 +296,12 @@ Serving count and rate are optional for selling events — output 0 if not state
 MIN_GUARANTEE_HOURLY
 Host guarantees a minimum per hour; covers shortfall if guest sales fall below it.
 Extract: MINIMUM_AMOUNT_PER_HOUR, TOTAL_EVENT_HOURS, UNITS_SERVED_TOTAL, RATE_PER_SERVING
+
+Requires a minimum stated PER HOUR that SCALES with time — "$150 per hour
+minimum", "a $150/hr guarantee". "The minimum for 1 hour will be $250" is a single
+minimum for a one-hour event, NOT $250 every hour, and it is a host purchase
+anyway — see (b) in STEP 1. Same test as INVOICE_HOURLY: would a 2-hour event
+double? If the notes do not say so, it is not per-hour.
 
 MIN_GUARANTEE_FLAT
 Host guarantees one flat minimum for the event; covers shortfall if guest sales fall below it.

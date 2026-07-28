@@ -83,6 +83,18 @@ _HOST_BILLED_MODELS = (
     "INVOICE_FIXED_PACKAGE", "INVOICE_HOURLY",
 )
 
+_MG_MODELS = (
+    "MIN_GUARANTEE_FLAT", "MIN_GUARANTEE_HOURLY",
+    "HYBRID_SELLING_PLUS_MIN_GUARANTEE",   # retired, but stored rows still carry it
+)
+
+# The notes saying the HOST owes a bill that will be sent to them.
+_HOST_INVOICED_PATTERNS = (
+    r"send (?:them )?(?:an? )?invoice", r"will be paying", r"will be billed",
+    r"ask to invoice", r"invoice (?:them|after|the (?:school|client|church))",
+    r"bill (?:the|them)", r"host pays", r"po\b", r"purchase order",
+)
+
 
 def _num(v: Any) -> float:
     try:
@@ -241,6 +253,28 @@ def check_invariants(
             "billed to the host",
             "If guests pay at the truck, the rate belongs in "
             "GUEST_RATE_PER_SERVING and the host owes only the base.",
+        )
+
+    # ── a host purchase classified as a minimum guarantee ────────────────────
+    # This one is the quietest failure in the system. MG events are DEFERRED until
+    # counted cash is posted, because their invoice is the shortfall against the
+    # minimum. On a host-billed event no cash is ever counted, so the deferral
+    # never lifts: no invoice is drafted, nothing looks wrong, and the host is
+    # simply never billed. Every other misclassification at least produces a wrong
+    # number somebody can see.
+    if (
+        billing_model in _MG_MODELS
+        and any(re.search(p, low) for p in _HOST_INVOICED_PATTERNS)
+        and not any(re.search(p, low) for p in _GUEST_PAYS_PATTERNS)
+    ):
+        add(
+            "Classified as a minimum guarantee, but the notes say the host is to be "
+            "invoiced and never mention guests paying",
+            "A minimum guarantee is backstopped by the truck's GUEST sales. If the "
+            "host is buying the servings, this is an Invoice event with the minimum "
+            "in MINIMUM_FLAT_AMOUNT — otherwise the invoice is deferred waiting for "
+            "cash that will never be counted, and the host is never billed.",
+            severity="CRITICAL",
         )
 
     # ── a stated price that does no work ────────────────────────────────────
