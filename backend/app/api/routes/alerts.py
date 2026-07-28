@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -99,6 +99,10 @@ def list_alerts(
     severity: Optional[str] = None,
     resolved: Optional[bool] = None,
     source: Optional[str] = None,
+    date_from: Optional[str] = Query(None, description="Inclusive event_date lower bound (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Inclusive event_date upper bound (YYYY-MM-DD)"),
+    brand: Optional[str] = None,
+    q: Optional[str] = Query(None, description="Matches event name / CRM id / issue text"),
 ) -> Page[AlertOut]:
     query = db.query(Alert)
     if severity:
@@ -107,7 +111,30 @@ def list_alerts(
         query = query.filter(Alert.resolved == resolved)
     if source:
         query = query.filter(Alert.source == source)
-    total = query.with_entities(func.count(Alert.id)).scalar() or 0
+
+    # Date, brand and event-name live on Event, not Alert, so those filters need
+    # a join. Alerts with no event (a session-maintenance failure, say) are
+    # correctly excluded once you filter by a date or a brand — they don't
+    # belong to one. A text search still matches them via the issue text, so
+    # the join is left outer and the event predicates do the narrowing.
+    if date_from or date_to or brand or q:
+        query = query.outerjoin(Event, Alert.event_id == Event.id)
+    if date_from:
+        # event_date is a YYYY-MM-DD string, so lexicographic >=/<= is correct
+        # date ordering (same convention as /api/events).
+        query = query.filter(Event.event_date >= date_from)
+    if date_to:
+        query = query.filter(Event.event_date <= date_to)
+    if brand:
+        query = query.filter(Event.brand == brand)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(Event.event_name.ilike(like), Event.crm_event_id.ilike(like),
+                Alert.issue.ilike(like))
+        )
+
+    total = query.order_by(None).with_entities(func.count(Alert.id)).scalar() or 0
     items = (
         query.order_by(Alert.resolved.asc(), Alert.id.desc())
         .offset((page - 1) * page_size)

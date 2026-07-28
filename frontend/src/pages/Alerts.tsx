@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, api, Page } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading } from "../components/ui";
+import { Badge, DeleteButton, Empty, Loading, Pager } from "../components/ui";
 
 const SEVERITIES = ["", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
+const PAGE_SIZE = 25;
 
 const SOURCE_LABELS: Record<string, string> = {
   "": "All kinds",
@@ -17,20 +18,61 @@ const SOURCE_LABELS: Record<string, string> = {
  *  missing" is unactionable until you know whose event it's about. */
 export default function Alerts() {
   const [data, setData] = useState<Page<Alert> | null>(null);
-  const [severity, setSeverity] = useState("");
-  const [source, setSource] = useState("");
-  const [showResolved, setShowResolved] = useState(false);
+  // Filters live in the URL so a filtered view can be bookmarked and shared —
+  // "the alerts for this date" is exactly the thing you want to send someone.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const severity = searchParams.get("severity") || "";
+  const source = searchParams.get("source") || "";
+  const dateFrom = searchParams.get("date_from") || "";
+  const dateTo = searchParams.get("date_to") || "";
+  const showResolved = searchParams.get("resolved") === "all";
+  const urlQ = searchParams.get("q") || "";
+  const [qInput, setQInput] = useState(urlQ);
+  const [debouncedQ, setDebouncedQ] = useState(urlQ);
+  const [page, setPage] = useState(1);
   const navigate = useNavigate();
+
+  function updateParams(patch: Record<string, string | undefined>) {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) next.set(k, v); else next.delete(k);
+    }
+    setSearchParams(next, { replace: true });
+    setPage(1);  // a narrowed list may not have the page you were on
+  }
+
+  // Debounce the search box into the URL.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(qInput), 300);
+    return () => clearTimeout(t);
+  }, [qInput]);
+
+  useEffect(() => {
+    updateParams({ q: debouncedQ || undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ]);
 
   async function load() {
     setData(null);
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = {
+      page: String(page), page_size: String(PAGE_SIZE),
+    };
     if (severity) params.severity = severity;
     if (source) params.source = source;
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    if (debouncedQ.trim()) params.q = debouncedQ.trim();
     if (!showResolved) params.resolved = "false";
     setData(await api.alerts(params));
   }
-  useEffect(() => { load(); }, [severity, source, showResolved]);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [severity, source, dateFrom, dateTo, debouncedQ, showResolved, page]);
+
+  const hasFilters = Boolean(
+    severity || source || dateFrom || dateTo || debouncedQ || showResolved
+  );
 
   async function resolve(e: React.MouseEvent, id: number) {
     e.stopPropagation();
@@ -47,28 +89,54 @@ export default function Alerts() {
       </p>
 
       <div className="toolbar">
-        <select className="select" value={severity} onChange={(e) => setSeverity(e.target.value)}>
+        <input
+          className="input"
+          style={{ minWidth: 200 }}
+          placeholder="Search event, CRM id, or issue…"
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+        />
+        <select className="select" value={severity}
+          onChange={(e) => updateParams({ severity: e.target.value })}>
           {SEVERITIES.map((s) => (
             <option key={s} value={s}>{s || "All severities"}</option>
           ))}
         </select>
-        <select className="select" value={source} onChange={(e) => setSource(e.target.value)}>
+        <select className="select" value={source}
+          onChange={(e) => updateParams({ source: e.target.value })}>
           {Object.entries(SOURCE_LABELS).map(([v, label]) => (
             <option key={v} value={v}>{label}</option>
           ))}
         </select>
+        <label className="field-label" htmlFor="alert-date-from">From</label>
+        <input id="alert-date-from" className="input" type="date" value={dateFrom}
+          style={{ width: 140 }}
+          onChange={(e) => updateParams({ date_from: e.target.value || undefined })}
+          title="The EVENT's date, not the day the alert was raised" />
+        <label className="field-label" htmlFor="alert-date-to">To</label>
+        <input id="alert-date-to" className="input" type="date" value={dateTo}
+          style={{ width: 140 }}
+          onChange={(e) => updateParams({ date_to: e.target.value || undefined })}
+          title="The EVENT's date, not the day the alert was raised" />
         <label className="chk">
           <input type="checkbox" checked={showResolved}
-            onChange={(e) => setShowResolved(e.target.checked)} />
+            onChange={(e) => updateParams({ resolved: e.target.checked ? "all" : undefined })} />
           Include sorted
         </label>
+        {hasFilters && (
+          <button className="btn" onClick={() => { setQInput(""); setSearchParams({}, { replace: true }); setPage(1); }}>
+            Clear filters
+          </button>
+        )}
         {data && <span className="count">{data.total} alerts</span>}
       </div>
 
       {!data ? (
         <Loading />
       ) : data.items.length === 0 ? (
-        <Empty text="Nothing needs attention. Everything's clean 🎉" />
+        <Empty text={hasFilters
+          ? "No alerts match these filters."
+          : "Nothing needs attention. Everything's clean 🎉"} />
       ) : (
         data.items.map((a) => (
           <div
@@ -119,6 +187,15 @@ export default function Alerts() {
             </div>
           </div>
         ))
+      )}
+
+      {data && data.total > 0 && (
+        <Pager
+          page={data.page}
+          pageSize={data.page_size}
+          total={data.total}
+          onPage={setPage}
+        />
       )}
     </>
   );
