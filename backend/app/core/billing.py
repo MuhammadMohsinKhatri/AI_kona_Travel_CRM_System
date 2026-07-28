@@ -53,6 +53,19 @@ LEGACY_BILLING_MODELS = (
     "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT",
 )
 
+# Models where a stated MINIMUM_FLAT_AMOUNT acts as a floor on the host's bill:
+# the client owes the greater of what the pricing earned and the minimum.
+#
+# The MG models are deliberately absent — MINIMUM_FLAT_AMOUNT is their billing
+# BASIS, not a floor on top, and _mg_subtotal already returns the shortfall
+# against it. Selling is absent because the host is not billed at all.
+FLOORED_BILLING_MODELS = (
+    "INVOICE_PER_SERVING",
+    "INVOICE_BASE_FEE_PLUS_SERVINGS",
+    "INVOICE_FIXED_PACKAGE",
+    "INVOICE_HOURLY",
+)
+
 
 def canonical_billing_model(model: Any, event: dict[str, Any] | None = None) -> str:
     """Map a retired model onto its canonical equivalent where one provably exists.
@@ -254,7 +267,26 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     else:  # UNDEFINED / unrecognized
         subtotal = base_amount + location_fee
 
-    # Flat add-on / extra charge applies to every model.
+    # ── MINIMUM FLOOR ─────────────────────────────────────────────────────────
+    # A stated minimum floors a host-billed invoice: the client owes the GREATER
+    # of what the pricing earned and the minimum. Expressing that here — rather
+    # than faking UNITS_INCLUDED_IN_BASE = minimum / rate to make a package model
+    # produce the same number — keeps every stored figure real. That fake divisor
+    # was routinely fractional ("covers 62.5 servings") and put a quantity nobody
+    # sold onto the client's invoice.
+    #
+    # NOT applied to the MG models: there MINIMUM_FLAT_AMOUNT is already the
+    # basis and _mg_subtotal returns the SHORTFALL against it, so flooring again
+    # would bill the whole minimum and ignore the truck's sales. Nor to selling,
+    # where the host is not billed at all.
+    minimum_floor = min_flat if billing_model in FLOORED_BILLING_MODELS else 0.0
+    minimum_uplift = 0.0
+    if minimum_floor > 0 and subtotal < minimum_floor:
+        minimum_uplift = _r2(minimum_floor - subtotal)
+        subtotal = float(minimum_floor)
+
+    # Flat add-on / extra charge applies to every model — and sits ON TOP of the
+    # minimum, so a stated extra is never swallowed by the floor.
     subtotal += addon_amount
 
     # ── TAX + PROCESSING FEE ────────────────────────────────────────────────────
@@ -329,6 +361,12 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         "HOST_AMOUNT": _r2(host_amount),
         "GUEST_AMOUNT": _r2(guest_amount),
         "MINIMUM_REQUIRED": _r2(minimum_required),
+        # The stated minimum acting as a floor on a host-billed invoice, and how
+        # much it added. MINIMUM_UPLIFT > 0 means the pricing came in under the
+        # minimum and the minimum is what is being charged — the breakdown needs
+        # this to explain the figure without inventing a serving count.
+        "MINIMUM_FLOOR": _r2(minimum_floor),
+        "MINIMUM_UPLIFT": _r2(minimum_uplift),
         # Computed from actual sales once cash is known; otherwise whatever the
         # driver wrote in the notes, which is all we have to go on.
         "MG_SHORTFALL": _r2(

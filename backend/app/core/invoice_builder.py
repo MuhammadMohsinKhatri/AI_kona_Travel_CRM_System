@@ -47,6 +47,44 @@ def _parse_location(location_str: str) -> dict[str, str]:
     return {"address": location_str, "city": "", "state": "", "zipCode": ""}
 
 
+def _hours_prefix(event: dict[str, Any]) -> str:
+    hours = _num(event.get("TOTAL_EVENT_HOURS"))
+    if hours <= 0:
+        return ""
+    trimmed = int(hours) if float(hours).is_integer() else hours
+    return f"{trimmed}-Hour "
+
+
+def _minimum_label(event: dict[str, Any]) -> str:
+    """Names the line that lifts an under-minimum bill up to the minimum."""
+    return f"{_hours_prefix(event)}Minimum Adjustment".strip()
+
+
+def _fixed_package_label(event: dict[str, Any], base_amount: float) -> str:
+    """Name the fixed-package charge after the reason the client owes it.
+
+    A stated minimum is expressed as a package internally — UNITS_INCLUDED_IN_BASE
+    is set to minimum / rate so the engine computes max(floor, servings x rate).
+    That divisor is a calculation device and routinely lands on a fraction, so
+    calling the charge a "Base Package" covering 62.5 servings puts a number on the
+    client's invoice that nobody sold and cannot be defended.
+
+    MINIMUM_FLAT_AMOUNT matching BASE_AMOUNT is the classifier's signal that the
+    figure is a floor, not a quoted package price.
+    """
+    minimum = _num(event.get("MINIMUM_FLAT_AMOUNT"))
+    if minimum <= 0 or abs(minimum - base_amount) > 0.01:
+        return "Base Package"
+
+    hours = _num(event.get("TOTAL_EVENT_HOURS"))
+    if hours == 1:
+        return "1-Hour Minimum"
+    if hours > 0:
+        trimmed = int(hours) if float(hours).is_integer() else hours
+        return f"{trimmed}-Hour Minimum"
+    return "Minimum Charge"
+
+
 def build_invoice_payload(
     event: dict[str, Any],
     cleaned: dict[str, Any],
@@ -116,7 +154,7 @@ def build_invoice_payload(
 
     if billing_model == "INVOICE_FIXED_PACKAGE":
         if base_amount > 0:
-            add_item("Base Package", base_amount, 1, base_amount, True)
+            add_item(_fixed_package_label(e, base_amount), base_amount, 1, base_amount, True)
         if overage_units > 0 and overage_revenue > 0:
             add_item("Additional Servings (Overage)", rate_per_serving, overage_units, overage_revenue, True)
 
@@ -159,6 +197,15 @@ def build_invoice_payload(
     else:
         if subtotal_pre_tax > 0:
             add_item("Event Services", subtotal_pre_tax, 1, subtotal_pre_tax, True)
+
+    # The pricing came in under a stated minimum. Show the difference as its own
+    # line so the invoice adds up in front of the client: servings at the real
+    # rate, then the uplift that brings it to the minimum they agreed to. The
+    # alternative — quietly presenting the minimum as though it were the pricing —
+    # is a total nobody can check.
+    minimum_uplift = _num(calc.get("MINIMUM_UPLIFT"))
+    if minimum_uplift > 0:
+        add_item(_minimum_label(e), minimum_uplift, 1, minimum_uplift, True)
 
     if location_fee > 0:
         add_item("Location / Destination Fee", location_fee, 1, location_fee, True)

@@ -56,31 +56,81 @@ def test_fixed_package_does_not_shrink_when_under_served():
 
 
 def test_a_minimum_floors_the_bill_it_does_not_add_to_it():
-    """Kiddie Academy - Roland Park, 2026-07-25: "$3 kiddie Kona's / The minimum
-    for 1 hour will be $250", 22 served. Confirmed correct total: $275.
+    """Kiddie Academy - Roland Park, 2026-07-25: "$4 small Kona's / The minimum for
+    1 hour will be $250", 22 served. Confirmed correct total: $275.
 
-    A base fee ADDS; a minimum REPLACES. Treating the $250 floor as a base fee
-    billed 250 + (22 x 3) = $316 -> $347.60, over-billing by $72.60.
+    A base fee ADDS; a minimum REPLACES. The minimum lives in its own field and
+    the engine applies it as a floor, so every stored figure is one the notes
+    actually state: 22 servings, $4 each, $250 minimum.
 
-    Modelling it as INVOICE_FIXED_PACKAGE with UNITS_INCLUDED_IN_BASE = 250/3
-    makes the engine compute max(floor, served x rate), which is the rule the
-    notes describe.
+    An earlier attempt made this work by setting UNITS_INCLUDED_IN_BASE = 250/4 =
+    62.5 so a package model would produce $250. That number was fabricated —
+    nobody sold 62.5 servings — and it reached the client's invoice as "Base
+    Package (covers 62.5 servings)".
     """
     floored = {
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 250,
-        "RATE_PER_SERVING": 3, "UNITS_INCLUDED_IN_BASE": 250 / 3,
-        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "MINIMUM_FLAT_AMOUNT": 250, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     }
     calc = calculate_invoice({**floored, "UNITS_SERVED_TOTAL": 22})
+    assert calc["UNIT_REVENUE"] == 88.0        # the real 22 x $4
+    assert calc["MINIMUM_FLOOR"] == 250.0
+    assert calc["MINIMUM_UPLIFT"] == 162.0     # what the floor added, itemisable
     assert calc["SUBTOTAL"] == 250.0
     assert calc["SALES_TAX"] == 15.0
     assert calc["CC_FEE"] == 10.0
     assert calc["FINAL_INVOICE_AMOUNT"] == 275.0
 
+    # Nothing fabricated: no package, no invented allowance.
+    assert calc["OVERAGE_UNITS"] == 0
+
     # The floor stops binding exactly where the servings out-earn it.
-    for served, expected in ((83, 250.0), (84, 252.0), (100, 300.0)):
-        assert calculate_invoice(
-            {**floored, "UNITS_SERVED_TOTAL": served})["SUBTOTAL"] == expected, served
+    for served, expected in ((62, 250.0), (63, 252.0), (70, 280.0), (100, 400.0)):
+        result = calculate_invoice({**floored, "UNITS_SERVED_TOTAL": served})
+        assert result["SUBTOTAL"] == expected, served
+        assert result["MINIMUM_UPLIFT"] == round(max(0.0, 250 - served * 4), 2)
+
+
+def test_the_minimum_floor_is_never_applied_to_a_guarantee_model():
+    """MIN_GUARANTEE_* uses MINIMUM_FLAT_AMOUNT as its BASIS — _mg_subtotal returns
+    the shortfall against it. Flooring on top would bill the whole minimum and
+    throw away the truck's sales, turning a $200 shortfall into $500."""
+    calc = calculate_invoice({
+        "BILLING_MODEL": "MIN_GUARANTEE_FLAT", "MINIMUM_FLAT_AMOUNT": 500,
+        "ACTUAL_CARD_SALES": 300, "ACTUAL_CASH_PRE_TAX": 0,
+        "ACTUAL_SALES_KNOWN": True, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 200.0
+    assert calc["MINIMUM_FLOOR"] == 0.0
+    assert calc["MINIMUM_UPLIFT"] == 0.0
+
+
+def test_the_minimum_floor_applies_to_a_base_fee_plus_servings_event():
+    """Closes the gap flagged on the 2026-07-26 event: the engine had no floor
+    outside the MG models, so a stated minimum was recorded and then ignored."""
+    event = {
+        "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+        "RATE_PER_SERVING": 4, "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+    }
+    # 23 served: 99 + 92 = 191 already clears the floor, so it must not interfere.
+    clears = calculate_invoice({**event, "UNITS_SERVED_TOTAL": 23})
+    assert clears["SUBTOTAL"] == 191.0
+    assert clears["MINIMUM_UPLIFT"] == 0.0
+
+    # 5 served: 99 + 20 = 119 is under the $150 minimum. Previously billed $119.
+    binds = calculate_invoice({**event, "UNITS_SERVED_TOTAL": 5})
+    assert binds["SUBTOTAL"] == 150.0
+    assert binds["MINIMUM_UPLIFT"] == 31.0
+
+
+def test_an_add_on_sits_on_top_of_the_minimum():
+    """A stated extra must not be swallowed by the floor."""
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 10, "MINIMUM_FLAT_AMOUNT": 250,
+        "ADDON_AMOUNT": 25, "ADDON_LABEL": "Ice cream", "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 275.0   # 250 floor + 25 add-on, not 250
 
     # The two wrong readings this event has actually produced, kept as
     # counter-examples. Both stack servings on top of a figure that was a floor.

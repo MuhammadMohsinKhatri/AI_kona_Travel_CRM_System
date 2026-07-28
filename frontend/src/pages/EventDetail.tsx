@@ -277,6 +277,9 @@ interface SubtotalLine {
   qty?: number;
   rate?: number;
   amount: number;
+  /** Why this line is the amount it is, when the figure alone doesn't show it —
+   *  e.g. servings that came in under a minimum and so added nothing. */
+  note?: string;
 }
 
 /** Shows how the Subtotal is built up, line by line — derived directly from
@@ -348,6 +351,23 @@ function SubtotalBreakdown({
     items.push({ label: "Event Services", amount: n(cls.BASE_AMOUNT) });
   }
 
+  // The pricing came in under a stated minimum. Show the gap as its own line so
+  // the bullets add up from real figures — the servings at their real rate, then
+  // the uplift to the minimum the client agreed to. Presenting the minimum as if
+  // it were the pricing gives a total nobody can check.
+  const minimumUplift = n(calc.MINIMUM_UPLIFT);
+  if (minimumUplift > 0) {
+    const hours = n(cls.TOTAL_EVENT_HOURS);
+    const label = hours > 0
+      ? `${Number.isInteger(hours) ? hours : hours.toFixed(1)}-hour minimum adjustment`
+      : "Minimum adjustment";
+    items.push({
+      label,
+      amount: minimumUplift,
+      note: `${money(n(calc.MINIMUM_FLOOR))} minimum applies — the pricing above came to ${money(n(calc.MINIMUM_FLOOR) - minimumUplift)}`,
+    });
+  }
+
   if (locationFee) items.push({ label: "Location / Destination Fee", amount: locationFee });
   if (addonAmount) items.push({ label: String(calc.ADDON_LABEL || "Add-on"), amount: addonAmount });
 
@@ -375,6 +395,9 @@ function SubtotalBreakdown({
             ) : null}
             {" = "}
             <strong>{it.amount < 0 ? `-${money(-it.amount)}` : money(it.amount)}</strong>
+            {it.note ? (
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{it.note}</div>
+            ) : null}
           </li>
         ))}
       </ul>
