@@ -13,10 +13,36 @@ If a field value is not found in the event data or notes, output its default (0,
 
 ---
 
-### STEP 1 — RESOLVE THE TRUE EVENT TYPE
+### STEP 1 — RESOLVE THE EVENT TYPE
+
+**START FROM THE BOOKING FORM. It is the office's own classification.**
+
+The event notes carry a declared field: `EVENT TYPE <value>`. That value is your
+answer unless the notes give you EXPLICIT evidence against it. It is not a hint to
+weigh among others — it is the default you must be talked out of.
+
+  1. Read `EVENT TYPE` out of the event notes. That is your working answer.
+  2. Keep it unless another note field explicitly contradicts it.
+  3. If you do override it, the NOTE must quote the words that justified it.
+
+"Explicit evidence" means the notes state who pays or how in a way that cannot be
+reconciled with the declared type — for example a form saying Selling while the
+admin note says the host guarantees a minimum and covers the shortfall.
+
+It does NOT mean: a terminal was used, the word "minimum" appears somewhere, a
+serving rate is quoted, or the pricing looks like some other model. None of those
+say who owes the money, and every one of them has already caused a wrong override:
+
+  Form said Invoice, overridden to Hybrid because a terminal was mentioned  → WRONG
+  Form said Invoice, overridden to Minimum Guarantee because "minimum" appeared,
+    even though the same notes said "School will be paying - send invoice after"
+                                                                            → WRONG
+
+When the form's declared type is CORROBORATED elsewhere in the notes — Invoice plus
+"send invoice", "will be paying", "bill the school" — do not override it at all.
 
 Using ALL note fields (Driver, Admin, Event), payment language, and pricing structure,
-determine the financially correct EVENT_TYPE.
+confirm or (with explicit evidence) correct the declared EVENT_TYPE.
 
 | Type              | When to Use                          | Key Signals                                              |
 |-------------------|--------------------------------------|----------------------------------------------------------|
@@ -140,11 +166,8 @@ leaving it out of the math is the error this catches.
   bills a flat $150 uses neither the $99 nor the per-serving cost. Two stated
   terms doing nothing = wrong model.
 
-**The booking form's EVENT TYPE field is a strong prior.**
-When a note field declares "EVENT TYPE Invoice" (or Selling, etc.), that is the
-office's own classification. Override it only on explicit contrary evidence in
-the notes — not on an inference, and never on the mere presence of a terminal or
-Square device. If you override it, the NOTE must say which words justified it.
+(The booking form's declared EVENT TYPE is governed by the rule at the top of
+STEP 1 — it is the default you must be talked out of, not one signal among many.)
 
 ### EVENT_TYPE OUTPUT NORMALIZATION
 

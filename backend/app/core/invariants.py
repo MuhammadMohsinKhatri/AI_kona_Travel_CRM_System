@@ -212,12 +212,18 @@ def check_invariants(
         "",
     )
     if declared_type and event_type and declared_type != event_type:
+        # CRITICAL because the declared type is the office's own classification and
+        # overriding it has been wrong every time so far — a terminal mention gave
+        # Hybrid, the word "minimum" gave Minimum Guarantee, on notes that plainly
+        # said the school would be invoiced. The type also decides whether an
+        # invoice is drafted at all, so a wrong one can mean never billing anyone.
         add(
             f"Booking form says EVENT TYPE '{declared_type}' but the event was "
             f"classified '{event_type}'",
-            "Confirm which is right. If the form is correct, re-run after fixing "
-            "the classifier prompt; if the notes genuinely override the form, "
-            "invoice manually.",
+            "The form is the office's own classification — treat it as correct "
+            "unless the notes explicitly contradict it. Confirm which is right "
+            "before invoicing.",
+            severity="CRITICAL",
         )
 
     declared_taxable = _form_field(text, "TAXABLE").lower()
