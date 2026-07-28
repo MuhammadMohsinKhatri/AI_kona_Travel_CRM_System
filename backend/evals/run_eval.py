@@ -98,7 +98,14 @@ def load_cases(include_unconfirmed: bool, only: str | None) -> list[dict[str, An
     return cases
 
 
-def score_case(case: dict[str, Any], classifier, repeat: int) -> dict[str, Any]:
+def _say(message: str) -> None:
+    """Progress goes out immediately. Without this the whole run printed nothing
+    until the final report, so a slow pass looked identical to a hang."""
+    print(message, flush=True)
+
+
+def score_case(case: dict[str, Any], classifier, repeat: int,
+               position: str = "") -> dict[str, Any]:
     from app.core import billing
 
     try:
@@ -107,8 +114,12 @@ def score_case(case: dict[str, Any], classifier, repeat: int) -> dict[str, Any]:
         def _normalize_classification(c):  # type: ignore[misc]
             return c
 
+    label = case.get("name") or case["_file"]
+    _say(f"  {position}{label}")
+
     attempts: list[dict[str, Any]] = []
-    for _ in range(repeat):
+    for attempt in range(1, repeat + 1):
+        _say(f"      attempt {attempt}/{repeat} — calling the model…")
         raw = classifier.classify(case["cleaned"])
         usage = raw.get("_usage") or {}
         classification = _normalize_classification(raw)
@@ -116,13 +127,19 @@ def score_case(case: dict[str, Any], classifier, repeat: int) -> dict[str, Any]:
 
         field_diff = _diff(case.get("expect", {}), classification)
         money_diff = _diff(case.get("expect_invoice", {}), calc)
+        ok = not field_diff and not money_diff
         attempts.append({
-            "ok": not field_diff and not money_diff,
+            "ok": ok,
             "field_diff": field_diff,
             "money_diff": money_diff,
             "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
             "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
         })
+        _say(
+            f"      attempt {attempt}/{repeat} — {'pass' if ok else 'FAIL'}"
+            f" · {classification.get('BILLING_MODEL', '?')}"
+            f" · subtotal {calc.get('SUBTOTAL')}"
+        )
 
     return {
         "name": case.get("name") or case["_file"],
@@ -190,6 +207,9 @@ def main() -> int:
                     help="input $/Mtok for the cost line (default: configured rate)")
     ap.add_argument("--out-cost", type=float, default=None,
                     help="output $/Mtok for the cost line (default: configured rate)")
+    ap.add_argument("--timeout", type=float, default=90.0,
+                    help="seconds before a single model call is abandoned "
+                         "(default 90) — a hung request must not stall the run")
     args = ap.parse_args()
 
     if args.repeat < 1:
@@ -231,8 +251,23 @@ def main() -> int:
     classifier = OpenAIClassifier()
     if args.model:
         classifier.model = args.model
+    # The production classifier has no timeout — fine for a Celery task that can
+    # be retried, wrong for an interactive run where a stuck call just hangs.
+    try:
+        classifier.client = classifier.client.with_options(timeout=args.timeout)
+    except Exception:  # pragma: no cover - older SDKs lack with_options
+        pass
 
-    results = [score_case(c, classifier, args.repeat) for c in runnable]
+    total_calls = len(runnable) * args.repeat
+    _say(f"\nmodel: {model}   {len(runnable)} case(s) x {args.repeat} "
+         f"= {total_calls} call(s), timeout {args.timeout:.0f}s each\n")
+
+    results = []
+    for i, case in enumerate(runnable, 1):
+        results.append(
+            score_case(case, classifier, args.repeat, position=f"[{i}/{len(runnable)}] ")
+        )
+
     ok = report(results, skipped, args.repeat, in_cost, out_cost, model)
     return 0 if ok else 1
 
