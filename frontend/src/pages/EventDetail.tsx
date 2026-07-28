@@ -351,6 +351,17 @@ function SubtotalBreakdown({
     items.push({ label: "Event Services", amount: n(cls.BASE_AMOUNT) });
   }
 
+  // A promised discount, shown as its own negative line so the bullets prove it
+  // was honoured instead of the subtotal quietly differing from rate x servings.
+  const discountApplied = n(calc.DISCOUNT_APPLIED);
+  if (discountApplied > 0) {
+    const pct = n(calc.DISCOUNT_PERCENT_AUDIT);
+    items.push({
+      label: pct > 0 ? `Discount (${pct}%)` : "Discount",
+      amount: -discountApplied,
+    });
+  }
+
   // The pricing came in under a stated minimum. Show the gap as its own line so
   // the bullets add up from real figures — the servings at their real rate, then
   // the uplift to the minimum the client agreed to. Presenting the minimum as if

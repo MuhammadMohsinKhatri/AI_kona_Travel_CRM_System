@@ -569,8 +569,16 @@ Percentage → DISCOUNT_PERCENT as plain number (10, not 0.10)
 Flat dollar → DISCOUNT_AMOUNT as dollar value
 None → both 0
 
-INVOICE_FIXED_PACKAGE: BASE_AMOUNT = final post-discount price as stated. DISCOUNT_PERCENT stored for audit only. Backend does not re-apply.
-All other models: store pre-discount RATE_PER_SERVING + DISCOUNT_PERCENT separately. Backend applies discount.
+INVOICE_FIXED_PACKAGE: BASE_AMOUNT = final post-discount price as stated.
+DISCOUNT_PERCENT is stored for audit only and the backend does NOT re-apply it —
+putting the discount in both places would take it off twice.
+
+All other models: store the PRE-discount RATE_PER_SERVING plus DISCOUNT_PERCENT,
+and the backend applies the discount to the subtotal. Do not pre-discount the rate
+yourself as well.
+  "$3 per 9oz Kona ... provide a 20% discount", 86 served
+    → RATE_PER_SERVING: 3 (not 2.40), DISCOUNT_PERCENT: 20
+    → billed: 86 × 3 = 258.00, less 20% = $206.40
 
 ### Discount — Offer vs. Confirmed
 

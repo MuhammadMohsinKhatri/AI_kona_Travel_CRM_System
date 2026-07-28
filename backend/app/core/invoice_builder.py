@@ -198,6 +198,14 @@ def build_invoice_payload(
         if subtotal_pre_tax > 0:
             add_item("Event Services", subtotal_pre_tax, 1, subtotal_pre_tax, True)
 
+    # A discount the client was promised, shown as its own negative line so the
+    # invoice proves it was honoured rather than just arriving at a smaller total.
+    discount_applied = _num(calc.get("DISCOUNT_APPLIED"))
+    if discount_applied > 0:
+        pct = _num(calc.get("DISCOUNT_PERCENT_AUDIT"))
+        label = f"Discount ({pct:g}%)" if pct > 0 else "Discount"
+        add_item(label, -discount_applied, 1, -discount_applied, True)
+
     # The pricing came in under a stated minimum. Show the difference as its own
     # line so the invoice adds up in front of the client: servings at the real
     # rate, then the uplift that brings it to the minimum they agreed to. The

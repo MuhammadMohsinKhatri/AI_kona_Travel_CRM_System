@@ -123,6 +123,70 @@ def test_the_minimum_floor_applies_to_a_base_fee_plus_servings_event():
     assert binds["MINIMUM_UPLIFT"] == 31.0
 
 
+def test_a_stated_discount_is_actually_applied():
+    """The Empowerment Academy, 2026-07-23: "$3 per 9oz Kona ... provide a 20%
+    discount", 86 served. Billed $258.00 + tax = $283.80; the school had been
+    promised 20% off, so it should have been $206.40 + tax = $227.04.
+
+    The prompt told the classifier to store a PRE-discount rate plus
+    DISCOUNT_PERCENT because "backend applies discount". The backend's own comment
+    said the opposite — "extracted for audit only, never re-applied" — so the
+    discount was recorded in the ledger and then billed at full price.
+    """
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "UNITS_SERVED_TOTAL": 86, "DISCOUNT_PERCENT": 20,
+        "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
+    })
+    assert calc["UNIT_REVENUE"] == 258.0        # pre-discount, as extracted
+    assert calc["DISCOUNT_APPLIED"] == 51.6     # itemisable on the invoice
+    assert calc["SUBTOTAL"] == 206.4
+    assert calc["SALES_TAX"] == 12.38           # tax on the discounted base
+    assert calc["FINAL_INVOICE_AMOUNT"] == 227.04
+
+
+def test_a_flat_dollar_discount_is_applied():
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "UNITS_SERVED_TOTAL": 100, "DISCOUNT_AMOUNT": 50, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 250.0
+    assert calc["DISCOUNT_APPLIED"] == 50.0
+
+
+def test_a_fixed_package_discount_is_not_applied_twice():
+    """There BASE_AMOUNT is the post-discount quoted price, so re-applying
+    DISCOUNT_PERCENT would take it off a second time."""
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 1200,
+        "UNITS_INCLUDED_IN_BASE": 600, "UNITS_SERVED_TOTAL": 536,
+        "DISCOUNT_PERCENT": 10, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 1200.0
+    assert calc["DISCOUNT_APPLIED"] == 0.0
+
+
+def test_a_discount_cannot_take_a_bill_below_a_stated_minimum():
+    """The discount is taken first, then the floor still holds — a minimum the
+    client agreed to is not undercut by a discount on the pricing."""
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 80, "MINIMUM_FLAT_AMOUNT": 250,
+        "DISCOUNT_PERCENT": 50, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 250.0   # 320 less 50% = 160, floored back to 250
+
+
+def test_a_discount_can_never_produce_a_negative_bill():
+    calc = calculate_invoice({
+        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "UNITS_SERVED_TOTAL": 10, "DISCOUNT_AMOUNT": 500,
+        "DISCOUNT_PERCENT": 200, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 0.0
+    assert calc["FINAL_INVOICE_AMOUNT"] == 0.0
+
+
 def test_an_add_on_sits_on_top_of_the_minimum():
     """A stated extra must not be swallowed by the floor."""
     calc = calculate_invoice({

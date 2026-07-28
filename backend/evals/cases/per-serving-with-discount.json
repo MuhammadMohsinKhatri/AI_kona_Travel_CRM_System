@@ -1,0 +1,57 @@
+{
+  "name": "Per-serving with a promised percentage discount",
+  "confirmed": true,
+  "why": [
+    "The Empowerment Academy, 2026-07-23. Admin notes: '$3 per 9oz Kona, and waive",
+    "our destination fee as well as provide a 20% discount keep count and only",
+    "charge for the amount we actually served'. Driver: 86 yellow cups.",
+    "Billed $258.00 + tax = $283.80 with the 20% discount silently dropped. The",
+    "school was promised 20% off, so it should be 86 x $3 = $258.00 less 20% =",
+    "$206.40, +6% tax $12.38, +4% card fee $8.26 = $227.04. Over-billed $56.76.",
+    "Cause was a contradiction between the prompt and the engine. The prompt said",
+    "'store pre-discount RATE_PER_SERVING + DISCOUNT_PERCENT separately. Backend",
+    "applies discount.' The engine said 'extracted for audit only -- never",
+    "re-applied'. So the classifier did its job, the figure reached the ledger, and",
+    "nothing ever took it off.",
+    "RATE_PER_SERVING must stay 3, NOT pre-discounted to 2.40 -- the engine applies",
+    "the percentage, and doing both would discount it twice.",
+    "'waive our destination fee' is honoured by LOCATION_FEE staying 0."
+  ],
+  "cleaned": {
+    "DATE": "2026-07-23",
+    "EVENT_STARTED": "2026-07-23T12:00:00-04:00",
+    "EVENT_ENDED": "2026-07-23T13:00:00-04:00",
+    "EVENT_NAME": "The Empowerment Academy",
+    "BUSINESS_NAME": "The Empowerment Academy",
+    "EVENT_TYPE": "Invoice",
+    "FINAL_EVENT_STATUS": "Completed",
+    "EVENT_NOTES_HTML": "EVENT TYPE Invoice ATTENDEES 150-160 SERVE / KEEP COUNT 9oz yellow Kona INCLUDE  PARKING on the blacktop area PAYMENT School will be paying - send invoice after",
+    "ADMIN_NOTES": "$3 per 9oz Kona, and waive our destination fee as well as provide a 20% discount keep count and only charge for the amount we actually served  Teach our drivers to inform us if the client paid or we need to send them an invoice",
+    "DRIVER_NOTES": "86 yellow cups",
+    "LOCATION_NOTES": "",
+    "EQUIPMENT": "KEV2 (SM)",
+    "EVENT_SALES": 0,
+    "NET_EVENT_SALES": 0,
+    "BALANCE": 0,
+    "SALES_TAX": 0,
+    "TIP_AMOUNT": 0,
+    "DELIVERY_FEE": 0
+  },
+  "expect": {
+    "EVENT_TYPE": "invoice",
+    "BILLING_MODEL": "INVOICE_PER_SERVING",
+    "RATE_PER_SERVING": 3,
+    "UNITS_SERVED_TOTAL": 86,
+    "DISCOUNT_PERCENT": 20,
+    "LOCATION_FEE": 0,
+    "TAXABLE": "YES"
+  },
+  "expect_invoice": {
+    "UNIT_REVENUE": 258.0,
+    "DISCOUNT_APPLIED": 51.6,
+    "SUBTOTAL": 206.4,
+    "SALES_TAX": 12.38,
+    "CC_FEE": 8.26,
+    "FINAL_INVOICE_AMOUNT": 227.04
+  }
+}

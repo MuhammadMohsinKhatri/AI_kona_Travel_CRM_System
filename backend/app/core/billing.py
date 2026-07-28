@@ -5,7 +5,8 @@ event (the flat CLASSIFICATION dict), it computes the invoice amount according t
 the resolved BILLING_MODEL.
 
 Key rules preserved from the original:
-  * No discount math here — BASE_AMOUNT is already the post-discount quoted price.
+  * A stated discount IS applied, except on INVOICE_FIXED_PACKAGE where
+    BASE_AMOUNT is already the post-discount quoted price.
   * MG models bill the guaranteed floor + location fee, regardless of servings.
   * Tax is 6% when taxable; a 4% CC/processing fee always applies.
   * If the admin wrote an explicit invoice total in notes (CHECK_INVOICE_AMOUNT),
@@ -163,7 +164,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     # no tax or processing fee is layered on top.
     price_is_all_in = str(event.get("PRICE_IS_ALL_IN") or "").upper() in ("TRUE", "YES", "1")
 
-    # Extracted for audit only — never re-applied (BASE_AMOUNT is post-discount).
+    # DISCOUNT_PERCENT is a plain number (20 means 20%), per the prompt.
     discount_percent = _num(event.get("DISCOUNT_PERCENT"))
     discount_amount = _num(event.get("DISCOUNT_AMOUNT"))
 
@@ -266,6 +267,26 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
 
     else:  # UNDEFINED / unrecognized
         subtotal = base_amount + location_fee
+
+    # ── DISCOUNT ──────────────────────────────────────────────────────────────
+    # Applied for every model EXCEPT INVOICE_FIXED_PACKAGE, whose BASE_AMOUNT is
+    # already the post-discount quoted price ("$1,200 after the 10% off").
+    #
+    # The prompt has always instructed the classifier to store a PRE-discount rate
+    # alongside DISCOUNT_PERCENT and let the backend apply it. The backend never
+    # did — the fields were extracted, written to the ledger, and then billed at
+    # full price. A school promised "a 20% discount" on 86 servings at $3 was
+    # invoiced $258.00 instead of $206.40.
+    #
+    # Taken before the minimum floor so a discount can never drag a bill below a
+    # minimum the client agreed to, and before the add-on so a separately stated
+    # extra is charged as stated rather than silently discounted too.
+    discount_total = 0.0
+    if billing_model != "INVOICE_FIXED_PACKAGE" and subtotal > 0:
+        pct = min(max(discount_percent, 0.0), 100.0)
+        discount_total = subtotal * (pct / 100.0) + max(discount_amount, 0.0)
+        discount_total = _r2(min(discount_total, subtotal))  # never below zero
+        subtotal = _r2(subtotal - discount_total)
 
     # ── MINIMUM FLOOR ─────────────────────────────────────────────────────────
     # A stated minimum floors a host-billed invoice: the client owes the GREATER
@@ -395,6 +416,9 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         # ── AUDIT ──
         "DISCOUNT_PERCENT_AUDIT": discount_percent,
         "DISCOUNT_AMOUNT_AUDIT": discount_amount,
+        # What the discount actually took off, so it can be shown as its own line
+        # instead of the subtotal quietly differing from rate x servings.
+        "DISCOUNT_APPLIED": _r2(discount_total),
         # ── FLAGS ──
         "_flags": {
             "taxable": taxable,
