@@ -66,6 +66,11 @@ _ADMIN_SENTENCES: list[tuple[re.Pattern, Any]] = [
             "RATE_PER_SERVING")),
     (re.compile(rf"^{_AMT} per hour\.?$", re.I),
      _model("PACKAGE_HOURLY", "HOURLY_RATE")),
+    # A floor on a package ("Minimum $150." on the party package). Sets the amount
+    # WITHOUT touching the billing model — the engine applies MINIMUM_FLAT_AMOUNT as
+    # a floor to the package models. Distinct from "Minimum guarantee $X flat.",
+    # which IS a model, and which this cannot match because of the amount position.
+    (re.compile(rf"^Minimum {_AMT}\.?$", re.I), _set("MINIMUM_FLAT_AMOUNT")),
     (re.compile(r"^Send invoice\.?$", re.I), lambda m, o: None),
     (re.compile(r"^Open selling event\.?$", re.I), _model("SELLING_OPEN")),
     (re.compile(r"^Guests pay individually\.?$", re.I), lambda m, o: None),

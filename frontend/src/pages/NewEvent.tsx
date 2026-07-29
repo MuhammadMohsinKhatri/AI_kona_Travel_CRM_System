@@ -48,7 +48,7 @@ interface F {
   hourlyRate: string; minFlat: string; mgPerHour: string; guestRate: string;
   locationFee: string;
   addonAmount: string; addonLabel: string; allIn: boolean;
-  cupSize: string;
+  pkg: string; cupSize: string;
   attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
   actualCount: string; actualTimes: string; squareDevice: string;
@@ -65,10 +65,60 @@ const initial: F = {
   hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "",
   locationFee: "",
   addonAmount: "", addonLabel: "", allIn: false,
-  cupSize: "",
+  pkg: "", cupSize: "",
   attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
   actualCount: "", actualTimes: "", squareDevice: "",
+};
+
+/** The published packages, exactly as they appear on the flyers sent to customers.
+ *
+ *  Brett, 2026-07-29: "the prices don't change, but then next to it, what size are
+ *  they choosing? And that will determine how many is included in the package and
+ *  how much we charge for each additional."
+ *
+ *  So the package fixes the price and the size fixes the included count and the
+ *  overage rate. Picking both fills the pricing fields in, which is the whole point
+ *  — the included counts are not guessable and were the one thing a person could
+ *  get wrong here.
+ *
+ *  The party package is a different shape: nothing is included, every cup is
+ *  charged on top of the $99, and the visit carries a $150 minimum. */
+const PACKAGES: Record<string, {
+  label: string;
+  base: number;
+  minimum: number;
+  billing: string;
+  sizes: Record<string, { included: number; additional: number }>;
+}> = {
+  "60-minute": {
+    label: "60 minutes — $295",
+    base: 295, minimum: 0, billing: "PACKAGE_FIXED",
+    sizes: {
+      "12oz Small": { included: 60, additional: 4 },
+      "16oz Medium": { included: 50, additional: 5 },
+      "17oz Color Change": { included: 40, additional: 6 },
+    },
+  },
+  "45-minute": {
+    label: "45 minutes — $245",
+    base: 245, minimum: 0, billing: "PACKAGE_FIXED",
+    sizes: {
+      "12oz Small": { included: 45, additional: 4 },
+      "16oz Medium": { included: 39, additional: 5 },
+      "17oz Color Change": { included: 33, additional: 6 },
+    },
+  },
+  Party: {
+    label: "Party — $99 + per serving (30 min, $150 minimum)",
+    base: 99, minimum: 150, billing: "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    sizes: {
+      "12oz Small": { included: 0, additional: 4 },
+      "16oz Medium": { included: 0, additional: 5 },
+      "17oz Color Change": { included: 0, additional: 6 },
+      "21oz Large": { included: 0, additional: 7 },
+    },
+  },
 };
 
 /** Cup / serving sizes offered. The size matters twice: it decides how many
@@ -185,6 +235,11 @@ function buildAdminNotes(f: F): string {
   if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
   if (Number(f.deposit)) lines.push(`Deposit $${f.deposit} required.`);
   if (Number(f.discount)) lines.push(`Discount $${f.discount} applied.`);
+  // The party package's floor. Its own sentence so rule_classifier can pick it up
+  // without the model changing — a minimum on a package is a floor, not a guarantee.
+  if (Number(f.minFlat) && f.billing.startsWith("PACKAGE_")) {
+    lines.push(`Minimum $${f.minFlat}.`);
+  }
   lines.push(f.taxExempt === "YES" ? "Client is tax exempt." : "Plus tax.");
   if (f.allIn) lines.push("Quoted total is all-in (tax and fee included).");
   if (f.cardOnly) lines.push("Card only, no on-site cash.");
@@ -297,6 +352,39 @@ export default function NewEvent() {
   const driverNotes = useMemo(() => buildDriverNotes(f), [f]);
   const est = useMemo(() => estimate(f), [f]);
   const up = (patch: Partial<F>) => setF((prev) => ({ ...prev, ...patch }));
+
+  /** Fill the pricing fields from a published package + size.
+   *
+   *  The package fixes the price; the size fixes the included count and the
+   *  overage rate. Both are needed before anything can be filled in, so choosing
+   *  one keeps the other and waits.
+   *
+   *  Writes to the same fields a person would type, so the notes, the estimate and
+   *  the classifier all see one shape whether the price came from a flyer or by
+   *  hand. Nothing here is derived or rounded — every number is off the flyer. */
+  function applyPackage(pkgKey: string, sizeKey: string) {
+    const pkg = PACKAGES[pkgKey];
+    if (!pkg) {
+      up({ pkg: "", cupSize: sizeKey });
+      return;
+    }
+    const size = pkg.sizes[sizeKey];
+    const model = BILLING_MODELS.find((m) => m.key === pkg.billing);
+    up({
+      pkg: pkgKey,
+      cupSize: size ? sizeKey : "",
+      billing: pkg.billing,
+      eventType: model ? model.type : "Package",
+      baseAmount: String(pkg.base),
+      // The party package includes nothing — every cup is charged on top of the
+      // $99 — so an included count of 0 is correct there, not missing.
+      unitsIncluded: size ? String(size.included || "") : "",
+      ratePerServing: size ? String(size.additional) : "",
+      // The $150 party minimum floors the bill; the engine applies it to the
+      // package models, so a light visit still bills $150 rather than $139.
+      minFlat: pkg.minimum ? String(pkg.minimum) : "",
+    });
+  }
 
   const missing = useMemo(() => {
     const m: string[] = [];
@@ -490,13 +578,58 @@ export default function NewEvent() {
               <Seg options={[["NO", "No — taxable"], ["YES", "Yes — exempt"]]} value={f.taxExempt} onChange={(v) => up({ taxExempt: v as F["taxExempt"] })} />
               {f.taxExempt === "YES" && <div className="cond warn">Tax-exempt — keep the exemption certificate on file for this event.</div>}
             </Field>
+            {/* The published packages first, because that is how a booking is
+                actually taken: which package, then what size. Choosing both fills
+                in the price, the included count and the overage rate, so the one
+                thing nobody can be expected to remember — 60 smalls or 50 mediums
+                or 40 colour-change — is never typed. Anything not on a flyer is
+                still priced by hand with the model picker below. */}
+            <Row>
+              <Field label="Published package" hint="Sets the price. Leave blank for custom pricing.">
+                <select className="select" value={f.pkg}
+                  onChange={(e) => applyPackage(e.target.value, f.cupSize)}>
+                  <option value="">— custom / not a standard package —</option>
+                  {Object.entries(PACKAGES).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Serving size"
+                req={Boolean(f.pkg)}
+                hint={f.pkg
+                  ? "Sets how many are included and the price of each additional."
+                  : "Pick a package first."}>
+                <select className="select" value={f.cupSize} disabled={!f.pkg}
+                  onChange={(e) => applyPackage(f.pkg, e.target.value)}>
+                  <option value="">Select size…</option>
+                  {Object.entries(PACKAGES[f.pkg]?.sizes ?? {}).map(([size, s]) => (
+                    <option key={size} value={size}>
+                      {size} — {s.included ? `${s.included} included, ` : ""}${s.additional} each additional
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </Row>
+            {f.pkg && f.cupSize && (
+              <div className="cond">
+                {PACKAGES[f.pkg].minimum > 0
+                  ? `$${PACKAGES[f.pkg].base} to attend plus $${f.ratePerServing} per serving, with a $${PACKAGES[f.pkg].minimum} minimum for the visit.`
+                  : `$${PACKAGES[f.pkg].base} covers ${f.unitsIncluded} × ${f.cupSize}; each additional $${f.ratePerServing}.`}
+              </div>
+            )}
             <Field label="Billing model" req hint="Predefined models — picking one sets the event type and reveals its pricing fields.">
               <select
                 className="select"
                 value={f.billing}
                 onChange={(e) => {
                   const model = BILLING_MODELS.find((m) => m.key === e.target.value);
-                  up({ billing: e.target.value, eventType: model ? model.type : f.eventType });
+                  // Choosing a model by hand means this is not a published
+                  // package, so clear the preset rather than leave it claiming one.
+                  up({
+                    billing: e.target.value,
+                    eventType: model ? model.type : f.eventType,
+                    pkg: "",
+                  });
                 }}
               >
                 <option value="">Select billing model…</option>
@@ -571,7 +704,11 @@ export default function NewEvent() {
                 includes 60 12oz Konas, each additional $4"). Prose had to be
                 parsed back out by the classifier to be usable, which is where
                 mistakes came from; as numbers they are read directly. */}
-            {SIZED_MODELS.has(f.billing) && (
+            {/* Custom pricing only. When a published package is chosen the size,
+                included count and overage rate come from the flyer and are shown in
+                the summary under the package picker — repeating the inputs here
+                would let the two disagree. */}
+            {!f.pkg && SIZED_MODELS.has(f.billing) && (
               <Row3>
                 <Field label="Serving size" req={SIZE_REQUIRED_MODELS.has(f.billing)}
                   hint="Decides how many the package includes, and tells the driver what to pour.">
