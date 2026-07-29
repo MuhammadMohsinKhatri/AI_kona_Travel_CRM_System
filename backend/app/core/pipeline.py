@@ -807,7 +807,13 @@ def _save_alerts(db: Session, event: Event, alerts: list[dict[str, str]]) -> lis
         row = Alert(
             event_id=event.id, severity=a["severity"],
             issue=a["issue"], action=a.get("action", ""),
-            source="financial",
+            # Honour a per-alert source. The pre-invoice gate tags its violations
+            # "verify" so the fix-it page can say what actually happened —
+            # everything used to be filed as "financial", whose guide reads
+            # "couldn't find something it needs … fix in KonaOS event notes".
+            # That is misleading for e.g. missing Square sales, where the notes
+            # are fine and the reconciliation is not.
+            source=a.get("source") or "financial",
         )
         db.add(row)
         saved.append(row)

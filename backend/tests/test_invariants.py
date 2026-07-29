@@ -329,5 +329,8 @@ def test_violations_carry_the_alert_shape():
     })
     assert v
     for item in v:
-        assert set(item) == {"severity", "issue", "action"}
+        assert set(item) == {"severity", "issue", "action", "source"}
         assert item["severity"] in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
+        # Routes the fix-it page to the "held before invoicing" guide rather than
+        # the generic "missing detail, fix the notes" one.
+        assert item["source"] == "verify"

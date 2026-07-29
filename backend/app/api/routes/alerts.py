@@ -35,6 +35,22 @@ SOURCE_GUIDE: dict[str, dict[str, str]] = {
             "calculation and the invoice."
         ),
     },
+    "verify": {
+        "label": "Checked and held before invoicing",
+        "what": (
+            "The automation worked out this event's bill, then its own consistency "
+            "checks found something that doesn't add up — so it stopped. No invoice "
+            "was created and nothing has gone to the client. The line above says "
+            "exactly what looked wrong."
+        ),
+        "fix_in": "Depends on the issue — see the suggested fix above",
+        "after": (
+            "Correct the underlying detail, then re-run this event with the button "
+            "below. If the figures are actually right and the check is being "
+            "over-cautious, mark it sorted and raise the invoice manually — the "
+            "automation will not do it while the check is failing."
+        ),
+    },
     "cash": {
         "label": "Waiting on cash",
         "what": (

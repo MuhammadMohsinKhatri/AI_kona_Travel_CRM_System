@@ -8,6 +8,7 @@ const PAGE_SIZE = 25;
 
 const SOURCE_LABELS: Record<string, string> = {
   "": "All kinds",
+  verify: "Held before invoicing",
   financial: "Event data problems",
   cash: "Waiting on cash",
   session: "KonaOS connection",

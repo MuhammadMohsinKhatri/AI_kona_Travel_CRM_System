@@ -188,7 +188,13 @@ def check_invariants(
     out: list[dict[str, str]] = []
 
     def add(issue: str, action: str, severity: str = "HIGH") -> None:
-        out.append({"severity": severity, "issue": issue, "action": action})
+        # source="verify" tells the alert detail page these came from the
+        # pre-invoice gate, so it can say "held before invoicing, nothing was sent"
+        # instead of the generic "missing detail — fix it in the KonaOS notes".
+        out.append({
+            "severity": severity, "issue": issue, "action": action,
+            "source": "verify",
+        })
 
     billing_model = str(classification.get("BILLING_MODEL") or "").upper().strip()
     event_type = str(classification.get("EVENT_TYPE") or "").strip().lower()
