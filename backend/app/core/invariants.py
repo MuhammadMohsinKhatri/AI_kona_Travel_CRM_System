@@ -88,6 +88,12 @@ _MG_MODELS = (
     "HYBRID_SELLING_PLUS_MIN_GUARANTEE",   # retired, but stored rows still carry it
 )
 
+# Models whose money comes from what the truck actually sold. For these, a
+# reconciliation of zero is a missing figure rather than a valid one.
+_SALES_DRIVEN_MODELS = (
+    "SELLING_OPEN", "SELLING_WITH_GIVEBACK",
+) + _MG_MODELS
+
 # The notes saying the HOST owes a bill that will be sent to them.
 _HOST_INVOICED_PATTERNS = (
     r"send (?:them )?(?:an? )?invoice", r"will be paying", r"will be billed",
@@ -169,6 +175,7 @@ def check_invariants(
     cleaned: dict[str, Any],
     classification: dict[str, Any],
     calc: dict[str, Any],
+    square: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Reasons this event must NOT be auto-invoiced. Empty list = safe to draft.
 
@@ -283,6 +290,45 @@ def check_invariants(
             "cash that will never be counted, and the host is never billed.",
             severity="CRITICAL",
         )
+
+    # ── a selling or guarantee event with no sales reconciled ────────────────
+    # On a selling event the truck's Square sales ARE the revenue, and on a
+    # minimum guarantee they are what counts toward the host's minimum. Zero
+    # therefore means one of two very different things: the truck genuinely sold
+    # nothing, or Square was never filled in for this event. Nothing in the system
+    # distinguished them, so a five-hour farmers market reconciling $0.00 looked
+    # exactly like a completed event with no takings.
+    #
+    # Left unnoticed it is worse than a wrong number: a selling event records no
+    # revenue at all, and an MG event bills the host the whole minimum because the
+    # sales that should have offset it are missing.
+    if square is not None and billing_model in _SALES_DRIVEN_MODELS:
+        breakdown = square.get("breakdown") or {}
+        card = _num(breakdown.get("net_card")) or _num(square.get("total_collected"))
+        orders = _num(square.get("order_count"))
+        cash = _num(classification.get("CASH_COLLECTED_AMOUNT")) + _num(
+            classification.get("ACTUAL_CASH_PRE_TAX")
+        )
+        if orders == 0 and card == 0 and cash == 0:
+            if not str(square.get("device_id") or "").strip():
+                add(
+                    "No sales reconciled and no Square device could be matched to "
+                    "this event",
+                    "The equipment name in the notes did not map to a Square "
+                    "device, so no orders could be found. Check the driver's "
+                    "reported equipment against the device list, then re-run.",
+                    severity="CRITICAL",
+                )
+            else:
+                add(
+                    "No sales at all were reconciled for this event — no Square "
+                    "orders and no cash",
+                    "On a selling event the Square sales ARE the revenue, so this "
+                    "records none. Confirm whether the truck genuinely sold "
+                    "nothing, or whether Square has not been filled in yet for "
+                    "this event — if it is the latter, re-run once it has.",
+                    severity="CRITICAL",
+                )
 
     # ── a stated price that does no work ────────────────────────────────────
     # The generalised form of most misclassifications: the model acknowledges a

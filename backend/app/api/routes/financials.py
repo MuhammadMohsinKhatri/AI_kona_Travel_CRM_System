@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core import overrides as ov
+from app.core.billing import canonical_billing_model, canonical_event_type
 from app.core.ledger import derive_sales_columns
 from app.db.base import get_db
 from app.konaos.router import verify_api_key
@@ -191,8 +192,14 @@ def list_entries(
             # Date column can show the event's time range under the date.
             "event_started": started, "event_ended": ended,
             "event_name": e.event_name, "event_code": e.event_code, "brand": e.brand,
-            "final_status": e.final_status, "event_type": e.event_type,
-            "billing_model": e.billing_model, "units_served": e.units_served,
+            # Served through the rename aliases so a row written before the
+            # invoice -> package rename still reads in the current vocabulary.
+            # Otherwise the ledger shows a mix of old and new until the migration
+            # script is run, which is housekeeping rather than a correctness fix.
+            "final_status": e.final_status,
+            "event_type": canonical_event_type(e.event_type),
+            "billing_model": canonical_billing_model(e.billing_model),
+            "units_served": e.units_served,
             "subtotal": e.subtotal, "sales_tax": e.sales_tax, "cc_fee": e.cc_fee,
             "check_invoice": e.check_invoice,
             # Square breakdown (sheet columns 5-10)

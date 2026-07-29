@@ -210,6 +210,101 @@ def test_a_genuine_minimum_guarantee_is_not_held():
     assert not any("guests paying" in x["issue"] for x in v), _issues(v)
 
 
+SELLING_NOTES = {
+    "EVENT_NOTES_HTML": "EVENT TYPE Selling ATTENDEES 200 TAXABLE Yes",
+    "ADMIN_NOTES": "Open selling event.",
+    "DRIVER_NOTES": "",
+}
+
+
+def _selling(square, **overrides):
+    classification = {
+        "EVENT_TYPE": "selling", "BILLING_MODEL": "SELLING_OPEN",
+        "TAXABLE": "YES", **overrides,
+    }
+    return check_invariants(
+        SELLING_NOTES, classification,
+        billing.calculate_invoice(classification), square,
+    )
+
+
+def test_a_selling_event_with_nothing_reconciled_is_flagged():
+    """(IC) Pikesville Farmers Market, 2026-07-28, a five-hour selling event that
+    reconciled $0.00. On a selling event the Square sales ARE the revenue, so this
+    records none — and nothing in the system distinguished "sold nothing" from
+    "Square not filled in for this event yet"."""
+    v = _selling({"device_id": "415CS149B7001332", "order_count": 0,
+                  "total_collected": 0.0, "breakdown": {"net_card": 0.0}})
+    assert any("No sales at all were reconciled" in x["issue"] for x in v), _issues(v)
+    assert any(x["severity"] == "CRITICAL" for x in v), _issues(v)
+
+
+def test_an_unmapped_device_is_named_as_the_cause():
+    """Same symptom, different cause — and the actionable one, so it gets its own
+    message rather than the generic "no sales" wording."""
+    v = _selling({"device_id": None, "order_count": 0, "total_collected": 0.0,
+                  "breakdown": {}})
+    assert any("no Square device could be matched" in x["issue"] for x in v), _issues(v)
+
+
+def test_reconciled_card_sales_are_not_flagged():
+    v = _selling({"device_id": "415CS149B7001332", "order_count": 12,
+                  "total_collected": 340.0, "breakdown": {"net_card": 340.0}})
+    assert not any("reconciled" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_cash_only_selling_event_is_not_flagged():
+    """No Square at all is legitimate when the driver took cash — the money is
+    accounted for, just not through a terminal."""
+    v = _selling(
+        {"device_id": None, "order_count": 0, "total_collected": 0.0, "breakdown": {}},
+        CASH_COLLECTED_AMOUNT=210.0,
+    )
+    assert not any("reconciled" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_package_event_with_no_square_is_not_flagged():
+    """Host-billed events are invoiced, not sold at the truck. Square is skipped
+    for them by design, so zero is the expected value and must not raise."""
+    classification = {
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_PER_SERVING",
+        "RATE_PER_SERVING": 3, "UNITS_SERVED_TOTAL": 40, "TAXABLE": "YES",
+    }
+    v = check_invariants(
+        {}, classification, billing.calculate_invoice(classification),
+        {"device_id": None, "order_count": 0, "total_collected": 0.0,
+         "breakdown": {}, "note": "skipped — invoice event"},
+    )
+    assert not any("reconciled" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_guarantee_event_with_no_sales_is_flagged():
+    """Missing sales on an MG event are worse than a blank column: the shortfall
+    the host is billed is the minimum MINUS those sales, so zero bills them the
+    whole minimum."""
+    classification = {
+        "EVENT_TYPE": "minimum guarantee", "BILLING_MODEL": "MIN_GUARANTEE_FLAT",
+        "MINIMUM_FLAT_AMOUNT": 295, "TAXABLE": "YES",
+    }
+    v = check_invariants(
+        {"ADMIN_NOTES": "sell to guests with the $295 minimum"}, classification,
+        billing.calculate_invoice(classification),
+        {"device_id": "420CS149B7000809", "order_count": 0,
+         "total_collected": 0.0, "breakdown": {"net_card": 0.0}},
+    )
+    assert any("No sales at all were reconciled" in x["issue"] for x in v), _issues(v)
+
+
+def test_the_check_is_skipped_when_square_was_not_passed():
+    """Callers that have no Square block (tests, the API, a recalculation) must
+    not have this fire on absent data."""
+    classification = {
+        "EVENT_TYPE": "selling", "BILLING_MODEL": "SELLING_OPEN", "TAXABLE": "YES",
+    }
+    v = check_invariants({}, classification, billing.calculate_invoice(classification))
+    assert not any("reconciled" in x["issue"] for x in v), _issues(v)
+
+
 def test_gate_kill_switch_is_wired_and_defaults_on():
     """The gate sits in front of billing, so a bad rule could stall invoicing.
     `invoice_gate_enabled=false` must fall back to alert-only without a rebuild."""

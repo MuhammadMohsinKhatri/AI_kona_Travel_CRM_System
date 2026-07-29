@@ -345,7 +345,8 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
             progress.counter("verify", i, len(items))
             try:
                 violations = check_invariants(
-                    item["cleaned"], item["classification"], item["calc"]
+                    item["cleaned"], item["classification"], item["calc"],
+                    item.get("square"),
                 )
                 # Carried, not saved: _save_alerts replaces an event's alerts
                 # wholesale, so the alerts phase writes these together with the
