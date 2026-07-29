@@ -101,16 +101,29 @@ _ADMIN_SENTENCES: list[tuple[re.Pattern, Any]] = [
     (re.compile(r"^Card only, no on-site cash\.?$", re.I), lambda m, o: None),
 ]
 
-_MODEL_TO_TYPE = {
-    "PACKAGE_PER_SERVING": "package",
-    "PACKAGE_BASE_FEE_PLUS_SERVINGS": "package",
-    "PACKAGE_FIXED": "package",
-    "PACKAGE_HOURLY": "package",
-    "SELLING_OPEN": "selling",
-    "SELLING_WITH_GIVEBACK": "selling",
-    "MIN_GUARANTEE_FLAT": "minimum guarantee",
-    "MIN_GUARANTEE_HOURLY": "minimum guarantee",
-    "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA": "hybrid",
+# Which event types each billing model may belong to.
+#
+# The four PACKAGE_* models are valid on a HYBRID event too. Brett, 2026-07-29:
+# "the hybrid is a package deal, but we also may make some sales ... everything
+# that's in package needs to be included in hybrid. The only difference is we're
+# training AI that if it's a hybrid, you need to go look on Square because there may
+# be some sales." So a hybrid is priced exactly like a package; the distinction is
+# only whether the truck's own sales get reconciled (the pipeline already skips
+# Square for package events and reconciles for hybrid).
+#
+# A tuple rather than a single value because the model no longer determines the type
+# on its own — the booking form's declared EVENT TYPE decides, and this says which
+# declarations are consistent with the model.
+_MODEL_TO_TYPES: dict[str, tuple[str, ...]] = {
+    "PACKAGE_PER_SERVING": ("package", "hybrid"),
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS": ("package", "hybrid"),
+    "PACKAGE_FIXED": ("package", "hybrid"),
+    "PACKAGE_HOURLY": ("package", "hybrid"),
+    "SELLING_OPEN": ("selling",),
+    "SELLING_WITH_GIVEBACK": ("selling",),
+    "MIN_GUARANTEE_FLAT": ("minimum guarantee",),
+    "MIN_GUARANTEE_HOURLY": ("minimum guarantee",),
+    "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA": ("hybrid",),
 }
 
 # Form label (EVENT TYPE: ...) → normalized event type. The booking form still
@@ -182,7 +195,7 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
         out["BILLING_MODEL"] = "SELLING_WITH_GIVEBACK"
 
     billing_model = out["BILLING_MODEL"]
-    event_type = _MODEL_TO_TYPE[billing_model]
+    allowed_types = _MODEL_TO_TYPES[billing_model]
 
     # ── EVENT NOTES: require the form's EVENT TYPE label and cross-check ─────
     label_type = None
@@ -197,8 +210,12 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
             attendees = int(_num(m.group(1)))
         # Other labeled lines (SERVE & KEEP COUNT / PARKING / ADD'L INSTRUCTION)
         # are informational — no pricing meaning, safe to ignore.
-    if label_type is None or label_type != event_type:
+    # The declared type decides, and the model only has to be consistent with it.
+    # A package model on a hybrid event is consistent — same pricing, plus sales to
+    # reconcile — so the label is what distinguishes the two.
+    if label_type is None or label_type not in allowed_types:
         return None  # missing/contradicting label → let the LLM arbitrate
+    event_type = label_type
 
     # ── DRIVER NOTES: labeled actuals only; anything else → AI ───────────────
     units_served = 0.0

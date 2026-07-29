@@ -11,7 +11,7 @@ from app.core.billing import (BILLING_MODELS, calculate_invoice,
                               canonical_billing_model, canonical_event_type)
 from app.core.invoice_builder import build_invoice_payload
 from app.core.pipeline import _normalize_classification
-from app.core.rule_classifier import _LABEL_TO_TYPE, _MODEL_TO_TYPE
+from app.core.rule_classifier import _LABEL_TO_TYPE, _MODEL_TO_TYPES
 
 LEGACY_TO_CURRENT = {
     "INVOICE_PER_SERVING": "PACKAGE_PER_SERVING",
@@ -91,17 +91,21 @@ def test_normalization_rewrites_a_legacy_pair_to_current_names():
 
 
 def test_the_rule_classifier_form_label_still_cross_checks():
-    """The office's form says "EVENT TYPE: Invoice". _MODEL_TO_TYPE now says
+    """The office's form says "EVENT TYPE: Invoice". _MODEL_TO_TYPES now says
     "package", and rule_classifier bails to the LLM when the two disagree — so a
     mismatch here would send every form-generated host-billed event to the model
     at full token cost, silently."""
     assert _LABEL_TO_TYPE["invoice"] == "package"
     assert _LABEL_TO_TYPE["package"] == "package"
-    for model, event_type in _MODEL_TO_TYPE.items():
+    for model, allowed in _MODEL_TO_TYPES.items():
         if model.startswith("PACKAGE_"):
-            assert event_type == "package", model
-        # Whatever a model maps to must be reachable from some form label.
-        assert event_type in set(_LABEL_TO_TYPE.values()), model
+            # Package models are valid on a package event and on a hybrid, which is
+            # a package that also makes sales.
+            assert "package" in allowed, model
+            assert "hybrid" in allowed, model
+        # Every type a model allows must be reachable from some form label.
+        for t_ in allowed:
+            assert t_ in set(_LABEL_TO_TYPE.values()), (model, t_)
 
 
 def test_no_legacy_invoice_model_names_remain_in_the_vocabulary():

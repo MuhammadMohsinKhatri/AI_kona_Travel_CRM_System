@@ -351,6 +351,22 @@ MG vs Package distinction:
 
 #### Hybrid models
 
+**A hybrid is a package that ALSO makes sales.** It is priced exactly like a package —
+all four Package models above are valid on a hybrid event — and the difference is
+only that the truck sold something of its own alongside the host's package, so its
+Square sales have to be reconciled. A package event has no sales of its own to look
+for.
+
+  "One-hour package deal for the team, and anyone who walks up can buy their own"
+    → EVENT_TYPE: hybrid, BILLING_MODEL: PACKAGE_HOURLY (or whichever package model
+      the host's side uses). Not a different pricing shape — a package plus sales.
+
+So pick the billing model from the HOST's pricing, exactly as you would for a
+package, and let the event type record that guests also bought. Use
+HYBRID_HOST_BASE_PLUS_GUEST_EXTRA only for the specific shape it describes: the host
+pays a base covering N servings and guests pay for the servings beyond it
+("we're going to pay for the first 50, then anybody else who wants to purchase").
+
 HYBRID_HOST_BASE_PLUS_GUEST_EXTRA
 Host pays a base covering X servings; guests pay for servings beyond that.
 Extract: BASE_AMOUNT, UNITS_INCLUDED_IN_BASE, UNITS_SERVED_TOTAL, RATE_PER_SERVING,

@@ -218,3 +218,65 @@ def test_the_tallied_amount_parses_from_driver_notes():
     assert with_tally is not None, "fell back to the LLM"
     assert with_tally["PURCHASED_AMOUNT"] == 80.0
     assert calculate_invoice(with_tally)["SUBTOTAL"] == 179.0
+
+
+# ── a hybrid is a package that also makes sales ──────────────────────────────
+
+def test_a_package_model_is_valid_on_a_hybrid_event():
+    """Brett, 2026-07-29: "the hybrid is a package deal, but we also may make some
+    sales ... everything that's in package needs to be included in hybrid. The only
+    difference is we're training AI that if it's a hybrid, you need to go look on
+    Square." Same pricing; the type decides whether sales are reconciled.
+    """
+    from app.core.invoice_builder import build_invoice_payload
+
+    def notes(label):
+        return {
+            "ADMIN_NOTES": "$295 covers up to 60 servings, each additional $4 a "
+                           "piece. Send invoice. Plus tax.",
+            "EVENT_NOTES_HTML": f"<p>EVENT TYPE: {label}<br>ATTENDEES: 80 expected</p>",
+            "DRIVER_NOTES": "ACTUAL SERVING COUNT: 72",
+            "EVENT_ID": "x", "EVENT_NAME": "T", "DATE": "2026-08-01",
+            "EVENT_STARTED": "2026-08-01T14:00:00-04:00",
+            "EVENT_ENDED": "2026-08-01T15:00:00-04:00",
+            "STAFF_ASSIGNED": "A", "EQUIPMENT": "KEV7",
+        }
+
+    for label, expected_type in (("Package", "package"), ("Hybrid", "hybrid")):
+        r = try_rule_classify(notes(label))
+        assert r is not None, f"{label} fell back to the LLM"
+        assert r["BILLING_MODEL"] == "PACKAGE_FIXED"
+        assert r["EVENT_TYPE"] == expected_type
+        # Priced identically — 295 + 12 x $4.
+        calc = calculate_invoice(r)
+        assert calc["SUBTOTAL"] == 343.0
+        # And both are host-billed, so both produce an invoice.
+        assert build_invoice_payload({**r, "calculations": calc}, notes(label), {}) is not None
+
+
+def test_the_declared_type_still_has_to_be_consistent_with_the_model():
+    """Widening package models to hybrid must not make the cross-check permissive:
+    a package model on a SELLING event is still a contradiction the LLM should
+    arbitrate."""
+    r = try_rule_classify({
+        "ADMIN_NOTES": "$295 covers up to 60 servings, each additional $4 a piece. "
+                       "Send invoice. Plus tax.",
+        "EVENT_NOTES_HTML": "<p>EVENT TYPE: Selling<br>ATTENDEES: 80 expected</p>",
+        "DRIVER_NOTES": "ACTUAL SERVING COUNT: 72",
+        "EVENT_ID": "x", "EVENT_NAME": "T", "DATE": "2026-08-01",
+        "EVENT_STARTED": "2026-08-01T14:00:00-04:00",
+        "EVENT_ENDED": "2026-08-01T15:00:00-04:00",
+        "STAFF_ASSIGNED": "A", "EQUIPMENT": "KEV7",
+    })
+    assert r is None
+
+
+def test_the_hybrid_only_model_is_not_offered_to_a_package_event():
+    """The host-base-plus-guest-extra model tracks guest payment, which a package
+    event by definition does not have."""
+    from app.core.rule_classifier import _MODEL_TO_TYPES
+
+    assert _MODEL_TO_TYPES["HYBRID_HOST_BASE_PLUS_GUEST_EXTRA"] == ("hybrid",)
+    for model in ("PACKAGE_PER_SERVING", "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+                  "PACKAGE_FIXED", "PACKAGE_HOURLY"):
+        assert _MODEL_TO_TYPES[model] == ("package", "hybrid")

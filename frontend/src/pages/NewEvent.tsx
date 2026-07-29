@@ -24,16 +24,21 @@ const EVENT_TYPE_LABELS: Record<EventType, string> = {
 };
 
 /** Predefined billing models, filtered by event type. */
-const BILLING_MODELS: { key: string; label: string; type: EventType }[] = [
-  { key: "PACKAGE_PER_SERVING", label: "Per serving — $X per serving", type: "Package" },
-  { key: "PACKAGE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X for every serving", type: "Package" },
-  { key: "PACKAGE_FIXED", label: "Base fee includes N servings — overage costs extra", type: "Package" },
-  { key: "PACKAGE_HOURLY", label: "Hourly — $X per hour", type: "Package" },
-  { key: "SELLING_OPEN", label: "Open selling — guests pay individually", type: "Selling" },
-  { key: "SELLING_WITH_GIVEBACK", label: "Selling with giveback %", type: "Selling" },
-  { key: "MIN_GUARANTEE_FLAT", label: "Flat minimum guarantee", type: "Min Guarantee" },
-  { key: "MIN_GUARANTEE_HOURLY", label: "Minimum guarantee per hour", type: "Min Guarantee" },
-  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Host base includes N servings — guests pay for extras", type: "Hybrid" },
+/** A model can belong to more than one event type. Brett, 2026-07-29: "the hybrid is
+ *  a package deal, but we also may make some sales ... everything that's in package
+ *  needs to be included in hybrid. The only difference is we're training AI that if
+ *  it's a hybrid, you need to go look on Square." Same pricing; the type decides
+ *  whether the truck's own sales are reconciled. */
+const BILLING_MODELS: { key: string; label: string; types: EventType[] }[] = [
+  { key: "PACKAGE_PER_SERVING", label: "Per serving — $X per serving", types: ["Package", "Hybrid"] },
+  { key: "PACKAGE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X for every serving", types: ["Package", "Hybrid"] },
+  { key: "PACKAGE_FIXED", label: "Base fee includes N servings — overage costs extra", types: ["Package", "Hybrid"] },
+  { key: "PACKAGE_HOURLY", label: "Hourly — $X per hour", types: ["Package", "Hybrid"] },
+  { key: "SELLING_OPEN", label: "Open selling — guests pay individually", types: ["Selling"] },
+  { key: "SELLING_WITH_GIVEBACK", label: "Selling with giveback %", types: ["Selling"] },
+  { key: "MIN_GUARANTEE_FLAT", label: "Flat minimum guarantee", types: ["Min Guarantee"] },
+  { key: "MIN_GUARANTEE_HOURLY", label: "Minimum guarantee per hour", types: ["Min Guarantee"] },
+  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Host base includes N servings — guests pay for extras", types: ["Hybrid"] },
 ];
 
 interface F {
@@ -150,7 +155,8 @@ const SIZED_MODELS = new Set([
 const SIZE_REQUIRED_MODELS = new Set([
   "PACKAGE_FIXED", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
 ]);
-const modelsFor = (t: string) => BILLING_MODELS.filter((m) => m.type === t);
+const modelsFor = (t: string) =>
+  BILLING_MODELS.filter((m) => m.types.includes(t as EventType));
 
 /** Which structured pricing fields each billing model needs. */
 const FIELD_MAP: Record<string, string[]> = {
@@ -394,7 +400,8 @@ export default function NewEvent() {
    *  one model — Hybrid does — it is selected outright rather than left as a
    *  one-item dropdown to click through. */
   function chooseEventType(v: EventType) {
-    const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
+    const keep = BILLING_MODELS.find(
+      (m) => m.key === f.billing && m.types.includes(v));
     const only = modelsFor(v);
     if (keep) {
       up({ eventType: v });
@@ -433,7 +440,11 @@ export default function NewEvent() {
       pkg: pkgKey,
       cupSize: size ? sizeKey : "",
       billing: pkg.billing,
-      eventType: model ? model.type : "Package",
+      // A published package can be booked as a Hybrid too — same pricing, plus
+      // sales to reconcile — so an existing Hybrid choice is preserved.
+      eventType: model && model.types.includes(f.eventType as EventType)
+        ? (f.eventType as EventType)
+        : "Package",
       baseAmount: String(pkg.base),
       // The party package includes nothing — every cup is charged on top of the
       // $99 — so an included count of 0 is correct there, not missing.
@@ -654,7 +665,7 @@ export default function NewEvent() {
                 thing nobody can be expected to remember — 60 smalls or 50 mediums
                 or 40 colour-change — is never typed. Anything not on a flyer is
                 still priced by hand with the model picker below. */}
-            {f.eventType === "Package" && (
+            {(f.eventType === "Package" || f.eventType === "Hybrid") && (
             <Row>
               <Field label="Published package" hint="Sets the price. Leave blank for custom pricing.">
                 <select className="select" value={f.pkg}
@@ -702,7 +713,12 @@ export default function NewEvent() {
                   // package, so clear the preset rather than leave it claiming one.
                   up({
                     billing: e.target.value,
-                    eventType: model ? model.type : f.eventType,
+                    // Only force the type when the model belongs to just one; a
+                    // package model is valid on Package AND Hybrid, so an explicit
+                    // choice of Hybrid must survive picking one.
+                    eventType: model && model.types.length === 1
+                      ? model.types[0]
+                      : f.eventType,
                     pkg: "",
                   });
                 }}
