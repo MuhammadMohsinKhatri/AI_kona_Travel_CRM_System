@@ -205,6 +205,7 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
     paid = False
     payment_method = ""
     cash_amount = 0.0
+    purchased_amount = 0.0
     square_device = ""
     for ln in [l.strip() for l in driver.split("\n") if l.strip()]:
         m = re.match(rf"^ACTUAL SERVING COUNT:\s*([\d,]+(?:\.\d+)?)$", ln, re.I)
@@ -225,6 +226,12 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
         m = re.match(rf"^CASH COLLECTED:\s*{_AMT}$", ln, re.I)
         if m:
             cash_amount = _num(m.group(1)); continue
+        # What the guests actually bought, in money, when a single rate cannot
+        # describe it — a party package where sizes were mixed and the driver
+        # tallied as they went. Takes precedence over count x rate in the engine.
+        m = re.match(rf"^PURCHASED AMOUNT:\s*{_AMT}$", ln, re.I)
+        if m:
+            purchased_amount = _num(m.group(1)); continue
         m = re.match(r"^SQUARE DEVICE:\s*(.+)$", ln, re.I)
         if m:
             square_device = m.group(1).strip(); continue
@@ -262,6 +269,7 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
         "ACTUAL_EVENT_END_TIME": "",
         "ATTENDEE_COUNT": attendees,
         "UNITS_SERVED_TOTAL": units_served,
+        "PURCHASED_AMOUNT": purchased_amount,
         "UNITS_INCLUDED_IN_BASE": out.get("UNITS_INCLUDED_IN_BASE", 0),
         "BASE_AMOUNT": out.get("BASE_AMOUNT", 0),
         "BASE_IS_FIXED_COMMITMENT": "TRUE",

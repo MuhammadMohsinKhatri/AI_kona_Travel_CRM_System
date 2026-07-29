@@ -146,3 +146,75 @@ def test_a_package_minimum_is_not_confused_with_a_guarantee():
         event_type="Min Guarantee", served=10))
     assert floor["BILLING_MODEL"] == "PACKAGE_BASE_FEE_PLUS_SERVINGS"
     assert guarantee["BILLING_MODEL"] == "MIN_GUARANTEE_FLAT"
+
+
+# ── the party package with mixed sizes ───────────────────────────────────────
+
+def test_a_mixed_size_party_bills_the_tallied_amount():
+    """Brett, 2026-07-29: "we don't require them to choose a size ... some people want
+    a large, some people want a small, some people want a colour change. And our
+    driver just tallies everything ... the driver will put in the driver's notes the
+    amount of what they purchased."
+
+    10 smalls at $4 plus 8 mediums at $5 is $80 of servings, so $179 with the $99.
+    A single rate could only ever produce $171 (all at $4) or $189 (all at $5).
+    """
+    calc = calculate_invoice({
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+        "UNITS_SERVED_TOTAL": 18, "PURCHASED_AMOUNT": 80,
+        "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+    })
+    assert calc["UNIT_REVENUE"] == 80.0
+    assert calc["SUBTOTAL"] == 179.0
+
+    for single_rate, wrong in ((4, 171.0), (5, 189.0)):
+        assert calculate_invoice({
+            "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+            "UNITS_SERVED_TOTAL": 18, "RATE_PER_SERVING": single_rate,
+            "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+        })["SUBTOTAL"] == wrong
+
+
+def test_a_tallied_amount_still_respects_the_minimum():
+    calc = calculate_invoice({
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+        "UNITS_SERVED_TOTAL": 6, "PURCHASED_AMOUNT": 26,
+        "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 150.0     # 99 + 26 = 125, floored
+
+
+def test_a_single_size_party_still_uses_count_times_rate():
+    """The other half of what Brett described: "sometimes we'll just serve everybody
+    a small green cup." One rate, no tally needed."""
+    calc = calculate_invoice({
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+        "UNITS_SERVED_TOTAL": 30, "RATE_PER_SERVING": 4,
+        "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+    })
+    assert calc["SUBTOTAL"] == 219.0     # 99 + 30 x $4
+
+
+def test_the_tallied_amount_parses_from_driver_notes():
+    r = try_rule_classify(_cleaned(
+        "Setup fee $99 plus $4 per serving. Send invoice. Minimum $150. Plus tax.",
+        served=18, minutes=30))
+    assert r is not None
+    r["PURCHASED_AMOUNT"] = 0            # baseline: no tally reported
+    assert calculate_invoice(r)["SUBTOTAL"] == 171.0
+
+    from app.core.rule_classifier import try_rule_classify as parse
+    with_tally = parse({
+        "ADMIN_NOTES": "Setup fee $99 plus $4 per serving. Send invoice. "
+                       "Minimum $150. Plus tax.",
+        "EVENT_NOTES_HTML": "<p>EVENT TYPE: Package<br>ATTENDEES: 20 expected</p>",
+        "DRIVER_NOTES": "ACTUAL SERVING COUNT: 18\nPURCHASED AMOUNT: $80\n"
+                        "PAID: No — send invoice",
+        "EVENT_ID": "x", "EVENT_NAME": "Party", "DATE": "2026-08-01",
+        "EVENT_STARTED": "2026-08-01T14:00:00-04:00",
+        "EVENT_ENDED": "2026-08-01T14:30:00-04:00",
+        "STAFF_ASSIGNED": "A", "EQUIPMENT": "KEV7",
+    })
+    assert with_tally is not None, "fell back to the LLM"
+    assert with_tally["PURCHASED_AMOUNT"] == 80.0
+    assert calculate_invoice(with_tally)["SUBTOTAL"] == 179.0

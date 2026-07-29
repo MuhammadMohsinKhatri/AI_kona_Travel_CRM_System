@@ -117,6 +117,25 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+def _servings_revenue(event: dict[str, Any], units_total: float, rate: float) -> float:
+    """What the servings came to.
+
+    ``units x rate`` assumes one price for the whole event. On the party package that
+    often does not hold: Brett, 2026-07-29 — "we don't require them to choose a size
+    ... some people want a large, some people want a small, some people want a colour
+    change. And our driver just tallies everything." A single rate cannot express
+    10 smalls at $4 plus 8 mediums at $5; it can only produce $171 or $189, never the
+    correct $179.
+
+    So the driver may instead report the money directly — "the driver will put in the
+    driver's notes ... the amount of what they purchased" — and PURCHASED_AMOUNT
+    takes precedence when present. Nothing is derived: it is the figure the driver
+    tallied at the truck.
+    """
+    reported = _num(event.get("PURCHASED_AMOUNT"))
+    return reported if reported > 0 else units_total * rate
+
+
 def _selling_sales(event: dict[str, Any], units_total: float, rate: float) -> float:
     """What a selling event actually took.
 
@@ -253,11 +272,11 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
 
     # ── BILLING LOGIC ─────────────────────────────────────────────────────────
     if billing_model == "PACKAGE_PER_SERVING":
-        unit_revenue = units_total * rate_per_serving
+        unit_revenue = _servings_revenue(event, units_total, rate_per_serving)
         subtotal = unit_revenue + location_fee
 
     elif billing_model == "PACKAGE_BASE_FEE_PLUS_SERVINGS":
-        unit_revenue = units_total * rate_per_serving
+        unit_revenue = _servings_revenue(event, units_total, rate_per_serving)
         subtotal = base_amount + unit_revenue + location_fee
 
     elif billing_model == "PACKAGE_FIXED":

@@ -51,7 +51,7 @@ interface F {
   pkg: string; cupSize: string;
   attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
-  actualCount: string; actualTimes: string; squareDevice: string;
+  actualCount: string; purchasedAmount: string; actualTimes: string; squareDevice: string;
 }
 
 const initial: F = {
@@ -68,7 +68,7 @@ const initial: F = {
   pkg: "", cupSize: "",
   attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
-  actualCount: "", actualTimes: "", squareDevice: "",
+  actualCount: "", purchasedAmount: "", actualTimes: "", squareDevice: "",
 };
 
 /** The published packages, exactly as they appear on the flyers sent to customers.
@@ -89,6 +89,7 @@ const PACKAGES: Record<string, {
   base: number;
   minimum: number;
   billing: string;
+  sizeOptional?: boolean;
   sizes: Record<string, { included: number; additional: number }>;
 }> = {
   "60-minute": {
@@ -111,6 +112,11 @@ const PACKAGES: Record<string, {
   },
   Party: {
     label: "Party — $99 + per serving (30 min, $150 minimum)",
+    // Brett, 2026-07-29: "we don't require them to choose a size ... some people
+    // want a large, some people want a small ... and our driver just tallies
+    // everything." So one size is optional here — pick it when the whole event is
+    // served in one size, otherwise leave it and let the driver report the total.
+    sizeOptional: true,
     base: 99, minimum: 150, billing: "PACKAGE_BASE_FEE_PLUS_SERVINGS",
     sizes: {
       "12oz Small": { included: 0, additional: 4 },
@@ -257,7 +263,7 @@ function buildAdminNotes(f: F): string {
 function buildEventNotes(f: F): string[] {
   const lines: string[] = [];
   lines.push(`EVENT TYPE: ${f.eventType || "—"}`);
-  if (f.attendees) lines.push(`ATTENDEES: ${f.attendees} people`);
+  if (f.attendees) lines.push(`ATTENDEES: ${f.attendees} expected`);
   // Composed from the structured fields rather than typed prose, so the count and
   // the size are always machine-readable instead of needing to be parsed back out.
   // Package and Hybrid only. On a selling or minimum-guarantee event guests buy
@@ -295,6 +301,9 @@ function buildDriverNotes(f: F): string[] {
   } else {
     lines.push("PAID: No — send invoice");
   }
+  // Mixed sizes: one rate cannot describe "10 smalls at $4 and 8 mediums at $5", so
+  // the driver reports the money instead. Takes precedence over count x rate.
+  if (Number(f.purchasedAmount)) lines.push(`PURCHASED AMOUNT: $${f.purchasedAmount}`);
   if (f.actualTimes) lines.push(`ACTUAL TIMES: ${f.actualTimes.trim()}`);
   if (f.squareDevice) lines.push(`SQUARE DEVICE: ${f.squareDevice.trim()}`);
   return lines;
@@ -460,7 +469,7 @@ export default function NewEvent() {
       if (!f.cupSize) m.push("Serving size");
       if (!f.unitsIncluded) m.push("Servings included");
     }
-    if (!f.attendees) m.push("Attendees");
+    if (!f.attendees) m.push("Expected number of attendees");
     if (needServe(f.eventType) && !f.actualCount) m.push("Actual serving count");
     if (f.paid && !f.method) m.push("Payment method");
     if (f.paid && f.method === "Cash" && !f.cashAmount) m.push("Cash amount");
@@ -657,10 +666,12 @@ export default function NewEvent() {
                 </select>
               </Field>
               <Field label="Serving size"
-                req={Boolean(f.pkg)}
-                hint={f.pkg
-                  ? "Sets how many are included and the price of each additional."
-                  : "Pick a package first."}>
+                req={Boolean(f.pkg) && !PACKAGES[f.pkg]?.sizeOptional}
+                hint={!f.pkg
+                  ? "Pick a package first."
+                  : PACKAGES[f.pkg]?.sizeOptional
+                    ? "Optional — only if the whole event is one size. Leave blank when sizes are mixed and the driver tallies the total."
+                    : "Sets how many are included and the price of each additional."}>
                 <select className="select" value={f.cupSize} disabled={!f.pkg}
                   onChange={(e) => applyPackage(f.pkg, e.target.value)}>
                   <option value="">Select size…</option>
@@ -762,7 +773,10 @@ export default function NewEvent() {
               />
             </Field>
             <Row>
-              <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
+              <Field label="Expected number of attendees" req
+                hint="What the client expects, not what we will serve — it is how the driver knows how to prep the truck. 30 employees and 300 students are very different loads.">
+                <input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" />
+              </Field>
               <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
             </Row>
             {/* Package and Hybrid only. On a selling event guests buy their own,
@@ -816,10 +830,22 @@ export default function NewEvent() {
               label="Actual serving count"
               req={needServe(f.eventType)}
               hint={needServe(f.eventType)
-                ? "Total number served. Required for Invoice / Hybrid events."
+                ? "Total number served, all sizes together."
                 : "Total number served (optional for this event type)."}
             >
               <input className="input" type="number" value={f.actualCount} onChange={(e) => up({ actualCount: e.target.value })} placeholder="79" />
+            </Field>
+            {/* For a mixed-size event, where one rate cannot describe what was sold.
+                Brett: "some people want a large, some people want a small ... our
+                driver just tallies everything ... the driver will put in the driver's
+                notes the amount of what they purchased." When filled, this is used
+                instead of count x rate. */}
+            <Field label="Amount purchased ($)"
+              hint="Only when sizes were mixed — the tallied total for the servings. Leave blank when one rate covers the whole event.">
+              <input className="input" type="number" step="0.01"
+                value={f.purchasedAmount}
+                onChange={(e) => up({ purchasedAmount: e.target.value })}
+                placeholder="80.00" />
             </Field>
             <label className="chk"><input type="checkbox" checked={f.paid} onChange={(e) => up({ paid: e.target.checked })} /> Payment received</label>
             {f.paid && (
