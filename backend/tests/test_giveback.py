@@ -132,3 +132,57 @@ def test_the_percentage_is_capped_at_100():
 
     with pytest.raises(pydantic.ValidationError):
         GivebackUpdate(giveback_percent=120)
+
+
+# ── selling revenue comes from Square, not a typed rate ──────────────────────
+
+def test_giveback_is_calculated_from_reconciled_sales_not_an_estimate():
+    """The venue is owed a percentage of what the truck ACTUALLY took. Computing it
+    from units x rate credited them against a guess: 100 served at $4 estimates $400
+    and a 20% giveback of $80, while Square reconciled $340 and they are owed $68.
+    """
+    calc = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_WITH_GIVEBACK", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 100, "GIVEBACK_PERCENTAGE": 0.20,
+        "ACTUAL_CARD_SALES": 340.0, "ACTUAL_CASH_PRE_TAX": 0.0,
+        "ACTUAL_SALES_KNOWN": True, "TAXABLE": "YES",
+    })
+    assert calc["SALES_AMOUNT"] == 340.0
+    assert calc["GIVEBACK_AMOUNT"] == 68.0     # was 80.0
+    assert calc["SUBTOTAL"] == 272.0
+
+
+def test_reconciled_sales_include_counted_cash():
+    calc = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_WITH_GIVEBACK", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 100, "GIVEBACK_PERCENTAGE": 0.10,
+        "ACTUAL_CARD_SALES": 300.0, "ACTUAL_CASH_PRE_TAX": 120.0,
+        "ACTUAL_SALES_KNOWN": True, "TAXABLE": "YES",
+    })
+    assert calc["SALES_AMOUNT"] == 420.0
+    assert calc["GIVEBACK_AMOUNT"] == 42.0
+
+
+def test_the_typed_rate_is_only_a_fallback_before_reconciliation():
+    """Nothing reconciled yet — an estimate is better than zero, so the rate is used.
+    It is never required, though: a selling event is not invoiced from it."""
+    estimate = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_OPEN", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 100, "TAXABLE": "YES",
+    })
+    assert estimate["SALES_AMOUNT"] == 400.0
+
+    # No rate and nothing reconciled: zero, not a crash or an invented figure.
+    blank = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_OPEN", "UNITS_SERVED_TOTAL": 100, "TAXABLE": "YES",
+    })
+    assert blank["SALES_AMOUNT"] == 0.0
+
+
+def test_reconciled_sales_win_even_when_no_rate_was_typed():
+    """The point of the change: the rate being blank must not zero out real revenue."""
+    calc = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_OPEN", "UNITS_SERVED_TOTAL": 100,
+        "ACTUAL_CARD_SALES": 512.50, "ACTUAL_SALES_KNOWN": True, "TAXABLE": "YES",
+    })
+    assert calc["SALES_AMOUNT"] == 512.50

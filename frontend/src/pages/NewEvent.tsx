@@ -162,7 +162,26 @@ const FIELD_MAP: Record<string, string[]> = {
  *  never block a booking — the guest rate does not enter the host's subtotal
  *  (a fixed host base plus host-billed overage is what gets invoiced), and the
  *  pricing document does not list it among the required fields either. */
-const OPTIONAL_FIELDS = new Set(["guestRate"]);
+const OPTIONAL_FIELDS = new Set([
+  "guestRate",
+  // On a selling event the money comes from Square and the cash tin, not from a
+  // rate typed at booking — the event is never invoiced at all. The rate is only a
+  // fallback estimate for before the event reconciles, so it must not block a
+  // booking. Keyed per model because for a package the same field IS the price.
+  "SELLING_OPEN:ratePerServing",
+  "SELLING_WITH_GIVEBACK:ratePerServing",
+]);
+
+const isOptionalField = (model: string, field: string) =>
+  OPTIONAL_FIELDS.has(field) || OPTIONAL_FIELDS.has(`${model}:${field}`);
+
+/** Per-model overrides where a shared field means something different. */
+const FIELD_HINTS: Record<string, string> = {
+  "SELLING_OPEN:ratePerServing":
+    "Optional. Guest menu price, used only to estimate sales before Square reconciles — the actual figure comes from Square.",
+  "SELLING_WITH_GIVEBACK:ratePerServing":
+    "Optional. Guest menu price for the pre-event estimate. The giveback is calculated from the sales Square actually reports.",
+};
 
 const FIELD_LABELS: Record<string, string> = {
   ratePerServing: "Price per serving ($)",
@@ -444,7 +463,7 @@ export default function NewEvent() {
     if (!f.eventType) m.push("Event type");
     if (f.eventType && !f.billing) m.push("Billing model");
     for (const field of FIELD_MAP[f.billing] ?? []) {
-      if (!OPTIONAL_FIELDS.has(field) && !(f as any)[field]) m.push(FIELD_LABELS[field]);
+      if (!isOptionalField(f.billing, field) && !(f as any)[field]) m.push(FIELD_LABELS[field]);
     }
     // The size and the included count live in the Event section rather than
     // FIELD_MAP, so they need checking separately. Both are load-bearing: without
@@ -705,7 +724,8 @@ export default function NewEvent() {
                 <Row3>
                   {(FIELD_MAP[f.billing] ?? []).map((field) => (
                     <Field key={field} label={FIELD_LABELS[field]}
-                      req={!OPTIONAL_FIELDS.has(field)}>
+                      req={!isOptionalField(f.billing, field)}
+                      hint={FIELD_HINTS[`${f.billing}:${field}`]}>
                       <input className="input" type="number" step="0.01"
                         value={(f as any)[field]}
                         onChange={(e) => up({ [field]: e.target.value } as Partial<F>)} />

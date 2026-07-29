@@ -117,6 +117,24 @@ def _num(v: Any) -> float:
         return 0.0
 
 
+def _selling_sales(event: dict[str, Any], units_total: float, rate: float) -> float:
+    """What a selling event actually took.
+
+    On a selling event guests pay at the truck, so the money is whatever Square and
+    the cash tin report — not a rate typed at booking. RATE_PER_SERVING is only a
+    fallback estimate for before the event reconciles, and on an open-selling event
+    it is often just the standard menu price nobody negotiated.
+
+    This matters most on SELLING_WITH_GIVEBACK, where the venue is owed a percentage
+    of gross sales. Computing that from `units x rate` credited the venue against an
+    estimate: 100 served at $4 estimates $400 and a 20% giveback of $80, while Square
+    reconciled $340 and the venue is actually owed $68. Wrong in either direction
+    depending on which way the estimate misses.
+    """
+    reconciled = _num(event.get("ACTUAL_CARD_SALES")) + _num(event.get("ACTUAL_CASH_PRE_TAX"))
+    return reconciled if reconciled > 0 else units_total * rate
+
+
 def _mg_subtotal(event: dict[str, Any], minimum_required: float, location_fee: float) -> float:
     """What the host owes on a minimum-guarantee event.
 
@@ -258,11 +276,11 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         subtotal = hourly_revenue + overage_revenue + location_fee
 
     elif billing_model == "SELLING_OPEN":
-        sales_amount = units_total * rate_per_serving
+        sales_amount = _selling_sales(event, units_total, rate_per_serving)
         subtotal = sales_amount + location_fee
 
     elif billing_model == "SELLING_WITH_GIVEBACK":
-        sales_amount = units_total * rate_per_serving
+        sales_amount = _selling_sales(event, units_total, rate_per_serving)
         giveback_amount = sales_amount * giveback_pct
         subtotal = (sales_amount - giveback_amount) + location_fee
 
