@@ -710,6 +710,27 @@ export default function NewEvent() {
 
           {/* EVENT — contract */}
           <Card title="Event — the contract" tag="at booking">
+            {/* Shown here as well as in the financial setup above. Unlike the
+                giveback and guest-rate duplicates that were removed, these two are
+                the SAME piece of state — one Seg cannot disagree with the other.
+                It earns its place: the type is part of the contract and this is the
+                card that writes EVENT TYPE into the KonaOS notes, so seeing it here
+                while filling the rest in avoids scrolling back up to check. */}
+            <Field label="Event type" req hint="Also set in the financial setup above — same value, either place.">
+              <Seg
+                options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
+                  .map((tt) => [tt, EVENT_TYPE_LABELS[tt]] as [string, string])}
+                value={f.eventType}
+                onChange={(v) => {
+                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
+                  up({
+                    eventType: v as EventType,
+                    billing: keep ? f.billing : "",
+                    pkg: keep ? f.pkg : "",
+                  });
+                }}
+              />
+            </Field>
             <Row>
               <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
               <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
