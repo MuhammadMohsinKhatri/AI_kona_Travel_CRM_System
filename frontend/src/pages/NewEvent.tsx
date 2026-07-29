@@ -259,6 +259,15 @@ function buildEventNotes(f: F): string[] {
   if (serve) lines.push(`SERVE & KEEP COUNT: ${serve}`);
   if (f.parking) lines.push(`PARKING: ${f.parking.trim()}`);
   if (f.additional) lines.push(`ADD'L INSTRUCTION: ${f.additional.trim()}`);
+  // Real KonaOS events carry TAXABLE and PAYMENT in the EVENT notes, not the admin
+  // notes — every one of the five live events checked has them there, and the
+  // classifier reads them from there. Ours omitted both, so a form-created event
+  // did not look like a real one.
+  if (f.taxExempt) lines.push(`TAXABLE: ${f.taxExempt === "YES" ? "No — exempt" : "Yes"}`);
+  const settle = f.eventType === "Selling" || f.eventType === "Min Guarantee"
+    ? "Guests pay at the truck"
+    : "Host will be billed — send invoice after";
+  lines.push(`PAYMENT: ${settle}`);
   return lines;
 }
 
@@ -574,6 +583,25 @@ export default function NewEvent() {
 
           {/* ADMIN — financial */}
           <Card title="Admin — financial setup" tag="at booking">
+            {/* FIRST question, because it decides every field below it. It used to
+                sit in the later card, under the package and billing pickers that it
+                governs, so the form read back to front. */}
+            <Field label="Event type" req hint="What kind of event this is. Everything below follows from it.">
+              <Seg
+                options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
+                  .map((t) => [t, EVENT_TYPE_LABELS[t]] as [string, string])}
+                value={f.eventType}
+                onChange={(v) => {
+                  // Drop the model and any package preset that no longer fit the type.
+                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
+                  up({
+                    eventType: v as EventType,
+                    billing: keep ? f.billing : "",
+                    pkg: keep ? f.pkg : "",
+                  });
+                }}
+              />
+            </Field>
             <Field label="Tax exempt" req hint="Drives the 6% sales tax. If YES, tax is $0 and a certificate should be on file.">
               <Seg options={[["NO", "No — taxable"], ["YES", "Yes — exempt"]]} value={f.taxExempt} onChange={(v) => up({ taxExempt: v as F["taxExempt"] })} />
               {f.taxExempt === "YES" && <div className="cond warn">Tax-exempt — keep the exemption certificate on file for this event.</div>}
@@ -584,6 +612,7 @@ export default function NewEvent() {
                 thing nobody can be expected to remember — 60 smalls or 50 mediums
                 or 40 colour-change — is never typed. Anything not on a flyer is
                 still priced by hand with the model picker below. */}
+            {f.eventType === "Package" && (
             <Row>
               <Field label="Published package" hint="Sets the price. Leave blank for custom pricing.">
                 <select className="select" value={f.pkg}
@@ -610,6 +639,7 @@ export default function NewEvent() {
                 </select>
               </Field>
             </Row>
+            )}
             {f.pkg && f.cupSize && (
               <div className="cond">
                 {PACKAGES[f.pkg].minimum > 0
@@ -680,18 +710,6 @@ export default function NewEvent() {
 
           {/* EVENT — contract */}
           <Card title="Event — the contract" tag="at booking">
-            <Field label="Event type" req hint="Synced with the billing model above; pick a model there and this fills in.">
-              <Seg
-                options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
-                  .map((t) => [t, EVENT_TYPE_LABELS[t]] as [string, string])}
-                value={f.eventType}
-                onChange={(v) => {
-                  // Clear the billing model if it no longer matches the chosen type.
-                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
-                  up({ eventType: v as EventType, billing: keep ? f.billing : "" });
-                }}
-              />
-            </Field>
             <Row>
               <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
               <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
