@@ -11,17 +11,29 @@ import { api, FormOptions, QuickCreateResult } from "../api/client";
 type EventType = "Package" | "Selling" | "Min Guarantee" | "Hybrid";
 type PayMethod = "Check" | "Credit Card" | "Cash";
 
+/** What each event type is CALLED on this form. The stored value stays short and
+ *  stable (it is written into the KonaOS notes as "EVENT TYPE: <value>" and parsed
+ *  back by rule_classifier), while the label spells the type out for whoever is
+ *  creating the event — a driver who knows "selling with a minimum guarantee"
+ *  may not recognise "min guarantee", and "hybrid" on its own tells them nothing. */
+const EVENT_TYPE_LABELS: Record<EventType, string> = {
+  Package: "Package",
+  Selling: "Selling",
+  "Min Guarantee": "Selling with Minimum Guarantee",
+  Hybrid: "Hybrid (Package / Selling)",
+};
+
 /** Predefined billing models, filtered by event type. */
 const BILLING_MODELS: { key: string; label: string; type: EventType }[] = [
   { key: "PACKAGE_PER_SERVING", label: "Per serving — $X per serving", type: "Package" },
-  { key: "PACKAGE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X per serving", type: "Package" },
-  { key: "PACKAGE_FIXED", label: "Fixed package — floor covers N servings, overage extra", type: "Package" },
+  { key: "PACKAGE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X for every serving", type: "Package" },
+  { key: "PACKAGE_FIXED", label: "Base fee includes N servings — overage costs extra", type: "Package" },
   { key: "PACKAGE_HOURLY", label: "Hourly — $X per hour", type: "Package" },
   { key: "SELLING_OPEN", label: "Open selling — guests pay individually", type: "Selling" },
   { key: "SELLING_WITH_GIVEBACK", label: "Selling with giveback %", type: "Selling" },
   { key: "MIN_GUARANTEE_FLAT", label: "Flat minimum guarantee", type: "Min Guarantee" },
   { key: "MIN_GUARANTEE_HOURLY", label: "Minimum guarantee per hour", type: "Min Guarantee" },
-  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Host base covers N servings, guests pay extras", type: "Hybrid" },
+  { key: "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA", label: "Host base includes N servings — guests pay for extras", type: "Hybrid" },
 ];
 
 interface F {
@@ -419,7 +431,7 @@ export default function NewEvent() {
               >
                 <option value="">Select billing model…</option>
                 {(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[]).map((t) => (
-                  <optgroup key={t} label={t}>
+                  <optgroup key={t} label={EVENT_TYPE_LABELS[t]}>
                     {modelsFor(t).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </optgroup>
                 ))}
@@ -467,7 +479,8 @@ export default function NewEvent() {
           <Card title="Event — the contract" tag="at booking">
             <Field label="Event type" req hint="Synced with the billing model above; pick a model there and this fills in.">
               <Seg
-                options={[["Package", "Package"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
+                options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
+                  .map((t) => [t, EVENT_TYPE_LABELS[t]] as [string, string])}
                 value={f.eventType}
                 onChange={(v) => {
                   // Clear the billing model if it no longer matches the chosen type.
@@ -480,9 +493,14 @@ export default function NewEvent() {
               <Field label="Attendees" req><input className="input" type="number" value={f.attendees} onChange={(e) => up({ attendees: e.target.value })} placeholder="100" /></Field>
               <Field label="Parking"><input className="input" value={f.parking} onChange={(e) => up({ parking: e.target.value })} placeholder="Covered circle drive" /></Field>
             </Row>
-            <Field label="Serve / Keep count" hint='Free-text pricing detail, e.g. "$295 covers 60 servings, each additional $4". Optional — the billing model above is the source of truth.'>
-              <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 covers 60 12oz Konas, each additional $4" />
-            </Field>
+            {/* Package and Hybrid only. On a selling event guests buy their own,
+                so there is no included count to record — showing the field there
+                just invites someone to fill in a number that means nothing. */}
+            {needServe(f.eventType) && (
+              <Field label="Serve / Keep count" hint='Free-text pricing detail, e.g. "$295 includes 60 servings, each additional $4". Optional — the billing model above is the source of truth.'>
+                <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 includes 60 12oz Konas, each additional $4" />
+              </Field>
+            )}
             <Field label="PAYMENT — pricing model" hint='Free-text billing basis, e.g. "$295 plus tax for the hour". Optional.'>
               <input className="input" value={f.paymentModel} onChange={(e) => up({ paymentModel: e.target.value })} placeholder="$295 plus tax for the hour" />
             </Field>
