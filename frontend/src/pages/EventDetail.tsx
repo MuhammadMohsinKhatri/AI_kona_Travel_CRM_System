@@ -309,17 +309,17 @@ function SubtotalBreakdown({
 
   const items: SubtotalLine[] = [];
 
-  if (model === "INVOICE_PER_SERVING" || model === "INVOICE_BASE_FEE_PLUS_SERVINGS") {
-    if (model === "INVOICE_BASE_FEE_PLUS_SERVINGS" && n(cls.BASE_AMOUNT)) {
+  if (model === "PACKAGE_PER_SERVING" || model === "PACKAGE_BASE_FEE_PLUS_SERVINGS") {
+    if (model === "PACKAGE_BASE_FEE_PLUS_SERVINGS" && n(cls.BASE_AMOUNT)) {
       items.push({ label: "Base Fee", amount: n(cls.BASE_AMOUNT) });
     }
     if (unitsTotal) items.push({ label: "Kona Ice Servings", qty: unitsTotal, rate, amount: n(calc.UNIT_REVENUE) });
-  } else if (model === "INVOICE_FIXED_PACKAGE") {
+  } else if (model === "PACKAGE_FIXED") {
     if (n(cls.BASE_AMOUNT)) items.push({ label: `Base Package (covers ${unitsIncluded || "—"} servings)`, amount: n(cls.BASE_AMOUNT) });
     if (n(calc.OVERAGE_UNITS) > 0) {
       items.push({ label: "Additional Servings (Overage)", qty: n(calc.OVERAGE_UNITS), rate, amount: n(calc.OVERAGE_REVENUE) });
     }
-  } else if (model === "INVOICE_HOURLY") {
+  } else if (model === "PACKAGE_HOURLY") {
     if (n(cls.TOTAL_EVENT_HOURS)) {
       items.push({ label: "Event Time", qty: n(cls.TOTAL_EVENT_HOURS), rate: n(cls.HOURLY_RATE), amount: n(calc.HOURLY_REVENUE) });
     }

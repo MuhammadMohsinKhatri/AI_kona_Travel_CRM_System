@@ -35,8 +35,8 @@
     "DELIVERY_FEE": 0
   },
   "expect": {
-    "EVENT_TYPE": "invoice",
-    "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+    "EVENT_TYPE": "package",
+    "BILLING_MODEL": "PACKAGE_FIXED",
     "BASE_AMOUNT": 295,
     "UNITS_INCLUDED_IN_BASE": 60,
     "UNITS_SERVED_TOTAL": 60,

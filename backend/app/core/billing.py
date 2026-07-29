@@ -5,7 +5,7 @@ event (the flat CLASSIFICATION dict), it computes the invoice amount according t
 the resolved BILLING_MODEL.
 
 Key rules preserved from the original:
-  * A stated discount IS applied, except on INVOICE_FIXED_PACKAGE where
+  * A stated discount IS applied, except on PACKAGE_FIXED where
     BASE_AMOUNT is already the post-discount quoted price.
   * MG models bill the guaranteed floor + location fee, regardless of servings.
   * Tax is 6% when taxable; a 4% CC/processing fee always applies.
@@ -24,10 +24,10 @@ CC_FEE_RATE = 0.04  # always applies to invoice/check/card payments
 # (frontend/src/pages/NewEvent.tsx). If a model cannot be picked by hand there,
 # the classifier must not invent it either.
 BILLING_MODELS = [
-    "INVOICE_PER_SERVING",
-    "INVOICE_BASE_FEE_PLUS_SERVINGS",
-    "INVOICE_FIXED_PACKAGE",
-    "INVOICE_HOURLY",
+    "PACKAGE_PER_SERVING",
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    "PACKAGE_FIXED",
+    "PACKAGE_HOURLY",
     "SELLING_OPEN",
     "SELLING_WITH_GIVEBACK",
     "MIN_GUARANTEE_FLAT",
@@ -61,22 +61,48 @@ LEGACY_BILLING_MODELS = (
 # BASIS, not a floor on top, and _mg_subtotal already returns the shortfall
 # against it. Selling is absent because the host is not billed at all.
 FLOORED_BILLING_MODELS = (
-    "INVOICE_PER_SERVING",
-    "INVOICE_BASE_FEE_PLUS_SERVINGS",
-    "INVOICE_FIXED_PACKAGE",
-    "INVOICE_HOURLY",
+    "PACKAGE_PER_SERVING",
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    "PACKAGE_FIXED",
+    "PACKAGE_HOURLY",
 )
 
 
-def canonical_billing_model(model: Any, event: dict[str, Any] | None = None) -> str:
-    """Map a retired model onto its canonical equivalent where one provably exists.
+# The four host-billed models were called INVOICE_* until they were renamed to
+# PACKAGE_*. Every event stored before that rename still carries the old name, and
+# the engine must keep pricing them — build_invoice_payload refuses to draft an
+# invoice for an unrecognised model, so an unaliased rename would silently stop
+# invoicing every historical event. Pure renames, so no figure moves.
+RENAMED_BILLING_MODELS = {
+    "INVOICE_PER_SERVING": "PACKAGE_PER_SERVING",
+    "INVOICE_BASE_FEE_PLUS_SERVINGS": "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    "INVOICE_FIXED_PACKAGE": "PACKAGE_FIXED",
+    "INVOICE_HOURLY": "PACKAGE_HOURLY",
+}
 
-    Only HYBRID_SELLING_PLUS_MIN_GUARANTEE qualifies — the arithmetic is
-    identical, so this changes the label without changing a single invoice.
-    Everything else is returned unchanged (uppercased/stripped) for the gate to
-    judge.
+# EVENT_TYPE "invoice" was likewise renamed to "package".
+RENAMED_EVENT_TYPES = {"invoice": "package"}
+
+
+def canonical_event_type(event_type: Any) -> str:
+    """Current name for an event type, translating the pre-rename "invoice"."""
+    name = str(event_type or "").strip().lower()
+    return RENAMED_EVENT_TYPES.get(name, name)
+
+
+def canonical_billing_model(model: Any, event: dict[str, Any] | None = None) -> str:
+    """Current name for a billing model.
+
+    Handles two kinds of legacy value:
+      * the INVOICE_* -> PACKAGE_* rename, a pure relabel;
+      * HYBRID_SELLING_PLUS_MIN_GUARANTEE, retired because its arithmetic was
+        identical to MIN_GUARANTEE_HOURLY / _FLAT depending on which minimum was
+        stated.
+    Neither changes a single invoice. Anything else is returned unchanged
+    (uppercased/stripped) for the gate to judge.
     """
     name = str(model or "").upper().strip()
+    name = RENAMED_BILLING_MODELS.get(name, name)
     if name == "HYBRID_SELLING_PLUS_MIN_GUARANTEE":
         per_hour = _num((event or {}).get("MINIMUM_AMOUNT_PER_HOUR"))
         return "MIN_GUARANTEE_HOURLY" if per_hour > 0 else "MIN_GUARANTEE_FLAT"
@@ -208,20 +234,20 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     guest_amount = 0.0
 
     # ── BILLING LOGIC ─────────────────────────────────────────────────────────
-    if billing_model == "INVOICE_PER_SERVING":
+    if billing_model == "PACKAGE_PER_SERVING":
         unit_revenue = units_total * rate_per_serving
         subtotal = unit_revenue + location_fee
 
-    elif billing_model == "INVOICE_BASE_FEE_PLUS_SERVINGS":
+    elif billing_model == "PACKAGE_BASE_FEE_PLUS_SERVINGS":
         unit_revenue = units_total * rate_per_serving
         subtotal = base_amount + unit_revenue + location_fee
 
-    elif billing_model == "INVOICE_FIXED_PACKAGE":
+    elif billing_model == "PACKAGE_FIXED":
         overage_units = max(0.0, units_total - units_included)
         overage_revenue = overage_units * rate_per_serving  # 0 if rate unknown
         subtotal = base_amount + overage_revenue + location_fee
 
-    elif billing_model == "INVOICE_HOURLY":
+    elif billing_model == "PACKAGE_HOURLY":
         hourly_revenue = total_hours * hourly_rate  # hoisted var, set only here
         # When the hourly rate includes a serving allowance ("$295/hr, each hour
         # includes up to 60 Konas, $4 each additional"), only servings ABOVE
@@ -269,7 +295,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
         subtotal = base_amount + location_fee
 
     # ── DISCOUNT ──────────────────────────────────────────────────────────────
-    # Applied for every model EXCEPT INVOICE_FIXED_PACKAGE, whose BASE_AMOUNT is
+    # Applied for every model EXCEPT PACKAGE_FIXED, whose BASE_AMOUNT is
     # already the post-discount quoted price ("$1,200 after the 10% off").
     #
     # The prompt has always instructed the classifier to store a PRE-discount rate
@@ -282,7 +308,7 @@ def calculate_invoice(event: dict[str, Any], waive_cc_fee: bool = False) -> dict
     # minimum the client agreed to, and before the add-on so a separately stated
     # extra is charged as stated rather than silently discounted too.
     discount_total = 0.0
-    if billing_model != "INVOICE_FIXED_PACKAGE" and subtotal > 0:
+    if billing_model != "PACKAGE_FIXED" and subtotal > 0:
         pct = min(max(discount_percent, 0.0), 100.0)
         discount_total = subtotal * (pct / 100.0) + max(discount_amount, 0.0)
         discount_total = _r2(min(discount_total, subtotal))  # never below zero

@@ -115,7 +115,7 @@ def recompute_cash_chain(entry: FinancialEntry) -> dict[str, float]:
     entry.cash_tax = _r2(cash - cash / (1 + rate)) if (taxable and rate and cash) else 0.0
     entry.cash_pre_tax = _r2(cash - entry.cash_tax) if cash else 0.0
 
-    if str(entry.event_type or "").strip().lower() != "invoice":
+    if str(entry.event_type or "").strip().lower() not in ("package", "invoice"):
         entry.event_sales_collected = _r2(net_card + entry.cash_pre_tax)
         entry.sales_dollars = _r2(net_card + card_tax + tips + cash)
         entry.net_event_sales = _r2(entry.event_sales_collected - giveback)

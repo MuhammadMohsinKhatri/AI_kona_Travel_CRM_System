@@ -77,29 +77,29 @@ _PRECISE_FIELD_MESSAGES: dict[str, dict[str, str]] = {
 }
 
 _SERVING_REQUIRED_MODELS = [
-    "INVOICE_PER_SERVING",
-    "INVOICE_BASE_FEE_PLUS_SERVINGS",
-    "INVOICE_FIXED_PACKAGE",
-    "INVOICE_HOURLY",
+    "PACKAGE_PER_SERVING",
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    "PACKAGE_FIXED",
+    "PACKAGE_HOURLY",
     "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
     "HYBRID_HOST_SUBSIDY_PLUS_GUEST_PAYMENT",
     "HYBRID_SELLING_PLUS_MIN_GUARANTEE",
 ]
 
 _SERVING_COUNT_MESSAGES = {
-    "INVOICE_PER_SERVING": {
+    "PACKAGE_PER_SERVING": {
         "issue": "Serving count is 0 — invoice cannot be calculated (billed per serving)",
         "action": "Driver or admin must confirm actual serving count",
     },
-    "INVOICE_FIXED_PACKAGE": {
+    "PACKAGE_FIXED": {
         "issue": "Serving count is 0 — cannot check if extra servings were charged",
         "action": "Driver must confirm actual servings vs. included in package",
     },
-    "INVOICE_BASE_FEE_PLUS_SERVINGS": {
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS": {
         "issue": "Serving count is 0 — serving portion of invoice cannot be calculated",
         "action": "Driver must confirm actual serving count to complete invoice",
     },
-    "INVOICE_HOURLY": {
+    "PACKAGE_HOURLY": {
         "issue": "Serving count is 0 — serving add-on cannot be calculated",
         "action": "Driver must confirm actual serving count if servings were charged separately",
     },

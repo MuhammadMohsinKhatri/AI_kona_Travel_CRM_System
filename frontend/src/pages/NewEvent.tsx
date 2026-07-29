@@ -8,15 +8,15 @@ import { api, FormOptions, QuickCreateResult } from "../api/client";
  * dropdown + structured number fields — no free-text pricing sentences — so
  * the generated notes and the invoice estimate are exact. */
 
-type EventType = "Invoice" | "Selling" | "Min Guarantee" | "Hybrid";
+type EventType = "Package" | "Selling" | "Min Guarantee" | "Hybrid";
 type PayMethod = "Check" | "Credit Card" | "Cash";
 
 /** Predefined billing models, filtered by event type. */
 const BILLING_MODELS: { key: string; label: string; type: EventType }[] = [
-  { key: "INVOICE_PER_SERVING", label: "Per serving — $X per serving", type: "Invoice" },
-  { key: "INVOICE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X per serving", type: "Invoice" },
-  { key: "INVOICE_FIXED_PACKAGE", label: "Fixed package — floor covers N servings, overage extra", type: "Invoice" },
-  { key: "INVOICE_HOURLY", label: "Hourly — $X per hour", type: "Invoice" },
+  { key: "PACKAGE_PER_SERVING", label: "Per serving — $X per serving", type: "Package" },
+  { key: "PACKAGE_BASE_FEE_PLUS_SERVINGS", label: "Base fee + $X per serving", type: "Package" },
+  { key: "PACKAGE_FIXED", label: "Fixed package — floor covers N servings, overage extra", type: "Package" },
+  { key: "PACKAGE_HOURLY", label: "Hourly — $X per hour", type: "Package" },
   { key: "SELLING_OPEN", label: "Open selling — guests pay individually", type: "Selling" },
   { key: "SELLING_WITH_GIVEBACK", label: "Selling with giveback %", type: "Selling" },
   { key: "MIN_GUARANTEE_FLAT", label: "Flat minimum guarantee", type: "Min Guarantee" },
@@ -59,15 +59,15 @@ const initial: F = {
   actualCount: "", actualTimes: "", squareDevice: "",
 };
 
-const needServe = (t: string) => t === "Invoice" || t === "Hybrid";
+const needServe = (t: string) => t === "Package" || t === "Hybrid";
 const modelsFor = (t: string) => BILLING_MODELS.filter((m) => m.type === t);
 
 /** Which structured pricing fields each billing model needs. */
 const FIELD_MAP: Record<string, string[]> = {
-  INVOICE_PER_SERVING: ["ratePerServing"],
-  INVOICE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
-  INVOICE_FIXED_PACKAGE: ["baseAmount", "unitsIncluded", "ratePerServing"],
-  INVOICE_HOURLY: ["hourlyRate"],
+  PACKAGE_PER_SERVING: ["ratePerServing"],
+  PACKAGE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
+  PACKAGE_FIXED: ["baseAmount", "unitsIncluded", "ratePerServing"],
+  PACKAGE_HOURLY: ["hourlyRate"],
   SELLING_OPEN: [],
   SELLING_WITH_GIVEBACK: ["giveback"],
   MIN_GUARANTEE_FLAT: ["minFlat"],
@@ -96,13 +96,13 @@ function hoursBetween(f: F): number {
 function buildAdminNotes(f: F): string {
   const lines: string[] = [];
   switch (f.billing) {
-    case "INVOICE_PER_SERVING":
+    case "PACKAGE_PER_SERVING":
       lines.push(`$${f.ratePerServing || "0"} per serving. Send invoice.`); break;
-    case "INVOICE_BASE_FEE_PLUS_SERVINGS":
+    case "PACKAGE_BASE_FEE_PLUS_SERVINGS":
       lines.push(`Setup fee $${f.baseAmount || "0"} plus $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
-    case "INVOICE_FIXED_PACKAGE":
+    case "PACKAGE_FIXED":
       lines.push(`$${f.baseAmount || "0"} covers up to ${f.unitsIncluded || "0"} servings, each additional $${f.ratePerServing || "0"} a piece. Send invoice.`); break;
-    case "INVOICE_HOURLY":
+    case "PACKAGE_HOURLY":
       lines.push(`$${f.hourlyRate || "0"} per hour. Send invoice.`); break;
     case "SELLING_OPEN":
       lines.push("Open selling event. Guests pay individually."); break;
@@ -165,19 +165,19 @@ function estimate(f: F) {
   let subtotal = 0;
   let detail = "";
   switch (f.billing) {
-    case "INVOICE_PER_SERVING":
+    case "PACKAGE_PER_SERVING":
       subtotal = count * n(f.ratePerServing);
       detail = `${count} × $${n(f.ratePerServing)}`; break;
-    case "INVOICE_BASE_FEE_PLUS_SERVINGS":
+    case "PACKAGE_BASE_FEE_PLUS_SERVINGS":
       subtotal = n(f.baseAmount) + count * n(f.ratePerServing);
       detail = `$${n(f.baseAmount)} + ${count} × $${n(f.ratePerServing)}`; break;
-    case "INVOICE_FIXED_PACKAGE": {
+    case "PACKAGE_FIXED": {
       const over = Math.max(0, count - n(f.unitsIncluded));
       subtotal = n(f.baseAmount) + over * n(f.ratePerServing);
       detail = over > 0 ? `$${n(f.baseAmount)} + ${over} over × $${n(f.ratePerServing)}` : `$${n(f.baseAmount)} floor`;
       break;
     }
-    case "INVOICE_HOURLY":
+    case "PACKAGE_HOURLY":
       subtotal = hours * n(f.hourlyRate);
       detail = `${hours}h × $${n(f.hourlyRate)}`; break;
     case "MIN_GUARANTEE_FLAT":
@@ -418,7 +418,7 @@ export default function NewEvent() {
                 }}
               >
                 <option value="">Select billing model…</option>
-                {(["Invoice", "Selling", "Min Guarantee", "Hybrid"] as EventType[]).map((t) => (
+                {(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[]).map((t) => (
                   <optgroup key={t} label={t}>
                     {modelsFor(t).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </optgroup>
@@ -467,7 +467,7 @@ export default function NewEvent() {
           <Card title="Event — the contract" tag="at booking">
             <Field label="Event type" req hint="Synced with the billing model above; pick a model there and this fills in.">
               <Seg
-                options={[["Invoice", "Invoice"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
+                options={[["Package", "Package"], ["Selling", "Selling"], ["Min Guarantee", "Min Guarantee"], ["Hybrid", "Hybrid"]]}
                 value={f.eventType}
                 onChange={(v) => {
                   // Clear the billing model if it no longer matches the chosen type.

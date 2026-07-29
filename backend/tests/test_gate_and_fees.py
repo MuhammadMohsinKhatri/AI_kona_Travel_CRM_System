@@ -39,7 +39,7 @@ def test_gate_rejects_cancelled():
 
 
 BASE = {
-    "BILLING_MODEL": "INVOICE_PER_SERVING",
+    "BILLING_MODEL": "PACKAGE_PER_SERVING",
     "UNITS_SERVED_TOTAL": 100, "RATE_PER_SERVING": 3, "TAXABLE": "NO",
 }
 

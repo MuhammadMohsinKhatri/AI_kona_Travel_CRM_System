@@ -266,7 +266,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 # routed invoice events around the Square search entirely).
                 # Selling, hybrid, and minimum-guarantee events still reconcile.
                 event_type = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
-                if event_type == "invoice":
+                if event_type in ("package", "invoice"):
                     item["square"] = {
                         "brand": item["cleaned"].get("BRAND", ""),
                         "device_id": equip.get("device_id"),
@@ -485,7 +485,7 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                 # CRM values. The KonaOS client PUTs read-modify-write, so
                 # everything else on the event is preserved.
                 event_type = str(item["classification"].get("EVENT_TYPE", "")).strip().lower()
-                if event_type != "invoice":
+                if event_type not in ("package", "invoice"):
                     phase_of_failure = "sync"  # past invoice creation now
                     sq_bd = (item.get("square") or {}).get("breakdown") or {}
                     calc = item["calc"]
@@ -972,9 +972,12 @@ def _declared_event_type(cleaned: dict[str, Any] | None) -> str:
     from app.core.invariants import _form_field, _notes_text
 
     declared = _form_field(_notes_text(cleaned), r"EVENT\s*TYPE").strip().lower()
-    for candidate in ("minimum guarantee", "invoice", "selling", "hybrid"):
+    # The booking form still says "Invoice"; our EVENT_TYPE value for it is
+    # "package". Longest first so "minimum guarantee" is not shadowed.
+    for candidate in ("minimum guarantee", "package", "invoice", "selling",
+                      "hybrid"):
         if declared.startswith(candidate):
-            return candidate
+            return billing.canonical_event_type(candidate)
     return ""
 
 
@@ -993,6 +996,9 @@ def _normalize_classification(
     leaving the old label on the row. Only provably-identical mappings are
     applied (see billing.canonical_billing_model), so no invoice moves.
     """
+    # "invoice" is the pre-rename name for "package". Translated first so every
+    # rule below, and everything downstream, sees one vocabulary.
+    cls["EVENT_TYPE"] = billing.canonical_event_type(cls.get("EVENT_TYPE"))
     event_type = str(cls.get("EVENT_TYPE", "")).strip().lower()
     method = str(cls.get("PAYMENT_METHOD", "")).strip().upper()
     if event_type == "selling" and method in ("", "CHECK"):
@@ -1140,7 +1146,9 @@ def _upsert_financial_entry(db: Session, run: PipelineRun, item: dict[str, Any])
         + entry.ai_completion_tokens / 1e6 * _cfg.openai_output_cost_per_mtok,
         6,
     )
-    entry.invoice_drafted = invoice_total > 0 and str(cls.get("EVENT_TYPE", "")).lower() in ("invoice", "hybrid")
+    entry.invoice_drafted = invoice_total > 0 and str(
+        cls.get("EVENT_TYPE", "")
+    ).lower() in ("package", "invoice", "hybrid")
     entry.invoice_sent = entry.invoice_sent or False  # manual flag, preserved
     # classifier / calc
     entry.total_event_hours = total_hours

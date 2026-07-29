@@ -207,7 +207,7 @@ class MockClassifier(Classifier):
     """Deterministic, rule-lite classifier good enough to drive the pipeline.
 
     Recognizes the sample events' note patterns. For unknown notes it falls back
-    to a safe INVOICE_PER_SERVING guess and emits the appropriate MISSING_*
+    to a safe PACKAGE_PER_SERVING guess and emits the appropriate MISSING_*
     alerts, mirroring how the real LLM would flag gaps.
     """
 
@@ -275,8 +275,8 @@ class MockClassifier(Classifier):
             c.PAID_STATUS = True
         elif "or more" in admin and "minimum" in admin:
             # "charge $X per Kona if N or more, otherwise $Y minimum" => fixed package
-            c.EVENT_TYPE = "invoice"
-            c.BILLING_MODEL = "INVOICE_FIXED_PACKAGE"
+            c.EVENT_TYPE = "package"
+            c.BILLING_MODEL = "PACKAGE_FIXED"
             base = re.search(r"\$(\d+)\s*minimum", admin)
             incl = re.search(r"(\d+)\s+konas?\s+or more", admin)
             rate = re.search(r"\$(\d+(?:\.\d+)?)\s*per", admin)
@@ -286,16 +286,16 @@ class MockClassifier(Classifier):
                 c.RATE_PER_SERVING = float(rate.group(1))
             c.PAYMENT_METHOD = "CHECK"
         elif "setup fee" in admin or "base fee" in admin:
-            c.EVENT_TYPE = "invoice"
-            c.BILLING_MODEL = "INVOICE_BASE_FEE_PLUS_SERVINGS"
+            c.EVENT_TYPE = "package"
+            c.BILLING_MODEL = "PACKAGE_BASE_FEE_PLUS_SERVINGS"
             base = re.search(r"(?:setup|base) fee \$(\d+)", admin)
             rate = re.search(r"\$(\d+(?:\.\d+)?)\s*per serving", admin)
             c.BASE_AMOUNT = float(base.group(1)) if base else 0.0
             c.RATE_PER_SERVING = float(rate.group(1)) if rate else 0.0
             c.PAYMENT_METHOD = "CHECK"
         elif "per serving" in admin or "per kona" in admin:
-            c.EVENT_TYPE = "invoice"
-            c.BILLING_MODEL = "INVOICE_PER_SERVING"
+            c.EVENT_TYPE = "package"
+            c.BILLING_MODEL = "PACKAGE_PER_SERVING"
             rate = re.search(r"\$(\d+(?:\.\d+)?)\s*per", admin)
             c.RATE_PER_SERVING = float(rate.group(1)) if rate else 0.0
             c.PAYMENT_METHOD = "CHECK"

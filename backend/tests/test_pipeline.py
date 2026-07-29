@@ -214,7 +214,7 @@ def test_full_pipeline_runs_end_to_end():
 
         # The base-fee + servings sample should produce an invoice.
         lincoln = db.query(Event).filter(Event.crm_event_id == "EVT-1001").one()
-        assert lincoln.billing_model == "INVOICE_BASE_FEE_PLUS_SERVINGS"
+        assert lincoln.billing_model == "PACKAGE_BASE_FEE_PLUS_SERVINGS"
         assert lincoln.final_invoice_amount > 0
         assert db.query(Invoice).filter(Invoice.event_id == lincoln.id).count() == 1
 

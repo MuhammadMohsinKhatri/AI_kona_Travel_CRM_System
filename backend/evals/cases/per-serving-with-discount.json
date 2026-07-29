@@ -38,8 +38,8 @@
     "DELIVERY_FEE": 0
   },
   "expect": {
-    "EVENT_TYPE": "invoice",
-    "BILLING_MODEL": "INVOICE_PER_SERVING",
+    "EVENT_TYPE": "package",
+    "BILLING_MODEL": "PACKAGE_PER_SERVING",
     "RATE_PER_SERVING": 3,
     "UNITS_SERVED_TOTAL": 86,
     "DISCOUNT_PERCENT": 20,

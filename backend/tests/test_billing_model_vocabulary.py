@@ -23,7 +23,7 @@ def test_the_list_matches_the_new_event_dropdown():
     offered 9, the backend accepted 11, and the classifier used the extras. Read
     the dropdown and compare, so they cannot silently diverge again."""
     source = NEW_EVENT_TSX.read_text(encoding="utf-8")
-    # The PREDEFINED list entries look like: { key: "INVOICE_HOURLY", label: ... }
+    # The PREDEFINED list entries look like: { key: "PACKAGE_HOURLY", label: ... }
     ui_keys = set(re.findall(r'\{\s*key:\s*"([A-Z_]+)"', source))
     assert ui_keys, "could not parse any model keys out of NewEvent.tsx"
     assert ui_keys == set(BILLING_MODELS), (
@@ -111,16 +111,18 @@ def test_the_declared_event_type_in_the_notes_wins():
          "MINIMUM_AMOUNT_PER_HOUR": 250, "TOTAL_EVENT_HOURS": 1},
         cleaned,
     )
-    assert cls["EVENT_TYPE"] == "invoice"
+    assert cls["EVENT_TYPE"] == "package"
     # The model's own answer is kept for the audit trail rather than discarded.
     assert cls["EVENT_TYPE_CLASSIFIED"] == "minimum guarantee"
 
 
 def test_a_declared_type_that_already_matches_is_left_untouched():
+    """The form says "Invoice" and the classifier answered "invoice" — both mean
+    "package", so this must read as agreement, not as an override."""
     cleaned = {"EVENT_NOTES_HTML": "EVENT TYPE Invoice TAXABLE Yes"}
     cls = _normalize_classification(
-        {"EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_HOURLY"}, cleaned)
-    assert cls["EVENT_TYPE"] == "invoice"
+        {"EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_HOURLY"}, cleaned)
+    assert cls["EVENT_TYPE"] == "package"
     assert "EVENT_TYPE_CLASSIFIED" not in cls
 
 
@@ -136,11 +138,11 @@ def test_no_declared_type_leaves_the_classifier_in_charge():
 
 def test_normalization_leaves_an_approved_model_alone():
     cls = _normalize_classification({
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_HOURLY",
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_HOURLY",
         "HOURLY_RATE": 295, "TOTAL_EVENT_HOURS": 1,
     })
-    assert cls["BILLING_MODEL"] == "INVOICE_HOURLY"
-    assert cls["EVENT_TYPE"] == "invoice"
+    assert cls["BILLING_MODEL"] == "PACKAGE_HOURLY"
+    assert cls["EVENT_TYPE"] == "package"
 
 
 # ── the gate refuses anything outside the nine ───────────────────────────────

@@ -4,7 +4,7 @@ from app.core.billing import calculate_invoice
 
 def test_invoice_per_serving_with_tax_and_ccfee():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING",
+        "BILLING_MODEL": "PACKAGE_PER_SERVING",
         "UNITS_SERVED_TOTAL": 100, "RATE_PER_SERVING": 3,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })
@@ -17,7 +17,7 @@ def test_invoice_per_serving_with_tax_and_ccfee():
 
 def test_base_fee_plus_servings():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS",
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS",
         "BASE_AMOUNT": 50, "UNITS_SERVED_TOTAL": 100, "RATE_PER_SERVING": 3,
         "TAXABLE": "NO",
     })
@@ -29,7 +29,7 @@ def test_base_fee_plus_servings():
 
 def test_fixed_package_overage_only_when_exceeded():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 125, "UNITS_INCLUDED_IN_BASE": 40,
         "UNITS_SERVED_TOTAL": 55, "RATE_PER_SERVING": 3, "TAXABLE": "YES",
     })
@@ -45,7 +45,7 @@ def test_fixed_package_does_not_shrink_when_under_served():
     # owes the full $1,200, never 536 × $2 = $1,072. Under-serving the
     # allotment is not a discount, and it is not negative overage either.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
         "TAXABLE": "YES",
@@ -69,7 +69,7 @@ def test_a_minimum_floors_the_bill_it_does_not_add_to_it():
     Package (covers 62.5 servings)".
     """
     floored = {
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 4,
         "MINIMUM_FLAT_AMOUNT": 250, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     }
     calc = calculate_invoice({**floored, "UNITS_SERVED_TOTAL": 22})
@@ -109,7 +109,7 @@ def test_the_minimum_floor_applies_to_a_base_fee_plus_servings_event():
     """Closes the gap flagged on the 2026-07-26 event: the engine had no floor
     outside the MG models, so a stated minimum was recorded and then ignored."""
     event = {
-        "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 99,
         "RATE_PER_SERVING": 4, "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
     }
     # 23 served: 99 + 92 = 191 already clears the floor, so it must not interfere.
@@ -134,7 +134,7 @@ def test_a_stated_discount_is_actually_applied():
     discount was recorded in the ledger and then billed at full price.
     """
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 3,
         "UNITS_SERVED_TOTAL": 86, "DISCOUNT_PERCENT": 20,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })
@@ -147,7 +147,7 @@ def test_a_stated_discount_is_actually_applied():
 
 def test_a_flat_dollar_discount_is_applied():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 3,
         "UNITS_SERVED_TOTAL": 100, "DISCOUNT_AMOUNT": 50, "TAXABLE": "YES",
     })
     assert calc["SUBTOTAL"] == 250.0
@@ -158,7 +158,7 @@ def test_a_fixed_package_discount_is_not_applied_twice():
     """There BASE_AMOUNT is the post-discount quoted price, so re-applying
     DISCOUNT_PERCENT would take it off a second time."""
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 1200,
+        "BILLING_MODEL": "PACKAGE_FIXED", "BASE_AMOUNT": 1200,
         "UNITS_INCLUDED_IN_BASE": 600, "UNITS_SERVED_TOTAL": 536,
         "DISCOUNT_PERCENT": 10, "TAXABLE": "YES",
     })
@@ -170,7 +170,7 @@ def test_a_discount_cannot_take_a_bill_below_a_stated_minimum():
     """The discount is taken first, then the floor still holds — a minimum the
     client agreed to is not undercut by a discount on the pricing."""
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 4,
         "UNITS_SERVED_TOTAL": 80, "MINIMUM_FLAT_AMOUNT": 250,
         "DISCOUNT_PERCENT": 50, "TAXABLE": "YES",
     })
@@ -179,7 +179,7 @@ def test_a_discount_cannot_take_a_bill_below_a_stated_minimum():
 
 def test_a_discount_can_never_produce_a_negative_bill():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 3,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 3,
         "UNITS_SERVED_TOTAL": 10, "DISCOUNT_AMOUNT": 500,
         "DISCOUNT_PERCENT": 200, "TAXABLE": "YES",
     })
@@ -190,7 +190,7 @@ def test_a_discount_can_never_produce_a_negative_bill():
 def test_an_add_on_sits_on_top_of_the_minimum():
     """A stated extra must not be swallowed by the floor."""
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 4,
         "UNITS_SERVED_TOTAL": 10, "MINIMUM_FLAT_AMOUNT": 250,
         "ADDON_AMOUNT": 25, "ADDON_LABEL": "Ice cream", "TAXABLE": "YES",
     })
@@ -199,7 +199,7 @@ def test_an_add_on_sits_on_top_of_the_minimum():
     # The two wrong readings this event has actually produced, kept as
     # counter-examples. Both stack servings on top of a figure that was a floor.
     as_base_fee = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 250,
+        "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT": 250,
         "RATE_PER_SERVING": 3, "UNITS_SERVED_TOTAL": 22,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })
@@ -208,7 +208,7 @@ def test_an_add_on_sits_on_top_of_the_minimum():
 
     # "the minimum for 1 hour" read as $250/hour, plus 22 x $4 of servings.
     as_hourly = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_HOURLY", "HOURLY_RATE": 250,
+        "BILLING_MODEL": "PACKAGE_HOURLY", "HOURLY_RATE": 250,
         "TOTAL_EVENT_HOURS": 1, "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 22,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })
@@ -225,7 +225,7 @@ def test_storing_the_overage_rate_is_inert_until_there_is_overage():
     the rate is financially inert at 60/60 and correct at 70/60.
     """
     package = {
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE", "BASE_AMOUNT": 295,
+        "BILLING_MODEL": "PACKAGE_FIXED", "BASE_AMOUNT": 295,
         "UNITS_INCLUDED_IN_BASE": 60, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     }
     # Exactly the included count: the rate must not change the bill either way.
@@ -256,7 +256,7 @@ def test_recorded_overage_rate_does_not_trip_the_dead_terms_gate():
         ),
     }
     classification = {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 295, "UNITS_INCLUDED_IN_BASE": 60,
         "UNITS_SERVED_TOTAL": 60, "RATE_PER_SERVING": 4, "TAXABLE": "YES",
         "PAYMENT_METHOD": "CHECK",
@@ -272,7 +272,7 @@ def test_fixed_package_all_in_bills_the_package_price_flat():
     # PRICE_IS_ALL_IN suppresses both the 6% tax and the 4% fee, so the host
     # is billed the package price exactly — $1,200, not $1,272 or $1,179.20.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
         "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
@@ -289,7 +289,7 @@ def test_hourly_bills_overage_above_included_allowance():
     # $295/hr, 1 hour, includes 60 Konas, $4 each additional; 100 served.
     # 1×295 + (100−60)×4 = 295 + 160 = 455.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_HOURLY",
+        "BILLING_MODEL": "PACKAGE_HOURLY",
         "TOTAL_EVENT_HOURS": 1, "HOURLY_RATE": 295,
         "UNITS_INCLUDED_IN_BASE": 60, "UNITS_SERVED_TOTAL": 100,
         "RATE_PER_SERVING": 4, "TAXABLE": "YES",
@@ -303,7 +303,7 @@ def test_hourly_no_allowance_bills_every_serving():
     # No included allowance (units_included = 0) → every served unit billed,
     # preserving the prior behavior: 2×150 + 50×4 = 300 + 200 = 500.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_HOURLY",
+        "BILLING_MODEL": "PACKAGE_HOURLY",
         "TOTAL_EVENT_HOURS": 2, "HOURLY_RATE": 150,
         "UNITS_SERVED_TOTAL": 50, "RATE_PER_SERVING": 4, "TAXABLE": "NO",
     })
@@ -321,7 +321,7 @@ def test_mg_flat_bills_floor_regardless_of_servings():
 
 def test_ai_extracted_invoice_overrides_and_records_variance():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING",
+        "BILLING_MODEL": "PACKAGE_PER_SERVING",
         "UNITS_SERVED_TOTAL": 100, "RATE_PER_SERVING": 3,
         "CHECK_INVOICE_AMOUNT": 400, "TAXABLE": "YES",
     })
@@ -344,7 +344,7 @@ def test_selling_with_giveback_deducts_share():
 def test_addon_added_as_taxable_amount():
     # Fixed package $442.50 covers 90; plus $25 ice cream add-on.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 442.50, "UNITS_INCLUDED_IN_BASE": 90,
         "UNITS_SERVED_TOTAL": 90, "ADDON_AMOUNT": 25, "ADDON_LABEL": "Ice cream",
         "TAXABLE": "NO",
@@ -356,7 +356,7 @@ def test_addon_added_as_taxable_amount():
 def test_price_all_in_suppresses_tax_and_fee():
     # $310 quoted all-in — no 6% tax, no 4% fee layered on top.
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 250, "UNITS_INCLUDED_IN_BASE": 60,
         "UNITS_SERVED_TOTAL": 75, "RATE_PER_SERVING": 4,
         "TAXABLE": "YES", "PRICE_IS_ALL_IN": "TRUE",
@@ -369,7 +369,7 @@ def test_price_all_in_suppresses_tax_and_fee():
 
 def test_balance_due_subtracts_deposit():
     calc = calculate_invoice({
-        "BILLING_MODEL": "INVOICE_PER_SERVING",
+        "BILLING_MODEL": "PACKAGE_PER_SERVING",
         "UNITS_SERVED_TOTAL": 100, "RATE_PER_SERVING": 3,
         "DEPOSIT_AMOUNT": 100, "TAXABLE": "YES",
     })

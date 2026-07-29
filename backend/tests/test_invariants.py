@@ -63,7 +63,7 @@ def _issues(violations):
 
 def test_correct_fixed_package_all_in_passes():
     v = _check(FIXED_PACKAGE_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0,
         "PRICE_IS_ALL_IN": "TRUE", "TAXABLE": "YES",
@@ -73,7 +73,7 @@ def test_correct_fixed_package_all_in_passes():
 
 def test_correct_base_plus_servings_passes():
     v = _check(BASE_PLUS_SERVINGS_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS",
         "BASE_AMOUNT": 99, "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 23,
         "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
         "PAYMENT_METHOD": "CREDIT_CARD",
@@ -86,7 +86,7 @@ def test_a_stated_per_unit_price_is_accounted_for_by_multiplication():
     as 2 x 600 = the $1,200 base. Without the product check this would hold every
     package event that shows its per-cup arithmetic."""
     v = _check(FIXED_PACKAGE_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 1200, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "PRICE_IS_ALL_IN": "TRUE", "TAXABLE": "YES",
     })
@@ -98,7 +98,7 @@ def test_a_stated_per_unit_price_is_accounted_for_by_multiplication():
 def test_all_in_quote_with_tax_added_is_held():
     # What actually shipped: $1,072 subtotal + 6% tax + 4% fee = $1,179.20.
     v = _check(FIXED_PACKAGE_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_FIXED_PACKAGE",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_FIXED",
         "BASE_AMOUNT": 1072, "UNITS_INCLUDED_IN_BASE": 600,
         "UNITS_SERVED_TOTAL": 536, "RATE_PER_SERVING": 0, "TAXABLE": "YES",
     })
@@ -132,7 +132,7 @@ def test_guest_paid_extras_billed_to_host_is_held():
     per-serving rate on top would collect that money twice. Subtotal is right
     today only because served == included, so nothing but this check catches it."""
     classification = {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_HOURLY",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_HOURLY",
         "HOURLY_RATE": 295, "TOTAL_EVENT_HOURS": 1,
         "UNITS_INCLUDED_IN_BASE": 60, "UNITS_SERVED_TOTAL": 60,
         "RATE_PER_SERVING": 4, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
@@ -144,7 +144,7 @@ def test_guest_paid_extras_billed_to_host_is_held():
 
 def test_taxable_disagreement_is_held():
     v = _check(BASE_PLUS_SERVINGS_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_BASE_FEE_PLUS_SERVINGS",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS",
         "BASE_AMOUNT": 99, "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 23,
         "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "NO",
     })
@@ -187,7 +187,7 @@ def test_the_correct_invoice_reading_of_that_event_passes():
     """The same notes read correctly: per-serving with the minimum as a floor.
     Nothing fabricated, and the gate has nothing to say."""
     v = _check(KIDDIE_ACADEMY_NOTES, {
-        "EVENT_TYPE": "invoice", "BILLING_MODEL": "INVOICE_PER_SERVING",
+        "EVENT_TYPE": "invoice", "BILLING_MODEL": "PACKAGE_PER_SERVING",
         "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 22,
         "MINIMUM_FLAT_AMOUNT": 250, "TAXABLE": "YES", "PAYMENT_METHOD": "CHECK",
     })

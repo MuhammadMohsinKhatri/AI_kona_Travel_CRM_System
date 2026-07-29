@@ -50,13 +50,13 @@ def _model(name: str, *setters):
 
 _ADMIN_SENTENCES: list[tuple[re.Pattern, Any]] = [
     (re.compile(rf"^{_AMT} per serving\.?$", re.I),
-     _model("INVOICE_PER_SERVING", "RATE_PER_SERVING")),
+     _model("PACKAGE_PER_SERVING", "RATE_PER_SERVING")),
     (re.compile(rf"^Setup fee {_AMT} plus {_AMT} per serving\.?$", re.I),
-     _model("INVOICE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT", "RATE_PER_SERVING")),
+     _model("PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT", "RATE_PER_SERVING")),
     (re.compile(rf"^{_AMT} covers up to ([\d,]+) servings, each additional {_AMT} a piece\.?$", re.I),
-     _model("INVOICE_FIXED_PACKAGE", "BASE_AMOUNT", "UNITS_INCLUDED_IN_BASE", "RATE_PER_SERVING")),
+     _model("PACKAGE_FIXED", "BASE_AMOUNT", "UNITS_INCLUDED_IN_BASE", "RATE_PER_SERVING")),
     (re.compile(rf"^{_AMT} per hour\.?$", re.I),
-     _model("INVOICE_HOURLY", "HOURLY_RATE")),
+     _model("PACKAGE_HOURLY", "HOURLY_RATE")),
     (re.compile(r"^Send invoice\.?$", re.I), lambda m, o: None),
     (re.compile(r"^Open selling event\.?$", re.I), _model("SELLING_OPEN")),
     (re.compile(r"^Guests pay individually\.?$", re.I), lambda m, o: None),
@@ -88,10 +88,10 @@ _ADMIN_SENTENCES: list[tuple[re.Pattern, Any]] = [
 ]
 
 _MODEL_TO_TYPE = {
-    "INVOICE_PER_SERVING": "invoice",
-    "INVOICE_BASE_FEE_PLUS_SERVINGS": "invoice",
-    "INVOICE_FIXED_PACKAGE": "invoice",
-    "INVOICE_HOURLY": "invoice",
+    "PACKAGE_PER_SERVING": "package",
+    "PACKAGE_BASE_FEE_PLUS_SERVINGS": "package",
+    "PACKAGE_FIXED": "package",
+    "PACKAGE_HOURLY": "package",
     "SELLING_OPEN": "selling",
     "SELLING_WITH_GIVEBACK": "selling",
     "MIN_GUARANTEE_FLAT": "minimum guarantee",
@@ -99,9 +99,13 @@ _MODEL_TO_TYPE = {
     "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA": "hybrid",
 }
 
-# Form label (EVENT TYPE: ...) → normalized event type.
+# Form label (EVENT TYPE: ...) → normalized event type. The booking form still
+# says "Invoice"; our value for it is "package". Both spellings map to "package"
+# so the cross-check below keeps matching — if they diverge, every form-generated
+# host-billed event silently falls through to the LLM.
 _LABEL_TO_TYPE = {
-    "invoice": "invoice",
+    "invoice": "package",
+    "package": "package",
     "selling": "selling",
     "min guarantee": "minimum guarantee",
     "minimum guarantee": "minimum guarantee",
@@ -209,7 +213,11 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
 
     taxable = out.get("TAXABLE", "YES")
     if not payment_method:
-        payment_method = "CHECK" if event_type in ("invoice", "minimum guarantee", "hybrid") else "CREDIT_CARD"
+        payment_method = (
+            "CHECK"
+            if event_type in ("package", "minimum guarantee", "hybrid")
+            else "CREDIT_CARD"
+        )
     if cash_amount > 0:
         payment_method = "CASH"
 

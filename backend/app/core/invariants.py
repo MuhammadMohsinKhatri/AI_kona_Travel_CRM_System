@@ -79,8 +79,8 @@ _GUEST_PAYS_PATTERNS = (
 )
 
 _HOST_BILLED_MODELS = (
-    "INVOICE_PER_SERVING", "INVOICE_BASE_FEE_PLUS_SERVINGS",
-    "INVOICE_FIXED_PACKAGE", "INVOICE_HOURLY",
+    "PACKAGE_PER_SERVING", "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+    "PACKAGE_FIXED", "PACKAGE_HOURLY",
 )
 
 _MG_MODELS = (
@@ -207,7 +207,8 @@ def check_invariants(
     # draft invoice.
     declared = _form_field(text, r"EVENT\s*TYPE").lower()
     declared_type = next(
-        (t for t in ("invoice", "selling", "hybrid", "minimum guarantee")
+        (t for t in ("package", "invoice", "selling", "hybrid",
+                     "minimum guarantee")
          if declared.startswith(t)),
         "",
     )

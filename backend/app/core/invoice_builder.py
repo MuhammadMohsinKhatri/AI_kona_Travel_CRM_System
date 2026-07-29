@@ -95,9 +95,13 @@ def build_invoice_payload(
     now = _now_ms()
 
     event_type_raw = str(e.get("EVENT_TYPE") or "").strip().upper()
-    if event_type_raw not in ("INVOICE", "HYBRID"):
+    # "INVOICE" is the pre-rename name for "PACKAGE"; accepted so events stored
+    # before the rename still draft an invoice instead of silently returning None.
+    if event_type_raw not in ("PACKAGE", "INVOICE", "HYBRID"):
         return None
-    invoice_type = "Invoice" if event_type_raw == "INVOICE" else "Hybrid"
+    # KonaOS's own invoiceType vocabulary is unchanged — the document is still an
+    # invoice, it is our EVENT TYPE that is now called Package.
+    invoice_type = "Hybrid" if event_type_raw == "HYBRID" else "Invoice"
 
     # Nothing owed → no invoice. This is the normal outcome for a
     # min-guarantee event whose sales covered the minimum: the shortfall is
@@ -152,25 +156,25 @@ def build_invoice_payload(
         })
         _id += 1
 
-    if billing_model == "INVOICE_FIXED_PACKAGE":
+    if billing_model == "PACKAGE_FIXED":
         if base_amount > 0:
             add_item(_fixed_package_label(e, base_amount), base_amount, 1, base_amount, True)
         if overage_units > 0 and overage_revenue > 0:
             add_item("Additional Servings (Overage)", rate_per_serving, overage_units, overage_revenue, True)
 
-    elif billing_model == "INVOICE_PER_SERVING":
+    elif billing_model == "PACKAGE_PER_SERVING":
         units = _num(e.get("UNITS_SERVED_TOTAL"))
         if units > 0 and rate_per_serving > 0:
             add_item("Kona Ice Servings", rate_per_serving, units, round(units * rate_per_serving, 2), True)
 
-    elif billing_model == "INVOICE_BASE_FEE_PLUS_SERVINGS":
+    elif billing_model == "PACKAGE_BASE_FEE_PLUS_SERVINGS":
         if base_amount > 0:
             add_item("Base Fee", base_amount, 1, base_amount, True)
         units = _num(e.get("UNITS_SERVED_TOTAL"))
         if units > 0 and rate_per_serving > 0:
             add_item("Kona Ice Servings", rate_per_serving, units, round(units * rate_per_serving, 2), True)
 
-    elif billing_model == "INVOICE_HOURLY":
+    elif billing_model == "PACKAGE_HOURLY":
         total_hours = _num(e.get("TOTAL_EVENT_HOURS"))
         hourly_rate = _num(e.get("HOURLY_RATE"))
         if total_hours > 0 and hourly_rate > 0:

@@ -8,7 +8,7 @@ type RunPhase = "idle" | "running" | "done";
 // Values must match the classifier's EVENT_TYPE output exactly.
 const RUN_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "selling", label: "Selling" },
-  { value: "invoice", label: "Invoice" },
+  { value: "package", label: "Package" },
   { value: "hybrid", label: "Hybrid" },
   { value: "minimum guarantee", label: "Minimum guarantee" },
 ];

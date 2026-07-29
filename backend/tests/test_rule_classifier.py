@@ -23,7 +23,7 @@ def test_fixed_package_under_floor():
         "$250 covers up to 60 servings, each additional $4 a piece. Send invoice. Plus tax.",
         "<p>EVENT TYPE: Invoice<br>ATTENDEES: 75 people</p>",
         "ACTUAL SERVING COUNT: 51"))
-    assert r is not None and r["BILLING_MODEL"] == "INVOICE_FIXED_PACKAGE"
+    assert r is not None and r["BILLING_MODEL"] == "PACKAGE_FIXED"
     assert r["ATTENDEE_COUNT"] == 75 and r["UNITS_SERVED_TOTAL"] == 51
     assert calculate_invoice(r)["FINAL_INVOICE_AMOUNT"] == 275.0
 

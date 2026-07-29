@@ -61,7 +61,7 @@ from the presence of a terminal — decide payer identity from who the notes say
 owes the money, then treat the instrument as a separate question.
 
   HOST pays (invoice, card, check from the org — including on a terminal at the event):
-    → Invoice or Minimum Guarantee
+    → Package or Minimum Guarantee
 
   GUESTS pay individually at the event (each guest buying their own):
     → Selling or Hybrid
@@ -80,11 +80,11 @@ owes the money, then treat the instrument as a separate question.
 
   (b) The HOST is buying the time or the servings and the minimum applies to THEIR
       OWN bill. No guest selling anywhere in the notes:
-    → Invoice, NEVER MG.
-      A minimum stated PER N HOURS prices the time → INVOICE_HOURLY.
+    → Package (host-billed), NEVER MG.
+      A minimum stated PER N HOURS prices the time → PACKAGE_HOURLY.
       "$3 kiddie or $4 small / The minimum for 1 hour will be $250" together with
       "School will be paying - send invoice after"
-        → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_HOURLY,
+        → EVENT_TYPE: package, BILLING_MODEL: PACKAGE_HOURLY,
           HOURLY_RATE: 250, TOTAL_EVENT_HOURS: 1, RATE_PER_SERVING: 0
         → billed 1 × 250 = $250
       A flat minimum for the whole event goes in MINIMUM_FLAT_AMOUNT and floors the
@@ -97,19 +97,19 @@ owes the money, then treat the instrument as a separate question.
   Getting this wrong costs money in both directions. Choosing MG for a host
   purchase means the pipeline DEFERS the invoice waiting for cash to be counted —
   and on an invoice event no cash is ever posted, so the host is never billed at
-  all. Choosing Invoice for a real MG bills the whole minimum instead of the gap.
+  all. Choosing Package for a real MG bills the whole minimum instead of the gap.
 
-**Minimum charge pattern — always Invoice, never MG:**
+**Minimum charge pattern — always Package, never MG:**
 When notes say "charge $X per Kona if they buy N or more, otherwise charge $Y minimum":
   - The HOST is being charged a floor price
   - $Y minimum = BASE_AMOUNT (floor billed to host)
   - $X per serving = overage rate above N included servings
-  - This is INVOICE_FIXED_PACKAGE regardless of the word "minimum"
+  - This is PACKAGE_FIXED regardless of the word "minimum"
 
 Example:
   "If they purchase 40 Konas or more, charge $3 per Kona.
    If they DID NOT MEET 40 Konas, still charge them $125 minimum."
-  → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_FIXED_PACKAGE
+  → EVENT_TYPE: package, BILLING_MODEL: PACKAGE_FIXED
   → BASE_AMOUNT: 125, UNITS_INCLUDED_IN_BASE: 40, RATE_PER_SERVING: 3 (only if >40 served)
 
 This rule is about the STRUCTURE, not the wording. Any phrasing that puts a floor
@@ -121,7 +121,7 @@ truck's GUEST sales; a floor under the host's own bill is an Invoice.
 Base fee + per-serving, with a floor:
   "$99 plus the cost of the amount of Kona's we serve (total minimum of $150 plus tax)",
   cup price $4, 23 served
-  → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_BASE_FEE_PLUS_SERVINGS
+  → EVENT_TYPE: package, BILLING_MODEL: PACKAGE_BASE_FEE_PLUS_SERVINGS
   → BASE_AMOUNT: 99, RATE_PER_SERVING: 4, UNITS_SERVED_TOTAL: 23,
     MINIMUM_FLAT_AMOUNT: 150 (recorded; the floor does not bind because
     99 + 23×4 = 191 already exceeds 150)
@@ -133,7 +133,7 @@ model, and getting it backwards double-charges the floor:
     → a base fee. It is ADDED to the per-serving total.
   "minimum", "at least", "the minimum for N hours will be $X"
     → a floor. It REPLACES the per-serving total whenever that total is lower.
-Never put an amount described as a minimum into INVOICE_BASE_FEE_PLUS_SERVINGS.
+Never put an amount described as a minimum into PACKAGE_BASE_FEE_PLUS_SERVINGS.
 That model adds BASE_AMOUNT on top of every serving charged, so a floor placed
 there gets billed twice over.
 
@@ -146,7 +146,7 @@ to make a minimum come out right.
 Per-serving with a floor and NO separate base fee:
   "$3 'kiddie' Kona's or our $4 'small' Kona's / The minimum for 1 hour will be $250",
   22 cups served at $4
-  → EVENT_TYPE: Invoice, BILLING_MODEL: INVOICE_PER_SERVING
+  → EVENT_TYPE: package, BILLING_MODEL: PACKAGE_PER_SERVING
   → RATE_PER_SERVING: 4, UNITS_SERVED_TOTAL: 22, MINIMUM_FLAT_AMOUNT: 250
   → BASE_AMOUNT: 0, UNITS_INCLUDED_IN_BASE: 0
   → billed: 22 × 4 = 88, floored to the $250 minimum = $250
@@ -176,7 +176,10 @@ STEP 1 — it is the default you must be talked out of, not one signal among man
 
 Before writing the final JSON:
 
-Invoice            → invoice
+Invoice            → package   ← the booking form says "Invoice"; the
+                                 EVENT_TYPE value is "package". The document
+                                 sent to the client is still an invoice.
+Package            → package
 Selling            → selling
 Minimum Guarantee  → minimum guarantee
 Hybrid             → hybrid
@@ -185,7 +188,7 @@ undefined          → undefined
 EVENT_TYPE must always be lowercase in the final JSON output.
 
 Examples:
-"Invoice"           → "invoice"
+"Invoice"           → "package"
 "Selling"           → "selling"
 "Minimum Guarantee" → "minimum guarantee"
 "Hybrid"            → "hybrid"
@@ -196,9 +199,9 @@ Examples:
 
 Once EVENT_TYPE is resolved, select the billing model that matches the pricing structure.
 
-#### Invoice models
+#### Package models (host-billed)
 
-INVOICE_PER_SERVING
+PACKAGE_PER_SERVING
 Host pays per serving billed by units served. No base fee exists.
 Extract: UNITS_SERVED_TOTAL, RATE_PER_SERVING
 
@@ -207,27 +210,27 @@ Use when:
   - A destination/location/travel fee exists but NO base fee
   - BASE_AMOUNT = 0
 
-INVOICE_BASE_FEE_PLUS_SERVINGS
+PACKAGE_BASE_FEE_PLUS_SERVINGS
 A true base fee (setup, appearance, event fee) plus per-serving cost for all servings.
 Extract: BASE_AMOUNT, UNITS_SERVED_TOTAL, RATE_PER_SERVING
 
 ONLY use when BASE_AMOUNT > 0.
-  If BASE_AMOUNT = 0 → use INVOICE_PER_SERVING instead.
+  If BASE_AMOUNT = 0 → use PACKAGE_PER_SERVING instead.
 
 A destination fee, travel fee, or location fee is NEVER a base fee:
   → Always goes to LOCATION_FEE, never BASE_AMOUNT
-  → Never causes INVOICE_BASE_FEE_PLUS_SERVINGS to be selected
+  → Never causes PACKAGE_BASE_FEE_PLUS_SERVINGS to be selected
 
 Example of CORRECT use:
   "Setup fee $50 + $3 per serving"
-  → INVOICE_BASE_FEE_PLUS_SERVINGS, BASE_AMOUNT: 50, RATE_PER_SERVING: 3
+  → PACKAGE_BASE_FEE_PLUS_SERVINGS, BASE_AMOUNT: 50, RATE_PER_SERVING: 3
 
 Example of INCORRECT use:
   "$50/hr destination fee + $3 per serving"
-  → INVOICE_PER_SERVING, LOCATION_FEE: 100 (2hr event), RATE_PER_SERVING: 3
+  → PACKAGE_PER_SERVING, LOCATION_FEE: 100 (2hr event), RATE_PER_SERVING: 3
     (destination fee → LOCATION_FEE, not BASE_AMOUNT)
 
-INVOICE_FIXED_PACKAGE
+PACKAGE_FIXED
 Fixed floor price covers a set number of servings; overage billed separately only if exceeded.
 Extract: BASE_AMOUNT, UNITS_INCLUDED_IN_BASE, UNITS_SERVED_TOTAL
 RATE_PER_SERVING: extract the overage rate WHENEVER it is stated, even if no
@@ -263,7 +266,7 @@ Never fall back to a servings-based sales figure (CRM/Square "system sales",
 or served × per-cup) as BASE_AMOUNT for a fixed package: that number tracks
 servings, but the package price is fixed on the included allotment.
 
-INVOICE_HOURLY
+PACKAGE_HOURLY
 Client pays by time.
 Extract: TOTAL_EVENT_HOURS, HOURLY_RATE
 
@@ -334,7 +337,7 @@ Extract: MINIMUM_AMOUNT_PER_HOUR, TOTAL_EVENT_HOURS, UNITS_SERVED_TOTAL, RATE_PE
 Requires a minimum stated PER HOUR that SCALES with time — "$150 per hour
 minimum", "a $150/hr guarantee". "The minimum for 1 hour will be $250" is a single
 minimum for a one-hour event, NOT $250 every hour, and it is a host purchase
-anyway — see (b) in STEP 1. Same test as INVOICE_HOURLY: would a 2-hour event
+anyway — see (b) in STEP 1. Same test as PACKAGE_HOURLY: would a 2-hour event
 double? If the notes do not say so, it is not per-hour.
 
 MIN_GUARANTEE_FLAT
@@ -342,9 +345,9 @@ Host guarantees one flat minimum for the event; covers shortfall if guest sales 
 Extract: MINIMUM_FLAT_AMOUNT, UNITS_SERVED_TOTAL, RATE_PER_SERVING
 Extract MG_SHORTFALL only if explicitly written in notes; otherwise 0.
 
-MG vs Invoice distinction:
+MG vs Package distinction:
   MG   → host covers the GAP between guest sales and the guaranteed floor
-  Invoice → host IS the buyer; "minimum" is just a floor price billed directly to the host
+  Package → host IS the buyer; "minimum" is just a floor price billed directly to the host
 
 #### Hybrid models
 
@@ -387,7 +390,7 @@ guest payment would make every card-paying host a selling event.
 Positive evidence guests paid individually:
   "guests paid", "each guest paid", "attendees bought", "sold to guests",
   "open selling", "guests tapped", a per-guest retail price with no host charge
-Evidence the HOST paid (→ Invoice, NOT this model):
+Evidence the HOST paid (→ Package, NOT this model):
   "paid in full", "client paid", "they paid", "paid the invoice/total/balance",
   or ANY note field stating a host charge ("$X plus the cost of what we serve",
   "host pays", "send invoice")
@@ -398,7 +401,7 @@ When the notes state a host charge AND a payment was taken at the event, the
 default is that the HOST settled that charge at the event. Do not reinterpret a
 stated host charge as guest sales.
 
-When the host is the one paying by card or check directly, it is Invoice — not
+When the host is the one paying by card or check directly, it is Package — not
 Selling and not a Minimum Guarantee.
 
 ---
@@ -408,10 +411,10 @@ Selling and not a Minimum Guarantee.
 These NINE are the only valid BILLING_MODEL values. They are exactly the
 "Predefined models" a person can pick on the New Event page:
 
-  INVOICE_PER_SERVING
-  INVOICE_BASE_FEE_PLUS_SERVINGS
-  INVOICE_FIXED_PACKAGE
-  INVOICE_HOURLY
+  PACKAGE_PER_SERVING
+  PACKAGE_BASE_FEE_PLUS_SERVINGS
+  PACKAGE_FIXED
+  PACKAGE_HOURLY
   SELLING_OPEN
   SELLING_WITH_GIVEBACK
   MIN_GUARANTEE_FLAT
@@ -527,9 +530,9 @@ Extract numeric estimate from notes.
 
 ### RATE_PER_SERVING
 
-INVOICE_FIXED_PACKAGE: extract the stated overage rate whenever the notes state one, whether or not servings exceeded UNITS_INCLUDED_IN_BASE — the backend applies it only to `max(0, served - included)`. Set 0 only when no additional-serving rate is stated at all, or when the per-unit figure merely derives the package price rather than pricing extras.
+PACKAGE_FIXED: extract the stated overage rate whenever the notes state one, whether or not servings exceeded UNITS_INCLUDED_IN_BASE — the backend applies it only to `max(0, served - included)`. Set 0 only when no additional-serving rate is stated at all, or when the per-unit figure merely derives the package price rather than pricing extras.
 
-All other models (INVOICE_PER_SERVING, INVOICE_BASE_FEE_PLUS_SERVINGS, MIN_GUARANTEE_HOURLY, MIN_GUARANTEE_FLAT, HYBRID_HOST_BASE_PLUS_GUEST_EXTRA):
+All other models (PACKAGE_PER_SERVING, PACKAGE_BASE_FEE_PLUS_SERVINGS, MIN_GUARANTEE_HOURLY, MIN_GUARANTEE_FLAT, HYBRID_HOST_BASE_PLUS_GUEST_EXTRA):
 Extract from any note field. "Usually" or "typically" does not disqualify a rate.
 
 When notes give base rate + discount:
@@ -569,7 +572,7 @@ Percentage → DISCOUNT_PERCENT as plain number (10, not 0.10)
 Flat dollar → DISCOUNT_AMOUNT as dollar value
 None → both 0
 
-INVOICE_FIXED_PACKAGE: BASE_AMOUNT = final post-discount price as stated.
+PACKAGE_FIXED: BASE_AMOUNT = final post-discount price as stated.
 DISCOUNT_PERCENT is stored for audit only and the backend does NOT re-apply it —
 putting the discount in both places would take it off twice.
 
@@ -828,7 +831,7 @@ invoice total separate from the pricing structure:
 
 ### HOURLY_RATE
 
-Only extract when BILLING_MODEL = INVOICE_HOURLY.
+Only extract when BILLING_MODEL = PACKAGE_HOURLY.
 HOURLY_RATE must always be 0 for all other billing models,
 even when an hourly rate appears in notes.
 
@@ -837,13 +840,13 @@ A destination fee, travel fee, or location fee stated as
   → Extract to LOCATION_FEE only (multiply by TOTAL_EVENT_HOURS)
   → Set HOURLY_RATE: 0
 
-"$50/hr destination fee", INVOICE_PER_SERVING event
+"$50/hr destination fee", PACKAGE_PER_SERVING event
   → LOCATION_FEE: 100 (2hrs × $50)
   → HOURLY_RATE: 0    ← never 50
 
 HOURLY_RATE: 0 for:
-  INVOICE_PER_SERVING, INVOICE_FIXED_PACKAGE,
-  INVOICE_BASE_FEE_PLUS_SERVINGS, all Selling models,
+  PACKAGE_PER_SERVING, PACKAGE_FIXED,
+  PACKAGE_BASE_FEE_PLUS_SERVINGS, all Selling models,
   all MG models, all Hybrid models
 
 ---
@@ -969,7 +972,7 @@ statement about the price, not about the client's tax status. Search all three
 note fields for it.
   Admin: "(no extra taxes or fees). This price includes up to 600 9oz cups …
    $2 per cup, so 600 Kona's would come to $1,200", 536 served
-    → BILLING_MODEL: INVOICE_FIXED_PACKAGE, BASE_AMOUNT: 1200,
+    → BILLING_MODEL: PACKAGE_FIXED, BASE_AMOUNT: 1200,
       UNITS_INCLUDED_IN_BASE: 600, UNITS_SERVED_TOTAL: 536,
       PRICE_IS_ALL_IN: "TRUE"
     → billed: $1,200 flat (no 6% tax, no 4% fee)
