@@ -409,7 +409,7 @@ export default function Financials() {
                     <Num v={r.event_sales_collected} g="g-tot" />
                     <Num v={r.sales_tax} g="g-tot" />
                     <Num v={r.sales_dollars} g="g-tot" />
-                    <Num v={r.giveback_amount} g="g-tot" />
+                    <GivebackCell row={r} onSaved={reload} />
                     <Num v={r.net_event_sales} g="g-tot" />
                     <Num v={r.location_fee} g="g-tot" />
                     <ToggleCell
@@ -487,6 +487,77 @@ export default function Financials() {
  *  The dot shows provenance at a glance — green when a machine or a person
  *  actually counted it, hollow when it's just what the AI read out of the
  *  driver's notes (i.e. a guess, and 0 when the notes said nothing). */
+/** Giveback amount, editable as a PERCENTAGE.
+ *
+ *  A giveback is frequently agreed with the venue and never written into the
+ *  event notes, so the classifier records 0 and what is owed goes missing —
+ *  Arbutus Youth Football's notes literally say "Giveback percentage" with no
+ *  number after it. Typing a percentage here re-prices the event and the value
+ *  survives later pipeline runs, so re-classifying cannot drop it again.
+ *
+ *  Per-event by design: the booking form captures the percentage going forward,
+ *  so a bulk updater would be built for a problem being designed out. */
+function GivebackCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<void> | void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const agreed = isSet(row, "giveback_percent");
+
+  async function save() {
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n < 0 || n > 100) { setErr("Enter a percentage, 0–100"); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      await api.setEventGiveback(row.crm_event_id, n);
+      setEditing(false);
+      await onSaved();
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <td className="right g-tot cash-cell" onClick={(e) => e.stopPropagation()}>
+        <input
+          className="cash-input"
+          autoFocus
+          value={draft}
+          disabled={busy}
+          placeholder="%"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") { setEditing(false); setErr(""); }
+          }}
+          onBlur={save}
+          title={err || "Percentage — Enter to save, Esc to cancel"}
+        />
+        {err && <div className="cash-err">{err}</div>}
+      </td>
+    );
+  }
+
+  return (
+    <td
+      className={"right g-tot cash-cell editable" + (row.giveback_amount ? "" : " zero")}
+      onClick={(e) => { e.stopPropagation(); setDraft(""); setEditing(true); }}
+      title={
+        agreed
+          ? `Giveback set — ${sourceLabel(row, "giveback_percent")}. Click to change the percentage.`
+          : "No giveback recorded. If one was agreed with the venue, click and enter the percentage — the event is re-priced and the figure survives future runs."
+      }
+    >
+      <span className={"cash-dot" + (agreed ? " counted" : "")} />
+      {money(row.giveback_amount)}
+    </td>
+  );
+}
+
 function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<void> | void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(row.cash_collected ?? 0));

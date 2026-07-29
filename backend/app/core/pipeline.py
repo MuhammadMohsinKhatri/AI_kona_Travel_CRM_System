@@ -311,6 +311,12 @@ def run_pipeline(db: Session, run: PipelineRun) -> PipelineRun:
                     "ACTUAL_CASH_PRE_TAX": cash_known if cash_known is not None else 0.0,
                     "ACTUAL_SALES_KNOWN": cash_known is not None,
                 }
+                # A giveback agreed with the venue but never written into the notes
+                # would be re-classified back to 0 on every run. An override wins
+                # permanently, exactly like a counted-cash figure.
+                giveback_known = _giveback_override_for(db, item["crm_id"])
+                if giveback_known is not None:
+                    classification["GIVEBACK_PERCENTAGE"] = giveback_known
                 calc = billing.calculate_invoice(classification)
                 item["classification"] = classification
                 item["calc"] = calc
@@ -659,6 +665,24 @@ def _upsert_event(
 
     db.flush()
     return event
+
+
+def _giveback_override_for(db: Session, crm_event_id: str) -> Optional[float]:
+    """Giveback percentage agreed for this event, or None if nobody has set one.
+
+    Read here so it survives re-runs. A giveback is often agreed with the venue
+    and never written into the notes, so re-classifying would put it back to 0 and
+    quietly drop what is owed. None means "not set" and leaves the notes in charge.
+    """
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        return None
+    value = overrides.get_override(entry, "giveback_percent")
+    return None if value is None else _num(value)
 
 
 def _cash_override_for(db: Session, crm_event_id: str) -> Optional[float]:

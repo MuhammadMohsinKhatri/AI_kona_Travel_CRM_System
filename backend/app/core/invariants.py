@@ -94,6 +94,13 @@ _SALES_DRIVEN_MODELS = (
     "SELLING_OPEN", "SELLING_WITH_GIVEBACK",
 ) + _MG_MODELS
 
+# "Giveback" as it is actually written — including the spelling that turns up when
+# notes are dictated ("gift bag").
+_GIVEBACK_PATTERNS = (
+    r"give\s?back", r"giveback", r"gift\s?bag", r"donat", r"kickback",
+    r"percentage back", r"back to the (?:school|team|league|club)",
+)
+
 # The notes saying the HOST owes a bill that will be sent to them.
 _HOST_INVOICED_PATTERNS = (
     r"send (?:them )?(?:an? )?invoice", r"will be paying", r"will be billed",
@@ -335,6 +342,25 @@ def check_invariants(
                     "this event — if it is the latter, re-run once it has.",
                     severity="CRITICAL",
                 )
+
+    # ── a giveback promised but never quantified ─────────────────────────────
+    # Arbutus Youth Football's notes read "Giveback percentage sell to guests with
+    # the $295 minimum" — the word is there, the number never is, so the
+    # percentage extracted as 0 and the row recorded a $0.00 giveback with nothing
+    # to show anything was missing. That is an unrecorded liability to the venue,
+    # and it only surfaces when somebody totals the year up and finds a gap.
+    if (
+        any(re.search(p, low) for p in _GIVEBACK_PATTERNS)
+        and _num(classification.get("GIVEBACK_PERCENTAGE")) <= 0
+        and _num(calc.get("GIVEBACK_AMOUNT")) <= 0
+    ):
+        add(
+            "The notes mention a giveback but no percentage or amount was found, "
+            "so none has been recorded",
+            "Set the giveback on this event (Event Financials) if one was agreed — "
+            "the amount owed to the venue is otherwise missing from the ledger. If "
+            "there is genuinely no giveback for this event, mark this sorted.",
+        )
 
     # ── a stated price that does no work ────────────────────────────────────
     # The generalised form of most misclassifications: the model acknowledges a

@@ -131,6 +131,18 @@ export const api = {
         body: JSON.stringify({ cash_collected: cash, source: "manual", by }),
       }
     ),
+  /** Set the giveback percentage agreed with the venue (10 = 10%) and re-price
+   *  the event. Needed because a giveback is often agreed long in advance and
+   *  never written into the notes, so the classifier records 0 and the amount
+   *  owed goes missing. Like cash, the override survives later pipeline runs. */
+  setEventGiveback: (crmEventId: string, percent: number, by = "") =>
+    request<GivebackUpdateResult>(
+      `/api/financials/by-event/${encodeURIComponent(crmEventId)}/giveback`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ giveback_percent: percent, source: "manual", by }),
+      }
+    ),
   /** Set deposit / taxable / paid / payment method. Recorded and shown, but
    *  deliberately inert: nothing else recalculates from these yet. */
   setEventFields: (
@@ -190,6 +202,16 @@ export interface QuickCreateResult {
   editUrl: string | null;
   driverNotesWritten?: boolean;
   driverNotesError?: string | null;
+}
+
+export interface GivebackUpdateResult {
+  crm_event_id: string;
+  giveback_percent: number;
+  giveback_amount: number;
+  previous_giveback_amount: number;
+  source: "api" | "manual" | "ai";
+  /** The single-event run that re-priced this event. Follow it on Automation Runs. */
+  repriced_run_id?: number | null;
 }
 
 export interface CashUpdateResult {

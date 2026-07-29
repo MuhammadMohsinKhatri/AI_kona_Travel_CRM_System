@@ -280,6 +280,89 @@ def _cash_response(entry: FinancialEntry, recomputed: dict[str, float]) -> dict:
     }
 
 
+class GivebackUpdate(BaseModel):
+    """The giveback percentage agreed with the venue, as a plain number (10 = 10%)."""
+
+    giveback_percent: float = Field(ge=0, le=100)
+    source: str = Field(default="manual", description="'api' or 'manual'")
+    by: str = Field(default="", max_length=255)
+
+
+@router.patch("/by-event/{crm_event_id}/giveback")
+def set_giveback_by_event(
+    crm_event_id: str,
+    body: GivebackUpdate,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key),
+) -> dict:
+    """Set the giveback percentage for one event and re-price it.
+
+    Venues like Liberty Sports Park have a giveback agreed long in advance that
+    never makes it into the event notes, so the classifier records 0 and the amount
+    owed goes missing. This is how it gets put back.
+
+    Deliberately per-event rather than a bulk tool: going forward the booking form
+    captures the percentage, so a batch updater would be built for a problem that
+    is being designed out. Set it here for the events that predate the form.
+
+    Like a counted-cash figure, the override wins permanently — a later pipeline run
+    will not overwrite it with whatever the notes do or don't say.
+
+    Re-prices by re-running this ONE event through the normal pipeline rather than
+    recomputing here, so invoice creation, the KonaOS sync, duplicate protection and
+    the audit trail all stay in one implementation.
+    """
+    if body.source not in ov.VALID_SOURCES:
+        raise HTTPException(status_code=400, detail=f"source must be one of {ov.VALID_SOURCES}")
+
+    entry = (
+        db.query(FinancialEntry)
+        .filter(FinancialEntry.crm_event_id == crm_event_id)
+        .one_or_none()
+    )
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ledger row for event {crm_event_id} — has it been processed yet?",
+        )
+
+    previous = entry.giveback_amount
+    ov.set_override(entry, "giveback_percent", body.giveback_percent,
+                    source=body.source, by=body.by)
+
+    event = db.get(Event, entry.event_id)
+    if event is not None:
+        who = body.by or ("an automation" if body.source == "api" else "a user")
+        db.add(CrmAuditEntry(
+            event_id=event.id, crm_event_id=entry.crm_event_id,
+            event_name=entry.event_name, event_date=entry.event_date,
+            action="giveback_updated",
+            summary=(
+                f"Giveback set to {body.giveback_percent:g}% by {who} — "
+                f"re-pricing the event (was {money_or_zero(previous)})"
+            ),
+            detail={"source": body.source, "by": body.by,
+                    "giveback_percent": body.giveback_percent,
+                    "previous_giveback_amount": previous},
+        ))
+    db.commit()
+
+    run_id = _settle_event(db, entry.crm_event_id)
+    db.refresh(entry)
+    return {
+        "crm_event_id": entry.crm_event_id,
+        "giveback_percent": body.giveback_percent,
+        "giveback_amount": entry.giveback_amount,
+        "previous_giveback_amount": previous,
+        "source": ov.source_of(entry, "giveback_percent"),
+        "repriced_run_id": run_id,
+    }
+
+
+def money_or_zero(v: float | None) -> str:
+    return f"${(v or 0.0):,.2f}"
+
+
 @router.patch("/by-event/{crm_event_id}/cash")
 def set_cash_by_event(
     crm_event_id: str,

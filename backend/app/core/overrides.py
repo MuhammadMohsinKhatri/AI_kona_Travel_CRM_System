@@ -22,8 +22,15 @@ from app.models import FinancialEntry
 # Fields a person or an automation may set. The bool says whether writing it
 # recomputes anything: cash does, the rest are stored for now and wired up
 # later (deliberately inert so nobody's invoice moves unexpectedly).
+# True = setting this field recalculates everything downstream of it.
 OVERRIDABLE: dict[str, bool] = {
     "cash_collected": True,
+    # A giveback is frequently agreed with the venue and never written into the
+    # notes — Arbutus Youth Football recorded $0.00 because the notes say
+    # "Giveback percentage" with no number after it. Overriding it re-runs the
+    # event, so the percentage survives later pipeline runs instead of being
+    # overwritten by whatever the notes do (or don't) say.
+    "giveback_percent": True,
     "deposit": False,
     "taxable": False,
     "paid": False,
