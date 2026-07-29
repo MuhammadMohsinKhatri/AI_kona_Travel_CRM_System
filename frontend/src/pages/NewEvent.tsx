@@ -279,9 +279,15 @@ function buildEventNotes(f: F): string[] {
 function buildDriverNotes(f: F): string[] {
   const lines: string[] = [];
   if (f.actualCount) lines.push(`ACTUAL SERVING COUNT: ${f.actualCount}`);
+  // Brett's third item for drivers: "did the customer pay, or do they need to send
+  // them an invoice?" — a two-way answer, so it is always stated. Writing nothing
+  // when unpaid left the classifier to infer it, while real driver notes say
+  // "send invoice" outright ("22 green cups sold; send invoice.").
   if (f.paid) {
     lines.push(`PAID: ${f.method ? f.method : "yes"}`);
     if (f.method === "Cash" && f.cashAmount) lines.push(`CASH COLLECTED: $${f.cashAmount}`);
+  } else {
+    lines.push("PAID: No — send invoice");
   }
   if (f.actualTimes) lines.push(`ACTUAL TIMES: ${f.actualTimes.trim()}`);
   if (f.squareDevice) lines.push(`SQUARE DEVICE: ${f.squareDevice.trim()}`);
@@ -820,13 +826,15 @@ export default function NewEvent() {
             )}
             <Row>
               <Field label="Actual event times" hint="Only if it ran longer/earlier."><input className="input" value={f.actualTimes} onChange={(e) => up({ actualTimes: e.target.value })} placeholder="Ran 1 hr, arrived 30 min early" /></Field>
-              {/* Package events are host-billed and skip Square reconciliation
-                  entirely, so a terminal recorded here would never be read. */}
-              {f.eventType !== "Package" && (
-                <Field label="Square device" hint="Terminal the driver used.">
-                  <input className="input" value={f.squareDevice} onChange={(e) => up({ squareDevice: e.target.value })} placeholder="KEV7" />
-                </Field>
-              )}
+              {/* Asked for every type, always optional. Hiding it on Package events
+                  was wrong: Square SALES reconciliation is skipped for them, but the
+                  host can still settle on a terminal at the event — Kiddie Academy's
+                  host paid on terminal 6, and Wayland's notes record other customers
+                  paying on the Mini. It is also one of the three things Brett wants
+                  drivers to report: how many served, which terminal, paid or invoice. */}
+              <Field label="Square device" hint="Terminal the driver used, if any. Optional.">
+                <input className="input" value={f.squareDevice} onChange={(e) => up({ squareDevice: e.target.value })} placeholder="KEV7 / Mini / terminal 6" />
+              </Field>
             </Row>
           </Card>
         </div>

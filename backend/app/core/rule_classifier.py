@@ -210,6 +210,11 @@ def try_rule_classify(cleaned: dict[str, Any]) -> Optional[dict[str, Any]]:
         m = re.match(rf"^ACTUAL SERVING COUNT:\s*([\d,]+(?:\.\d+)?)$", ln, re.I)
         if m:
             units_served = _num(m.group(1)); continue
+        # The unpaid answer. Explicit rather than absent, so "nobody said" and
+        # "the driver confirmed no payment was taken" stay distinguishable.
+        if re.match(r"^PAID:\s*No\b.*$", ln, re.I):
+            paid = False
+            continue
         m = re.match(r"^PAID:\s*(Check|Credit Card|Cash|yes)$", ln, re.I)
         if m:
             paid = True

@@ -140,3 +140,33 @@ def test_plain_hourly_still_bills_only_the_hour():
     assert r["RATE_PER_SERVING"] == 0
     # Two hours at $250, and the 22 servings add nothing.
     assert calculate_invoice(r)["SUBTOTAL"] == 500.0
+
+
+def test_driver_notes_state_the_unpaid_answer_explicitly():
+    """Brett's third item for drivers is "did the customer pay, or do they need to
+    send them an invoice?" — a two-way answer. The form used to write nothing when
+    unpaid, leaving "nobody said" indistinguishable from "the driver confirmed no
+    payment was taken"."""
+    r = try_rule_classify(cleaned(
+        "$4 per serving. Send invoice. Plus tax.",
+        "<p>EVENT TYPE: Package<br>ATTENDEES: 50 people</p>",
+        "ACTUAL SERVING COUNT: 40\nPAID: No — send invoice\nSQUARE DEVICE: KEV7"))
+    assert r is not None, "fell back to the LLM"
+    assert r["PAID_STATUS"] in ("FALSE", False, "")
+    assert r["UNITS_SERVED_TOTAL"] == 40
+    assert r["DRIVER_REPORTED_EQUIPMENT"] == "KEV7"
+    # Unpaid, so the 4% processing fee still applies — the client deducts it if
+    # they end up paying by check.
+    assert calculate_invoice(r)["CC_FEE"] > 0
+
+
+def test_a_terminal_is_accepted_on_a_package_event():
+    """Square SALES reconciliation is skipped for host-billed events, but a host can
+    still settle on a terminal at the event, so the field must round-trip."""
+    r = try_rule_classify(cleaned(
+        "$295 per hour. Send invoice. Plus tax.",
+        "<p>EVENT TYPE: Package<br>ATTENDEES: 60 people</p>",
+        "ACTUAL SERVING COUNT: 55\nPAID: Credit Card\nSQUARE DEVICE: terminal 6"))
+    assert r is not None
+    assert r["DRIVER_REPORTED_EQUIPMENT"] == "terminal 6"
+    assert r["PAYMENT_METHOD"] == "CREDIT_CARD"
