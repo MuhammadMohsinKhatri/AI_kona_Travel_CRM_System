@@ -89,3 +89,46 @@ def test_giveback_is_a_recalculating_override():
     """It must recompute downstream, like counted cash — not merely be recorded
     the way deposit/taxable/paid are."""
     assert overrides.OVERRIDABLE["giveback_percent"] is True
+
+
+def test_giveback_percentage_is_stored_as_a_decimal():
+    """GIVEBACK_PERCENTAGE is a DECIMAL throughout: billing multiplies sales by it
+    directly and the UI renders it as pct * 100. The API takes a human percentage,
+    so the conversion has to happen at that boundary.
+
+    Storing 20 instead of 0.20 on a $1,000 event computes a $20,000 giveback and a
+    -$19,000 subtotal — the whole event's sales twenty times over. This is the guard
+    against that unit slipping back in.
+    """
+    from app.api.routes.financials import GivebackUpdate
+
+    body = GivebackUpdate(giveback_percent=20)
+    as_decimal = round(body.giveback_percent / 100.0, 6)
+    assert as_decimal == 0.20
+
+    sane = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_WITH_GIVEBACK", "RATE_PER_SERVING": 5,
+        "UNITS_SERVED_TOTAL": 200, "GIVEBACK_PERCENTAGE": as_decimal,
+        "TAXABLE": "YES",
+    })
+    assert sane["GIVEBACK_AMOUNT"] == 200.0    # 20% of $1,000
+    assert sane["SUBTOTAL"] == 800.0
+
+    # What the un-converted value would have produced.
+    broken = billing.calculate_invoice({
+        "BILLING_MODEL": "SELLING_WITH_GIVEBACK", "RATE_PER_SERVING": 5,
+        "UNITS_SERVED_TOTAL": 200, "GIVEBACK_PERCENTAGE": 20, "TAXABLE": "YES",
+    })
+    assert broken["GIVEBACK_AMOUNT"] == 20000.0
+    assert broken["SUBTOTAL"] < 0
+
+
+def test_the_percentage_is_capped_at_100():
+    """A decimal above 1.0 would mean giving back more than the event earned."""
+    import pydantic
+    import pytest
+
+    from app.api.routes.financials import GivebackUpdate
+
+    with pytest.raises(pydantic.ValidationError):
+        GivebackUpdate(giveback_percent=120)

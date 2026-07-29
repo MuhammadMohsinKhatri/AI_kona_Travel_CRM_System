@@ -281,9 +281,16 @@ def _cash_response(entry: FinancialEntry, recomputed: dict[str, float]) -> dict:
 
 
 class GivebackUpdate(BaseModel):
-    """The giveback percentage agreed with the venue, as a plain number (10 = 10%)."""
+    """The giveback agreed with the venue, as a human percentage: 20 means 20%.
 
-    giveback_percent: float = Field(ge=0, le=100)
+    Converted to a decimal before storage. GIVEBACK_PERCENTAGE is a DECIMAL
+    everywhere else in the system — billing multiplies sales by it directly and the
+    UI renders it as `pct * 100`. Storing 20 rather than 0.20 would compute a
+    giveback twenty times the entire event's sales and drive the subtotal negative.
+    """
+
+    giveback_percent: float = Field(
+        ge=0, le=100, description="Human percentage: 20 means 20%")
     source: str = Field(default="manual", description="'api' or 'manual'")
     by: str = Field(default="", max_length=255)
 
@@ -327,7 +334,10 @@ def set_giveback_by_event(
         )
 
     previous = entry.giveback_amount
-    ov.set_override(entry, "giveback_percent", body.giveback_percent,
+    # Percent in, DECIMAL stored — see GivebackUpdate. The boundary is here so the
+    # API stays human ("20") while everything downstream keeps one unit.
+    as_decimal = round(body.giveback_percent / 100.0, 6)
+    ov.set_override(entry, "giveback_percent", as_decimal,
                     source=body.source, by=body.by)
 
     event = db.get(Event, entry.event_id)
@@ -351,7 +361,8 @@ def set_giveback_by_event(
     db.refresh(entry)
     return {
         "crm_event_id": entry.crm_event_id,
-        "giveback_percent": body.giveback_percent,
+        "giveback_percent": body.giveback_percent,   # as sent, 20 = 20%
+        "giveback_fraction": as_decimal,             # as stored, 0.20
         "giveback_amount": entry.giveback_amount,
         "previous_giveback_amount": previous,
         "source": ov.source_of(entry, "giveback_percent"),
