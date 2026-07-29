@@ -254,9 +254,13 @@ function buildEventNotes(f: F): string[] {
   if (f.attendees) lines.push(`ATTENDEES: ${f.attendees} people`);
   // Composed from the structured fields rather than typed prose, so the count and
   // the size are always machine-readable instead of needing to be parsed back out.
-  const count = f.unitsIncluded;
-  const serve = [count, f.cupSize].filter(Boolean).join(" ");
-  if (serve) lines.push(`SERVE & KEEP COUNT: ${serve}`);
+  // Package and Hybrid only. On a selling or minimum-guarantee event guests buy
+  // their own, so there is no included count — writing one would tell the
+  // classifier something untrue about the event.
+  if (needServe(f.eventType)) {
+    const serve = [f.unitsIncluded, f.cupSize].filter(Boolean).join(" ");
+    if (serve) lines.push(`SERVE & KEEP COUNT: ${serve}`);
+  }
   if (f.parking) lines.push(`PARKING: ${f.parking.trim()}`);
   if (f.additional) lines.push(`ADD'L INSTRUCTION: ${f.additional.trim()}`);
   // Real KonaOS events carry TAXABLE and PAYMENT in the EVENT notes, not the admin
@@ -371,10 +375,19 @@ export default function NewEvent() {
   function chooseEventType(v: EventType) {
     const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
     const only = modelsFor(v);
+    if (keep) {
+      up({ eventType: v });
+      return;
+    }
     up({
       eventType: v,
-      billing: keep ? f.billing : (only.length === 1 ? only[0].key : ""),
-      pkg: keep ? f.pkg : "",
+      billing: only.length === 1 ? only[0].key : "",
+      // Full pricing reset. Every one of these belonged to the model being
+      // abandoned, and they are hidden for the new type, so leaving them would
+      // put figures into the notes that nobody can see or correct.
+      pkg: "", cupSize: "",
+      baseAmount: "", unitsIncluded: "", ratePerServing: "",
+      hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "", giveback: "",
     });
   }
 
