@@ -87,6 +87,13 @@ const needServe = (t: string) => t === "Package" || t === "Hybrid";
 const SIZED_MODELS = new Set([
   "PACKAGE_FIXED", "PACKAGE_HOURLY", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
 ]);
+
+/** Of those, the ones that cannot be priced without an included count. Hourly is
+ *  absent on purpose: an allowance is optional there ("$250 per hour" with nothing
+ *  included is normal), and requiring one would block an ordinary booking. */
+const SIZE_REQUIRED_MODELS = new Set([
+  "PACKAGE_FIXED", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
+]);
 const modelsFor = (t: string) => BILLING_MODELS.filter((m) => m.type === t);
 
 /** Which structured pricing fields each billing model needs. */
@@ -95,14 +102,20 @@ const FIELD_MAP: Record<string, string[]> = {
   PACKAGE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
   PACKAGE_FIXED: ["baseAmount"],            // included count + overage: Event section
   PACKAGE_HOURLY: ["hourlyRate"],
-  SELLING_OPEN: [],
-  SELLING_WITH_GIVEBACK: ["giveback"],
+  SELLING_OPEN: ["ratePerServing"],
+  SELLING_WITH_GIVEBACK: ["ratePerServing", "giveback"],
   MIN_GUARANTEE_FLAT: ["minFlat"],
   MIN_GUARANTEE_HOURLY: ["mgPerHour"],
   HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: ["baseAmount", "guestRate"],
 };
+/** FIELD_MAP entries are required by default. These are recorded when known but
+ *  never block a booking — the guest rate does not enter the host's subtotal
+ *  (a fixed host base plus host-billed overage is what gets invoiced), and the
+ *  pricing document does not list it among the required fields either. */
+const OPTIONAL_FIELDS = new Set(["guestRate"]);
+
 const FIELD_LABELS: Record<string, string> = {
-  ratePerServing: "Rate per serving ($)",
+  ratePerServing: "Price per serving ($)",
   baseAmount: "Base / package amount ($)",
   unitsIncluded: "Servings included",
   hourlyRate: "Hourly rate ($)",
@@ -299,13 +312,13 @@ export default function NewEvent() {
     if (!f.eventType) m.push("Event type");
     if (f.eventType && !f.billing) m.push("Billing model");
     for (const field of FIELD_MAP[f.billing] ?? []) {
-      if (!(f as any)[field]) m.push(FIELD_LABELS[field]);
+      if (!OPTIONAL_FIELDS.has(field) && !(f as any)[field]) m.push(FIELD_LABELS[field]);
     }
     // The size and the included count live in the Event section rather than
     // FIELD_MAP, so they need checking separately. Both are load-bearing: without
     // the count the engine cannot tell an overage from an included serving, and
     // without the size the driver does not know what to pour.
-    if (SIZED_MODELS.has(f.billing)) {
+    if (SIZE_REQUIRED_MODELS.has(f.billing)) {
       if (!f.cupSize) m.push("Serving size");
       if (!f.unitsIncluded) m.push("Servings included");
     }
@@ -498,25 +511,25 @@ export default function NewEvent() {
               <div className="cond">
                 <Row3>
                   {(FIELD_MAP[f.billing] ?? []).map((field) => (
-                    <Field key={field} label={FIELD_LABELS[field]} req>
+                    <Field key={field} label={FIELD_LABELS[field]}
+                      req={!OPTIONAL_FIELDS.has(field)}>
                       <input className="input" type="number" step="0.01"
                         value={(f as any)[field]}
                         onChange={(e) => up({ [field]: e.target.value } as Partial<F>)} />
                     </Field>
                   ))}
-                  {f.billing === "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA" && (
-                    <Field label="Guest rate per serving ($)">
-                      <input className="input" type="number" step="0.01" value={f.guestRate} onChange={(e) => up({ guestRate: e.target.value })} />
-                    </Field>
-                  )}
                 </Row3>
               </div>
             )}
-            <Row3>
-              <Field label="Giveback %"><input className="input" type="number" value={f.giveback} onChange={(e) => up({ giveback: e.target.value })} placeholder="0" /></Field>
+            {/* Deposit / discount / location fee apply to any model, so they stay.
+                Giveback does not — it lives in FIELD_MAP under
+                SELLING_WITH_GIVEBACK, the only model that uses it. It used to
+                render here as well, so that model showed it twice and every other
+                model showed a field that changed nothing. */}
+            <Row>
               <Field label="Deposit ($)"><input className="input" type="number" value={f.deposit} onChange={(e) => up({ deposit: e.target.value })} placeholder="0" /></Field>
               <Field label="Discount ($)"><input className="input" type="number" value={f.discount} onChange={(e) => up({ discount: e.target.value })} placeholder="0" /></Field>
-            </Row3>
+            </Row>
             <Field label="Location fee ($)"><input className="input" type="number" value={f.locationFee} onChange={(e) => up({ locationFee: e.target.value })} placeholder="0" /></Field>
             <Row>
               <Field label="Add-on / extra charge — label" hint='A flat extra on top, e.g. "Ice cream". Leave blank if none.'>
@@ -560,14 +573,18 @@ export default function NewEvent() {
                 mistakes came from; as numbers they are read directly. */}
             {SIZED_MODELS.has(f.billing) && (
               <Row3>
-                <Field label="Serving size" hint="Decides how many the package includes, and tells the driver what to pour.">
+                <Field label="Serving size" req={SIZE_REQUIRED_MODELS.has(f.billing)}
+                  hint="Decides how many the package includes, and tells the driver what to pour.">
                   <select className="select" value={f.cupSize}
                     onChange={(e) => up({ cupSize: e.target.value })}>
                     <option value="">Select size…</option>
                     {CUP_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </Field>
-                <Field label="Servings included" req hint="How many this size includes at the package price.">
+                <Field label="Servings included" req={SIZE_REQUIRED_MODELS.has(f.billing)}
+                  hint={SIZE_REQUIRED_MODELS.has(f.billing)
+                    ? "How many this size includes at the package price."
+                    : "Optional — leave blank when the hourly rate does not include servings."}>
                   <input className="input" type="number" min="0" step="1"
                     value={f.unitsIncluded}
                     onChange={(e) => up({ unitsIncluded: e.target.value })}
@@ -610,7 +627,13 @@ export default function NewEvent() {
             )}
             <Row>
               <Field label="Actual event times" hint="Only if it ran longer/earlier."><input className="input" value={f.actualTimes} onChange={(e) => up({ actualTimes: e.target.value })} placeholder="Ran 1 hr, arrived 30 min early" /></Field>
-              <Field label="Square device"><input className="input" value={f.squareDevice} onChange={(e) => up({ squareDevice: e.target.value })} placeholder="KEV7" /></Field>
+              {/* Package events are host-billed and skip Square reconciliation
+                  entirely, so a terminal recorded here would never be read. */}
+              {f.eventType !== "Package" && (
+                <Field label="Square device" hint="Terminal the driver used.">
+                  <input className="input" value={f.squareDevice} onChange={(e) => up({ squareDevice: e.target.value })} placeholder="KEV7" />
+                </Field>
+              )}
             </Row>
           </Card>
         </div>
