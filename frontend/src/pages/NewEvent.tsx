@@ -362,6 +362,22 @@ export default function NewEvent() {
   const est = useMemo(() => estimate(f), [f]);
   const up = (patch: Partial<F>) => setF((prev) => ({ ...prev, ...patch }));
 
+  /** Choosing the event type narrows everything below it.
+   *
+   *  Keeps the current billing model only if it belongs to the new type, and drops
+   *  any published-package preset that no longer applies. When a type offers just
+   *  one model — Hybrid does — it is selected outright rather than left as a
+   *  one-item dropdown to click through. */
+  function chooseEventType(v: EventType) {
+    const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
+    const only = modelsFor(v);
+    up({
+      eventType: v,
+      billing: keep ? f.billing : (only.length === 1 ? only[0].key : ""),
+      pkg: keep ? f.pkg : "",
+    });
+  }
+
   /** Fill the pricing fields from a published package + size.
    *
    *  The package fixes the price; the size fixes the included count and the
@@ -591,15 +607,7 @@ export default function NewEvent() {
                 options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
                   .map((t) => [t, EVENT_TYPE_LABELS[t]] as [string, string])}
                 value={f.eventType}
-                onChange={(v) => {
-                  // Drop the model and any package preset that no longer fit the type.
-                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
-                  up({
-                    eventType: v as EventType,
-                    billing: keep ? f.billing : "",
-                    pkg: keep ? f.pkg : "",
-                  });
-                }}
+                onChange={(v) => chooseEventType(v as EventType)}
               />
             </Field>
             <Field label="Tax exempt" req hint="Drives the 6% sales tax. If YES, tax is $0 and a certificate should be on file.">
@@ -651,6 +659,7 @@ export default function NewEvent() {
               <select
                 className="select"
                 value={f.billing}
+                disabled={!f.eventType}
                 onChange={(e) => {
                   const model = BILLING_MODELS.find((m) => m.key === e.target.value);
                   // Choosing a model by hand means this is not a published
@@ -662,11 +671,13 @@ export default function NewEvent() {
                   });
                 }}
               >
-                <option value="">Select billing model…</option>
-                {(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[]).map((t) => (
-                  <optgroup key={t} label={EVENT_TYPE_LABELS[t]}>
-                    {modelsFor(t).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                  </optgroup>
+                <option value="">
+                  {f.eventType ? "Select billing model…" : "Pick an event type first…"}
+                </option>
+                {/* Only the chosen type's models. Showing all nine invited picking
+                    one that contradicts the type selected just above it. */}
+                {modelsFor(f.eventType).map((m) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
                 ))}
               </select>
             </Field>
@@ -721,14 +732,7 @@ export default function NewEvent() {
                 options={(["Package", "Selling", "Min Guarantee", "Hybrid"] as EventType[])
                   .map((tt) => [tt, EVENT_TYPE_LABELS[tt]] as [string, string])}
                 value={f.eventType}
-                onChange={(v) => {
-                  const keep = BILLING_MODELS.find((m) => m.key === f.billing && m.type === v);
-                  up({
-                    eventType: v as EventType,
-                    billing: keep ? f.billing : "",
-                    pkg: keep ? f.pkg : "",
-                  });
-                }}
+                onChange={(v) => chooseEventType(v as EventType)}
               />
             </Field>
             <Row>
