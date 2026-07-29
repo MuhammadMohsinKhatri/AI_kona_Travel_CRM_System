@@ -152,8 +152,8 @@ const FIELD_MAP: Record<string, string[]> = {
   PACKAGE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
   PACKAGE_FIXED: ["baseAmount"],            // included count + overage: Event section
   PACKAGE_HOURLY: ["hourlyRate"],
-  SELLING_OPEN: ["ratePerServing"],
-  SELLING_WITH_GIVEBACK: ["ratePerServing", "giveback"],
+  SELLING_OPEN: [],                          // revenue comes from Square
+  SELLING_WITH_GIVEBACK: ["giveback"],       // ditto; only the % is ours to set
   MIN_GUARANTEE_FLAT: ["minFlat"],
   MIN_GUARANTEE_HOURLY: ["mgPerHour"],
   HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: ["baseAmount", "guestRate"],
@@ -162,26 +162,13 @@ const FIELD_MAP: Record<string, string[]> = {
  *  never block a booking — the guest rate does not enter the host's subtotal
  *  (a fixed host base plus host-billed overage is what gets invoiced), and the
  *  pricing document does not list it among the required fields either. */
-const OPTIONAL_FIELDS = new Set([
-  "guestRate",
-  // On a selling event the money comes from Square and the cash tin, not from a
-  // rate typed at booking — the event is never invoiced at all. The rate is only a
-  // fallback estimate for before the event reconciles, so it must not block a
-  // booking. Keyed per model because for a package the same field IS the price.
-  "SELLING_OPEN:ratePerServing",
-  "SELLING_WITH_GIVEBACK:ratePerServing",
-]);
+const OPTIONAL_FIELDS = new Set(["guestRate"]);
 
 const isOptionalField = (model: string, field: string) =>
   OPTIONAL_FIELDS.has(field) || OPTIONAL_FIELDS.has(`${model}:${field}`);
 
 /** Per-model overrides where a shared field means something different. */
-const FIELD_HINTS: Record<string, string> = {
-  "SELLING_OPEN:ratePerServing":
-    "Optional. Guest menu price, used only to estimate sales before Square reconciles — the actual figure comes from Square.",
-  "SELLING_WITH_GIVEBACK:ratePerServing":
-    "Optional. Guest menu price for the pre-event estimate. The giveback is calculated from the sales Square actually reports.",
-};
+const FIELD_HINTS: Record<string, string> = {};
 
 const FIELD_LABELS: Record<string, string> = {
   ratePerServing: "Price per serving ($)",
