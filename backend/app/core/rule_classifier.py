@@ -55,6 +55,15 @@ _ADMIN_SENTENCES: list[tuple[re.Pattern, Any]] = [
      _model("PACKAGE_BASE_FEE_PLUS_SERVINGS", "BASE_AMOUNT", "RATE_PER_SERVING")),
     (re.compile(rf"^{_AMT} covers up to ([\d,]+) servings, each additional {_AMT} a piece\.?$", re.I),
      _model("PACKAGE_FIXED", "BASE_AMOUNT", "UNITS_INCLUDED_IN_BASE", "RATE_PER_SERVING")),
+    # Hourly with a serving allowance, written by the New Event form when an
+    # included count is entered. Must come BEFORE the plain hourly rule, which
+    # would otherwise never be reached for this sentence — and without it the
+    # allowance is lost, so every serving gets billed on top of the hour.
+    (re.compile(
+        rf"^{_AMT} per hour, includes up to ([\d,]+) servings, "
+        rf"each additional {_AMT} a piece\.?$", re.I),
+     _model("PACKAGE_HOURLY", "HOURLY_RATE", "UNITS_INCLUDED_IN_BASE",
+            "RATE_PER_SERVING")),
     (re.compile(rf"^{_AMT} per hour\.?$", re.I),
      _model("PACKAGE_HOURLY", "HOURLY_RATE")),
     (re.compile(r"^Send invoice\.?$", re.I), lambda m, o: None),

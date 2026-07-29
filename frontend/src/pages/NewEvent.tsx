@@ -48,7 +48,7 @@ interface F {
   hourlyRate: string; minFlat: string; mgPerHour: string; guestRate: string;
   locationFee: string;
   addonAmount: string; addonLabel: string; allIn: boolean;
-  serveKeep: string; paymentModel: string;
+  cupSize: string;
   attendees: string; parking: string; additional: string; cardOnly: boolean;
   paid: boolean; method: "" | PayMethod; cashAmount: string;
   actualCount: string; actualTimes: string; squareDevice: string;
@@ -65,26 +65,41 @@ const initial: F = {
   hourlyRate: "", minFlat: "", mgPerHour: "", guestRate: "",
   locationFee: "",
   addonAmount: "", addonLabel: "", allIn: false,
-  serveKeep: "", paymentModel: "",
+  cupSize: "",
   attendees: "", parking: "", additional: "", cardOnly: false,
   paid: false, method: "", cashAmount: "",
   actualCount: "", actualTimes: "", squareDevice: "",
 };
 
+/** Cup / serving sizes offered. The size matters twice: it decides how many
+ *  servings a package includes (same price, fewer larger cups) and it is how the
+ *  driver knows what to pour. Kept as a list here rather than hard-coded against
+ *  included counts, because the size -> included-count -> overage-price grid
+ *  varies per package and has not been supplied yet — inventing one would put a
+ *  number nobody agreed to onto a client's invoice. */
+const CUP_SIZES = ["9oz", "12oz", "16oz", "Large", "Novelty / ice cream"] as const;
+
 const needServe = (t: string) => t === "Package" || t === "Hybrid";
+
+/** Models where a serving SIZE, an included COUNT and an OVERAGE price all apply.
+ *  Everything else prices per serving or per hour with nothing "included", so
+ *  showing an included count there invites a meaningless number. */
+const SIZED_MODELS = new Set([
+  "PACKAGE_FIXED", "PACKAGE_HOURLY", "HYBRID_HOST_BASE_PLUS_GUEST_EXTRA",
+]);
 const modelsFor = (t: string) => BILLING_MODELS.filter((m) => m.type === t);
 
 /** Which structured pricing fields each billing model needs. */
 const FIELD_MAP: Record<string, string[]> = {
   PACKAGE_PER_SERVING: ["ratePerServing"],
   PACKAGE_BASE_FEE_PLUS_SERVINGS: ["baseAmount", "ratePerServing"],
-  PACKAGE_FIXED: ["baseAmount", "unitsIncluded", "ratePerServing"],
+  PACKAGE_FIXED: ["baseAmount"],            // included count + overage: Event section
   PACKAGE_HOURLY: ["hourlyRate"],
   SELLING_OPEN: [],
   SELLING_WITH_GIVEBACK: ["giveback"],
   MIN_GUARANTEE_FLAT: ["minFlat"],
   MIN_GUARANTEE_HOURLY: ["mgPerHour"],
-  HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: ["baseAmount", "unitsIncluded", "ratePerServing"],
+  HYBRID_HOST_BASE_PLUS_GUEST_EXTRA: ["baseAmount", "guestRate"],
 };
 const FIELD_LABELS: Record<string, string> = {
   ratePerServing: "Rate per serving ($)",
@@ -94,6 +109,7 @@ const FIELD_LABELS: Record<string, string> = {
   minFlat: "Flat minimum ($)",
   mgPerHour: "Minimum per hour ($)",
   giveback: "Giveback %",
+  guestRate: "Guest pays per serving ($)",
 };
 
 function hoursBetween(f: F): number {
@@ -113,9 +129,29 @@ function buildAdminNotes(f: F): string {
     case "PACKAGE_BASE_FEE_PLUS_SERVINGS":
       lines.push(`Setup fee $${f.baseAmount || "0"} plus $${f.ratePerServing || "0"} per serving. Send invoice.`); break;
     case "PACKAGE_FIXED":
-      lines.push(`$${f.baseAmount || "0"} covers up to ${f.unitsIncluded || "0"} servings, each additional $${f.ratePerServing || "0"} a piece. Send invoice.`); break;
-    case "PACKAGE_HOURLY":
-      lines.push(`$${f.hourlyRate || "0"} per hour. Send invoice.`); break;
+      // Wording is load-bearing: rule_classifier matches this sentence exactly.
+      // The serving size travels in EVENT NOTES instead.
+      lines.push(
+        `$${f.baseAmount || "0"} covers up to ${f.unitsIncluded || "0"} servings, ` +
+        `each additional $${f.ratePerServing || "0"} a piece. Send invoice.`
+      ); break;
+    case "PACKAGE_HOURLY": {
+      // An hourly package may or may not include servings. Only say so when a
+      // keep count is given, because "includes N" and "plus $X each" are what
+      // decide whether servings are billed on top of the hour.
+      // Two templates, both matched exactly by rule_classifier: plain hourly, or
+      // hourly with a serving allowance. Servings are billed only above the
+      // allowance, so omitting it means the hour is the whole charge.
+      if (Number(f.unitsIncluded)) {
+        lines.push(
+          `$${f.hourlyRate || "0"} per hour, includes up to ${f.unitsIncluded} ` +
+          `servings, each additional $${f.ratePerServing || "0"} a piece. Send invoice.`
+        );
+      } else {
+        lines.push(`$${f.hourlyRate || "0"} per hour. Send invoice.`);
+      }
+      break;
+    }
     case "SELLING_OPEN":
       lines.push("Open selling event. Guests pay individually."); break;
     case "SELLING_WITH_GIVEBACK":
@@ -131,7 +167,6 @@ function buildAdminNotes(f: F): string {
         (f.guestRate ? ` Guests pay $${f.guestRate} per serving for extras.` : "")
       ); break;
   }
-  if (f.paymentModel.trim()) lines.push(f.paymentModel.trim());
   if (Number(f.giveback)) lines.push(`Giveback percentage: ${f.giveback}%.`);
   if (Number(f.addonAmount)) lines.push(`Plus $${f.addonAmount} for ${f.addonLabel || "add-on"}.`);
   if (Number(f.locationFee)) lines.push(`$${f.locationFee} location fee.`);
@@ -149,7 +184,10 @@ function buildEventNotes(f: F): string[] {
   const lines: string[] = [];
   lines.push(`EVENT TYPE: ${f.eventType || "—"}`);
   if (f.attendees) lines.push(`ATTENDEES: ${f.attendees} people`);
-  const serve = f.serveKeep.trim() || (f.unitsIncluded ? `${f.unitsIncluded} servings included` : "");
+  // Composed from the structured fields rather than typed prose, so the count and
+  // the size are always machine-readable instead of needing to be parsed back out.
+  const count = f.unitsIncluded;
+  const serve = [count, f.cupSize].filter(Boolean).join(" ");
   if (serve) lines.push(`SERVE & KEEP COUNT: ${serve}`);
   if (f.parking) lines.push(`PARKING: ${f.parking.trim()}`);
   if (f.additional) lines.push(`ADD'L INSTRUCTION: ${f.additional.trim()}`);
@@ -186,12 +224,23 @@ function estimate(f: F) {
     case "PACKAGE_FIXED": {
       const over = Math.max(0, count - n(f.unitsIncluded));
       subtotal = n(f.baseAmount) + over * n(f.ratePerServing);
-      detail = over > 0 ? `$${n(f.baseAmount)} + ${over} over × $${n(f.ratePerServing)}` : `$${n(f.baseAmount)} floor`;
+      detail = over > 0
+        ? `$${n(f.baseAmount)} + ${over} over × $${n(f.ratePerServing)}`
+        : `$${n(f.baseAmount)} package (${n(f.unitsIncluded)} ${f.cupSize || "servings"} included)`;
       break;
     }
-    case "PACKAGE_HOURLY":
-      subtotal = hours * n(f.hourlyRate);
-      detail = `${hours}h × $${n(f.hourlyRate)}`; break;
+    case "PACKAGE_HOURLY": {
+      // Servings are billed only ABOVE an allowance, and only when one is given.
+      // The engine applies max(0, served - included), so with no allowance the
+      // hour is the whole charge rather than the hour plus every serving.
+      const included = n(f.unitsIncluded);
+      const over = included > 0 ? Math.max(0, count - included) : 0;
+      subtotal = hours * n(f.hourlyRate) + over * n(f.ratePerServing);
+      detail = over > 0
+        ? `${hours}h × $${n(f.hourlyRate)} + ${over} over × $${n(f.ratePerServing)}`
+        : `${hours}h × $${n(f.hourlyRate)}`;
+      break;
+    }
     case "MIN_GUARANTEE_FLAT":
       subtotal = n(f.minFlat); detail = "guaranteed floor"; break;
     case "MIN_GUARANTEE_HOURLY":
@@ -251,6 +300,14 @@ export default function NewEvent() {
     if (f.eventType && !f.billing) m.push("Billing model");
     for (const field of FIELD_MAP[f.billing] ?? []) {
       if (!(f as any)[field]) m.push(FIELD_LABELS[field]);
+    }
+    // The size and the included count live in the Event section rather than
+    // FIELD_MAP, so they need checking separately. Both are load-bearing: without
+    // the count the engine cannot tell an overage from an included serving, and
+    // without the size the driver does not know what to pour.
+    if (SIZED_MODELS.has(f.billing)) {
+      if (!f.cupSize) m.push("Serving size");
+      if (!f.unitsIncluded) m.push("Servings included");
     }
     if (!f.attendees) m.push("Attendees");
     if (needServe(f.eventType) && !f.actualCount) m.push("Actual serving count");
@@ -495,15 +552,35 @@ export default function NewEvent() {
             </Row>
             {/* Package and Hybrid only. On a selling event guests buy their own,
                 so there is no included count to record — showing the field there
-                just invites someone to fill in a number that means nothing. */}
-            {needServe(f.eventType) && (
-              <Field label="Serve / Keep count" hint='Free-text pricing detail, e.g. "$295 includes 60 servings, each additional $4". Optional — the billing model above is the source of truth.'>
-                <input className="input" value={f.serveKeep} onChange={(e) => up({ serveKeep: e.target.value })} placeholder="$295 includes 60 12oz Konas, each additional $4" />
-              </Field>
+                just invites someone to fill in a number that means nothing.
+
+                These three replace what used to be one free-text box ("$295
+                includes 60 12oz Konas, each additional $4"). Prose had to be
+                parsed back out by the classifier to be usable, which is where
+                mistakes came from; as numbers they are read directly. */}
+            {SIZED_MODELS.has(f.billing) && (
+              <Row3>
+                <Field label="Serving size" hint="Decides how many the package includes, and tells the driver what to pour.">
+                  <select className="select" value={f.cupSize}
+                    onChange={(e) => up({ cupSize: e.target.value })}>
+                    <option value="">Select size…</option>
+                    {CUP_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </Field>
+                <Field label="Servings included" req hint="How many this size includes at the package price.">
+                  <input className="input" type="number" min="0" step="1"
+                    value={f.unitsIncluded}
+                    onChange={(e) => up({ unitsIncluded: e.target.value })}
+                    placeholder="60" />
+                </Field>
+                <Field label="Additional serving ($)" hint="Charged per serving beyond the included count. Leave blank if extras are not billed.">
+                  <input className="input" type="number" min="0" step="0.01"
+                    value={f.ratePerServing}
+                    onChange={(e) => up({ ratePerServing: e.target.value })}
+                    placeholder="4.00" />
+                </Field>
+              </Row3>
             )}
-            <Field label="PAYMENT — pricing model" hint='Free-text billing basis, e.g. "$295 plus tax for the hour". Optional.'>
-              <input className="input" value={f.paymentModel} onChange={(e) => up({ paymentModel: e.target.value })} placeholder="$295 plus tax for the hour" />
-            </Field>
             <Field label="Additional instructions">
               <input className="input" value={f.additional} onChange={(e) => up({ additional: e.target.value })} placeholder='e.g. "Hard stop at 100 servings"' />
             </Field>

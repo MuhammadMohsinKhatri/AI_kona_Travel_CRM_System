@@ -104,3 +104,39 @@ def test_label_model_mismatch_falls_back_to_ai():
 def test_legacy_unlabeled_notes_fall_back_to_ai():
     assert try_rule_classify(cleaned(
         "$4 per serving. Send invoice. Plus tax.", "<p>bring ice</p>")) is None
+
+
+def test_hourly_with_a_serving_allowance_parses_deterministically():
+    """The New Event form writes this sentence when an included count is entered.
+    Without a matching template it fell through to the LLM at full token cost, and
+    the allowance was lost — every serving then billed on top of the hour.
+
+    Ordered before the plain "$X per hour" rule, which would otherwise swallow it.
+    """
+    r = try_rule_classify(cleaned(
+        "$295 per hour, includes up to 60 servings, each additional $4 a piece. "
+        "Send invoice. Plus tax.",
+        "<p>EVENT TYPE: Package<br>ATTENDEES: 100 people</p>",
+        "ACTUAL SERVING COUNT: 75"))
+    assert r is not None, "fell back to the LLM"
+    assert r["BILLING_MODEL"] == "PACKAGE_HOURLY"
+    assert r["HOURLY_RATE"] == 295.0
+    assert r["UNITS_INCLUDED_IN_BASE"] == 60.0
+    assert r["RATE_PER_SERVING"] == 4.0
+    # The shared helper's window is 10:00-12:00, so TWO hours:
+    # 2 x $295 + max(0, 75 - 60) x $4 = 590 + 60 = $650.
+    assert r["TOTAL_EVENT_HOURS"] == 2.0
+    assert calculate_invoice(r)["SUBTOTAL"] == 650.0
+
+
+def test_plain_hourly_still_bills_only_the_hour():
+    """No allowance stated means servings are NOT charged on top — the shape that
+    produced Kiddie Academy's $250 rather than $338."""
+    r = try_rule_classify(cleaned(
+        "$250 per hour. Send invoice. Plus tax.",
+        "<p>EVENT TYPE: Package<br>ATTENDEES: 30 people</p>",
+        "ACTUAL SERVING COUNT: 22"))
+    assert r is not None and r["BILLING_MODEL"] == "PACKAGE_HOURLY"
+    assert r["RATE_PER_SERVING"] == 0
+    # Two hours at $250, and the 22 servings add nothing.
+    assert calculate_invoice(r)["SUBTOTAL"] == 500.0
