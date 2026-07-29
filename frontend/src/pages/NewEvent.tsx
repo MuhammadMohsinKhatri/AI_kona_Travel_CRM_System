@@ -709,8 +709,14 @@ export default function NewEvent() {
                 disabled={!f.eventType}
                 onChange={(e) => {
                   const model = BILLING_MODELS.find((m) => m.key === e.target.value);
-                  // Choosing a model by hand means this is not a published
-                  // package, so clear the preset rather than leave it claiming one.
+                  // Choosing a model by hand means this is not a published package.
+                  // Clearing only the preset LABEL left its figures behind: after
+                  // leaving the party package the notes still read "Setup fee $99
+                  // ... Minimum $150" while the picker said "custom". The stray
+                  // minimum is the harmful one — it would quietly floor a custom
+                  // event at $150. So drop whatever the preset filled in. Figures
+                  // typed by hand are untouched, because there was no preset then.
+                  const leavingPreset = Boolean(f.pkg);
                   up({
                     billing: e.target.value,
                     // Only force the type when the model belongs to just one; a
@@ -720,6 +726,12 @@ export default function NewEvent() {
                       ? model.types[0]
                       : f.eventType,
                     pkg: "",
+                    ...(leavingPreset
+                      ? {
+                          cupSize: "", baseAmount: "", unitsIncluded: "",
+                          ratePerServing: "", minFlat: "",
+                        }
+                      : {}),
                   });
                 }}
               >
