@@ -555,6 +555,9 @@ export interface Invoice {
 }
 export interface EventDetail extends EventSummary {
   error: string | null;
+  /** Deep link to this event in KonaOS. null when the events didn't come from
+   *  KonaOS (mock dataset), in which case no link is offered. */
+  konaos_url: string | null;
   raw: Record<string, unknown>;
   cleaned: Record<string, unknown>;
   classification: Record<string, unknown>;

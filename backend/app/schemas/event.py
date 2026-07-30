@@ -77,6 +77,10 @@ class InvoiceOut(BaseModel):
 
 
 class EventDetail(EventSummary):
+    # Deep link into the KonaOS admin UI for this event, so the source notes
+    # behind every figure on the page are one click away. None when the events
+    # didn't come from KonaOS (see Event.konaos_url).
+    konaos_url: Optional[str] = None
     raw: dict[str, Any]
     cleaned: dict[str, Any]
     classification: dict[str, Any]

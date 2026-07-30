@@ -58,6 +58,20 @@ export default function EventDetail() {
           </p>
         </div>
         <div className="flex">
+          {/* Straight to the source: every figure on this page is derived from
+              the KonaOS notes, so checking one shouldn't mean searching the
+              Events grid by hand for the same booking. */}
+          {ev.konaos_url && (
+            <a
+              className="btn"
+              href={ev.konaos_url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open this booking in Kona OS to read the original notes"
+            >
+              Open in Kona OS ↗
+            </a>
+          )}
           <Badge kind={ev.status}>{ev.status}</Badge>
         </div>
       </div>

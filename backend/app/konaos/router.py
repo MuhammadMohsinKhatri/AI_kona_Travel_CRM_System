@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import httpx
 from bs4 import BeautifulSoup
 
+from app.konaos.admin_links import ADMIN_BASE_URL, event_admin_url
 from app.konaos.client import KonaosClient
 from app.konaos.models import (
     ClientDetails,
@@ -433,8 +434,6 @@ async def konaos_session_update(
 
 # ── Event intake helpers (form options + create-and-locate) ──────────────────
 
-ADMIN_BASE_URL = "https://admin.konaos.com"
-
 # Fixed frontend enums (not exposed by any KonaOS API — sourced from the UI).
 EVENT_STATUSES = [
     {"value": "pending", "label": "Pending (no client emails)"},
@@ -584,10 +583,7 @@ async def konaos_quick_create(
     if driver_notes and not driver_notes_written:
         message += " (Driver notes couldn't be saved automatically — add them in Kona OS.)"
 
-    edit_url = (
-        f"{ADMIN_BASE_URL}/#/franchise/events/edit-event?id={event_id}&eventType=list"
-        if event_id else None
-    )
+    edit_url = event_admin_url(event_id)
     return {
         "success": True,
         "message": message,

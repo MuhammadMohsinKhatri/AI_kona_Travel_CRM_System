@@ -76,3 +76,19 @@ class Event(Base):
         "FinancialEntry", back_populates="event",
         cascade="all, delete-orphan", uselist=False,
     )
+
+    @property
+    def konaos_url(self) -> Optional[str]:
+        """Deep link to this event in the KonaOS admin UI, or None.
+
+        crm_event_id is only a real KonaOS id when the events came from KonaOS;
+        under CRM_PROVIDER=mock it is a made-up "EVT-1001", so a link would go
+        nowhere. Gating on the provider means the button simply isn't offered on
+        a mock dataset rather than offering a dead one.
+        """
+        from app.config import settings
+        from app.konaos.admin_links import event_admin_url
+
+        if settings.crm_provider != "konaos":
+            return None
+        return event_admin_url(self.crm_event_id)
