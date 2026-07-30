@@ -552,6 +552,9 @@ export interface Invoice {
   id: number;
   event_id: number;
   crm_invoice_id: string | null;
+  /** Deep link to this invoice in Kona OS. null when the draft never reached
+   *  Kona OS (dry run, or a create that failed), so there's nothing to open. */
+  konaos_url: string | null;
   invoice_number: string | null;
   title: string;
   invoice_type: string;

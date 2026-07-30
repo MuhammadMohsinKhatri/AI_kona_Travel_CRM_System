@@ -28,3 +28,26 @@ def event_admin_url(crm_event_id: str | None) -> str | None:
     if not eid:
         return None
     return f"{ADMIN_BASE_URL}/#/franchise/events/edit-event?id={eid}&eventType=list"
+
+
+def invoice_admin_url(crm_invoice_id: str | None) -> str | None:
+    """Link to one invoice's detail screen in KonaOS, or None if there's no id.
+
+    Route and parameter taken from the admin app's own router, not guessed:
+    it navigates with ``router.navigate(["franchise/invoice/invoice-details"],
+    {queryParams: {id: e.id}})``. A wrong fragment here would load the invoice
+    shell with nothing selected, which reads as "the link is broken" rather than
+    as an error anyone can trace.
+
+    KonaOS's sibling route ``quotation-details`` serves the same screen for
+    documents whose invoiceType is "quotation". Every record we hold is one this
+    system created, and it only ever creates "Invoice"/"Hybrid" (see
+    invoice_builder), so invoice-details is always correct here.
+
+    The id is the CRM's own invoice id, not our row id and not the human invoice
+    number — a draft that failed to reach KonaOS has no id and gets no link.
+    """
+    iid = str(crm_invoice_id or "").strip()
+    if not iid:
+        return None
+    return f"{ADMIN_BASE_URL}/#/franchise/invoice/invoice-details?id={iid}"

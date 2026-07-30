@@ -145,6 +145,21 @@ export default function Invoices() {
                     )}
                   </td>
                   <td className="actions">
+                    {/* stopPropagation: the row navigates to the event, and a
+                        click meant for KonaOS shouldn't do that instead. */}
+                    {inv.konaos_url && (
+                      <a
+                        className="btn"
+                        href={inv.konaos_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Open this invoice in Kona OS"
+                        style={{ marginRight: 6 }}
+                      >
+                        Kona OS ↗
+                      </a>
+                    )}
                     <DeleteButton
                       title="Delete this invoice record (KonaOS is not touched)"
                       onDelete={async () => { await api.deleteInvoice(inv.id); await reload(); }}

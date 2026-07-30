@@ -11,11 +11,14 @@ import os
 os.environ.setdefault("CRM_PROVIDER", "mock")
 
 from app.config import settings
-from app.konaos.admin_links import ADMIN_BASE_URL, event_admin_url
-from app.models import Event
+from app.konaos.admin_links import (ADMIN_BASE_URL, event_admin_url,
+                                    invoice_admin_url)
+from app.models import Event, Invoice
 
 # A real KonaOS event id, the 32-hex shape its API returns.
 REAL_ID = "30c81c46a35ce411e5fbc1191a0a52ef"
+# A real KonaOS invoice id, same shape (from the live invoice grid).
+REAL_INVOICE_ID = "7031554e484648ceb97e1e167fdabeb2"
 
 
 def test_url_is_the_admin_hash_route_the_grid_itself_uses():
@@ -42,6 +45,54 @@ def test_konaos_events_get_the_link(monkeypatch):
     monkeypatch.setattr(settings, "crm_provider", "konaos")
     ev = Event(crm_event_id=REAL_ID)
     assert ev.konaos_url == event_admin_url(REAL_ID)
+
+
+def test_invoice_url_is_the_route_the_admin_grid_navigates_to():
+    """Taken from the admin app's own router, not guessed:
+    router.navigate(["franchise/invoice/invoice-details"], {queryParams: {id}}).
+    A wrong fragment loads the invoice shell with nothing selected, which reads
+    as a broken link rather than an error anyone can trace."""
+    assert invoice_admin_url(REAL_INVOICE_ID) == (
+        f"{ADMIN_BASE_URL}/#/franchise/invoice/invoice-details?id={REAL_INVOICE_ID}"
+    )
+
+
+def test_a_draft_that_never_reached_konaos_gets_no_invoice_link(monkeypatch):
+    """crm_invoice_id is empty on a dry run or a failed create — there is no
+    document at the other end, so no button."""
+    monkeypatch.setattr(settings, "crm_provider", "konaos")
+    assert Invoice(crm_invoice_id=None).konaos_url is None
+    assert Invoice(crm_invoice_id="").konaos_url is None
+
+
+def test_mock_invoices_are_not_offered_a_dead_link(monkeypatch):
+    monkeypatch.setattr(settings, "crm_provider", "mock")
+    assert Invoice(crm_invoice_id=REAL_INVOICE_ID).konaos_url is None
+
+
+def test_konaos_invoices_get_the_link(monkeypatch):
+    monkeypatch.setattr(settings, "crm_provider", "konaos")
+    assert Invoice(crm_invoice_id=REAL_INVOICE_ID).konaos_url == \
+        invoice_admin_url(REAL_INVOICE_ID)
+
+
+def test_invoice_schema_carries_the_link(monkeypatch):
+    """Same from_attributes hop as the event link — the routes return the ORM
+    object and never mention konaos_url."""
+    from app.schemas.event import InvoiceOut
+
+    monkeypatch.setattr(settings, "crm_provider", "konaos")
+    inv = Invoice(
+        id=1, event_id=1, crm_invoice_id=REAL_INVOICE_ID, invoice_number="00849",
+        title="ThriftBooks", invoice_type="Invoice", status="draft",
+        grand_total=136.40, subtotal=124.0, tax_amount=7.44, due_amount=136.40,
+        has_variance=False, variance_amount=0.0, payload={},
+    )
+    from datetime import datetime, timezone
+    inv.created_at = datetime.now(timezone.utc)
+
+    out = InvoiceOut.model_validate(inv)
+    assert out.konaos_url and REAL_INVOICE_ID in out.konaos_url
 
 
 def test_detail_schema_carries_the_link(monkeypatch):

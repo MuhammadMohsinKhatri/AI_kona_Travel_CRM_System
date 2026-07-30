@@ -62,3 +62,19 @@ class Invoice(Base):
     @property
     def brand(self) -> str:
         return self.event.brand if self.event else ""
+
+    @property
+    def konaos_url(self) -> Optional[str]:
+        """Deep link to this invoice in the KonaOS admin UI, or None.
+
+        None in two cases, both meaning there is nothing to open: the draft never
+        reached KonaOS (no crm_invoice_id — e.g. a dry run, or a create that
+        failed), or the events didn't come from KonaOS at all. Same reasoning as
+        Event.konaos_url: no button beats a dead one.
+        """
+        from app.config import settings
+        from app.konaos.admin_links import invoice_admin_url
+
+        if settings.crm_provider != "konaos":
+            return None
+        return invoice_admin_url(self.crm_invoice_id)

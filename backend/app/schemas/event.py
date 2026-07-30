@@ -54,6 +54,9 @@ class InvoiceOut(BaseModel):
     id: int
     event_id: int
     crm_invoice_id: Optional[str] = None
+    # Deep link to this invoice in the KonaOS admin UI. None when the draft never
+    # reached KonaOS, or the CRM isn't KonaOS (see Invoice.konaos_url).
+    konaos_url: Optional[str] = None
     invoice_number: Optional[str] = None
     title: str
     invoice_type: str

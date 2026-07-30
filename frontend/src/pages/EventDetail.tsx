@@ -198,6 +198,21 @@ export default function EventDetail() {
                 {inv.invoice_type} · {inv.invoice_number} · {inv.status}
               </div>
               <LineItems payload={inv.payload} />
+              {/* Straight to the document itself — the line items below are what
+                  we SENT; this is what Kona OS is actually holding. */}
+              {inv.konaos_url && (
+                <p style={{ marginTop: 10, marginBottom: 0 }}>
+                  <a
+                    className="btn"
+                    href={inv.konaos_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open this invoice in Kona OS"
+                  >
+                    Open invoice in Kona OS ↗
+                  </a>
+                </p>
+              )}
             </div>
           ))}
         </>
