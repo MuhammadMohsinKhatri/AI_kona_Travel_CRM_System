@@ -117,6 +117,17 @@ def test_form_event_type_mismatch_is_held():
     assert any("EVENT TYPE 'invoice'" in x["issue"] for x in v), _issues(v)
 
 
+def test_form_invoice_against_package_is_not_a_mismatch():
+    """The form's word for a package event is still "Invoice" — that agrees with
+    a "package" classification and must not be reported as a disagreement."""
+    v = _check(BASE_PLUS_SERVINGS_NOTES, {
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_BASE_FEE_PLUS_SERVINGS",
+        "BASE_AMOUNT": 99, "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 23,
+        "MINIMUM_FLAT_AMOUNT": 150, "TAXABLE": "YES",
+    })
+    assert not any("EVENT TYPE" in x["issue"] for x in v), _issues(v)
+
+
 def test_dropped_base_fee_is_held():
     """The generalised catch: the $99 is stated and the chosen model ignores it."""
     v = _check(BASE_PLUS_SERVINGS_NOTES, {

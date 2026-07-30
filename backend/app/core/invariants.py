@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.core.billing import BILLING_MODELS
+from app.core.billing import BILLING_MODELS, canonical_event_type
 
 # Two cents: money is rounded to 2dp upstream, and derived products
 # (rate x units) can land a hair off.
@@ -204,7 +204,7 @@ def check_invariants(
         })
 
     billing_model = str(classification.get("BILLING_MODEL") or "").upper().strip()
-    event_type = str(classification.get("EVENT_TYPE") or "").strip().lower()
+    event_type = canonical_event_type(classification.get("EVENT_TYPE"))
 
     # ── a billing model nobody could have chosen by hand ─────────────────────
     # The 9 in billing.BILLING_MODELS are the whole vocabulary — they mirror the
@@ -227,12 +227,18 @@ def check_invariants(
     # draft invoice.
     declared = _form_field(text, r"EVENT\s*TYPE").lower()
     declared_type = next(
-        (t for t in ("package", "invoice", "selling", "hybrid",
-                     "minimum guarantee")
+        (t for t in ("minimum guarantee", "package", "invoice", "selling",
+                     "hybrid")
          if declared.startswith(t)),
         "",
     )
-    if declared_type and event_type and declared_type != event_type:
+    # The booking form still says "Invoice" for what we now call "package" — the
+    # office never changed its wording. Comparing the raw words made every
+    # correctly-classified package event fire this CRITICAL, which is exactly the
+    # everything-fires noise that gets a gate switched off. Both sides go through
+    # the same rename map so only a real disagreement is reported.
+    if (declared_type and event_type
+            and canonical_event_type(declared_type) != event_type):
         # CRITICAL because the declared type is the office's own classification and
         # overriding it has been wrong every time so far — a terminal mention gave
         # Hybrid, the word "minimum" gave Minimum Guarantee, on notes that plainly
