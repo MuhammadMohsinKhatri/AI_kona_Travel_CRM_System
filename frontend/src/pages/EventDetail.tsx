@@ -446,15 +446,19 @@ function SubtotalBreakdown({
   if (locationFee) items.push({ label: "Location / Destination Fee", amount: locationFee });
   if (addonAmount) items.push({ label: String(calc.ADDON_LABEL || "Add-on"), amount: addonAmount });
 
-  // A fee the notes state and then cancel ("waived $50 destination fee"). It
-  // contributes nothing by design, which is exactly why it needs a line: with no
-  // line, the notes name a $50 that appears nowhere in the invoice and the
-  // reader can't tell whether it was handled or dropped.
+  // A "waived" fee is charged in full and discounted straight back off, so the
+  // client can see the discount they were given — that is the entire reason the
+  // office records it. Shown as the same two lines the invoice carries, not as a
+  // single $0.00, because the dashboard has to explain the document rather than
+  // summarise it away.
   for (const w of (cls.WAIVED_FEES as WaivedFee[] | undefined) ?? []) {
+    const label = titleCase(w.name || "Destination fee");
+    items.push({ label, amount: w.amount });
     items.push({
-      label: `${titleCase(w.name || "Fee")} (waived)`,
-      amount: 0,
-      note: `Stated as ${money(w.amount)} in the notes — waived, so nothing is charged.`,
+      label: `${label} discount`,
+      amount: -w.amount,
+      note: "Charged in full and taken straight back off — the client sees the "
+        + "discount, and the total is unchanged.",
     });
   }
 

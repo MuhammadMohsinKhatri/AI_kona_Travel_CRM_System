@@ -216,6 +216,38 @@ th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: v
 tbody tr:hover { background: var(--surface-2); cursor: pointer; }
 tbody tr:last-child td { border-bottom: none; }
 
+/* ── Fitted table: everything on screen, no sideways scrolling ─────────────
+   For tables whose job is to be READ rather than scanned across dozens of
+   columns (the change log). The global `white-space: nowrap` above is what
+   forces those tables wider than the viewport — one long summary or a 32-char
+   KonaOS id and the whole row overflows. Here the columns are sized as
+   percentages of the container and the prose columns wrap instead.
+
+   Opt-in via `.table-wrap.fit`, not a change to the base rules: the ledger and
+   sheet views genuinely need nowrap + horizontal scroll, and a value that wraps
+   mid-figure in a money column is harder to read, not easier. */
+/* min-width, not a viewport media query: what squeezes these columns is the
+   CONTAINER, and the container is the window minus a ~330px sidebar. Keying the
+   fallback to viewport width measured fine at 950px while the real content box
+   was 620px and the Details column had collapsed to 29px. A container-relative
+   floor can't be fooled that way — above it nothing scrolls, below it the
+   wrapper scrolls rather than crushing the column you came to read. */
+.table-wrap.fit { overflow-x: auto; }
+.table-wrap.fit table { table-layout: fixed; width: 100%; min-width: 46rem; }
+.table-wrap.fit th, .table-wrap.fit td { white-space: normal; overflow-wrap: anywhere; }
+/* Keeps dates and short labels on one line — wrapping "2026-07-29" after the
+   year reads as two separate values. */
+.table-wrap.fit .keep { white-space: nowrap; }
+
+
+/* ── Pagination bar ────────────────────────────────────────────────────────
+   Under a fitted table: which slice you're looking at, and the way to the next.
+   The range ("11–20 of 156") rather than just a page number, because "page 2"
+   alone doesn't say whether you've seen everything. */
+.pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+  margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+.pager .btn:disabled { opacity: .45; cursor: not-allowed; }
+
 /* ── Sheet view: a wide ledger you can actually read ───────────────────────
    Frozen header + frozen identity columns (DATE / EVENT / EVENT TYPE), so a
    value 20 columns to the right still tells you which event it belongs to.

@@ -3,6 +3,11 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CrmAuditResponse } from "../api/client";
 import { AuditDetail, Badge, Empty, Loading } from "../components/ui";
 
+/** Rows per page. Ten keeps the whole table on screen without scrolling, which
+ *  matters more here than density: each row can carry a multi-line summary, a
+ *  before/after diff, and an expandable error dump. */
+const PAGE_SIZE = 10;
+
 /** Plain-language names for each logged change. The backend keys stay as-is —
  *  this is display only.
  *
@@ -30,6 +35,10 @@ const ACTION_LABELS: Record<string, string> = {
 export default function CrmAudit() {
   const [searchParams, setSearchParams] = useSearchParams();
   const action = searchParams.get("action") || "";
+  // In the URL like every other filter, so a link to page 3 of "errors in July"
+  // reopens exactly that. Clamped at 1 so a hand-edited ?page=0 can't ask the
+  // API for a negative offset.
+  const page = Math.max(1, Number(searchParams.get("page") || 1) || 1);
   const fromDate = searchParams.get("from_date") || "";
   const toDate = searchParams.get("to_date") || "";
   const urlSearch = searchParams.get("search") || "";
@@ -40,11 +49,15 @@ export default function CrmAudit() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  /** Any filter change resets to page 1 unless the patch sets `page` itself.
+   *  Without this, narrowing a filter while on page 6 shows an empty table and
+   *  looks like "no results" rather than "you're past the end". */
   function updateParams(patch: Record<string, string | undefined>) {
     const next = new URLSearchParams(searchParams);
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v); else next.delete(k);
     }
+    if (!("page" in patch)) next.delete("page");
     setSearchParams(next, { replace: true });
   }
 
@@ -58,13 +71,15 @@ export default function CrmAudit() {
   }, [debounced]);
 
   const params = useMemo(() => {
-    const p: Record<string, string> = { page_size: "100" };
+    const p: Record<string, string> = {
+      page_size: String(PAGE_SIZE), page: String(page),
+    };
     if (action) p.action = action;
     if (fromDate) p.from_date = fromDate;
     if (toDate) p.to_date = toDate;
     if (debounced.trim()) p.search = debounced.trim();
     return p;
-  }, [action, fromDate, toDate, debounced]);
+  }, [action, fromDate, toDate, debounced, page]);
 
   useEffect(() => {
     setData(null);
@@ -73,6 +88,8 @@ export default function CrmAudit() {
   }, [params]);
 
   const hasFilters = !!(action || fromDate || toDate || searchInput);
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
+
   function clearFilters() {
     setSearchParams(new URLSearchParams(), { replace: true });
     setSearchInput("");
@@ -123,8 +140,19 @@ export default function CrmAudit() {
       ) : data.items.length === 0 ? (
         <Empty text={hasFilters ? "No changes match these filters." : "The automation hasn't changed anything in KonaOS yet."} />
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap fit">
           <table>
+            {/* Percentages, not rem: fixed column widths don't shrink, so on a
+                narrower window they ate the row and left Details at 29px. These
+                scale, and the table's min-width (styles.css .table-wrap.fit)
+                stops them shrinking past readable. */}
+            <colgroup>
+              <col style={{ width: "11%" }} />
+              <col style={{ width: "23%" }} />
+              <col style={{ width: "14%" }} />
+              <col />
+              <col style={{ width: "11%" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Event date</th>
@@ -133,7 +161,7 @@ export default function CrmAudit() {
                     KonaOS changing under us, the opposite direction. */}
                 <th>What happened</th>
                 <th>Details</th>
-                <th>When it happened</th>
+                <th>When</th>
               </tr>
             </thead>
             <tbody>
@@ -148,16 +176,29 @@ export default function CrmAudit() {
                     borderLeft: e.action === "error" ? "3px solid var(--crit)" : undefined,
                   }}
                 >
-                  <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{e.event_date || "—"}</td>
+                  <td className="keep" style={{ fontWeight: 700 }}>{e.event_date || "—"}</td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{e.event_name || e.crm_event_id || "—"}</div>
-                    <div className="muted" style={{ fontSize: 12 }}>{e.crm_event_id}</div>
+                    {/* The KonaOS id is 32 characters and would drive the whole
+                        table wider than the screen. Truncated with the full value
+                        on hover — it's here to identify the row, and the event
+                        name above already does that at a glance. */}
+                    <div
+                      className="muted"
+                      title={e.crm_event_id}
+                      style={{
+                        fontSize: 12, whiteSpace: "nowrap",
+                        overflow: "hidden", textOverflow: "ellipsis",
+                      }}
+                    >
+                      {e.crm_event_id}
+                    </div>
                   </td>
                   <td><Badge kind={e.action}>{ACTION_LABELS[e.action] || e.action}</Badge></td>
                   <td
                     title={JSON.stringify(e.detail, null, 2)}
                     style={{
-                      whiteSpace: "normal", minWidth: 280, maxWidth: 460, fontSize: 13,
+                      fontSize: 13,
                       color: e.action === "error" ? "var(--crit)" : undefined,
                     }}
                   >
@@ -165,13 +206,52 @@ export default function CrmAudit() {
                     <AuditDetail detail={e.detail} />
                     <ErrorDiagnostic detail={e.detail} />
                   </td>
-                  <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                    {e.created_at ? new Date(e.created_at).toLocaleString() : "—"}
+                  {/* Date and time on two lines rather than one long string —
+                      a full toLocaleString() was the other column forcing the
+                      table wide. Exact value on hover. */}
+                  <td
+                    className="muted keep"
+                    style={{ fontSize: 12 }}
+                    title={e.created_at ? new Date(e.created_at).toString() : ""}
+                  >
+                    {e.created_at ? (
+                      <>
+                        <div>{new Date(e.created_at).toLocaleDateString(undefined, {
+                          day: "numeric", month: "short",
+                        })}</div>
+                        <div>{new Date(e.created_at).toLocaleTimeString(undefined, {
+                          hour: "numeric", minute: "2-digit",
+                        })}</div>
+                      </>
+                    ) : "—"}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {data && data.total > 0 && (
+        <div className="pager">
+          <span>
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, data.total)}
+            {" of "}{data.total}
+          </span>
+          <button
+            className="btn"
+            disabled={page <= 1}
+            onClick={() => updateParams({ page: page > 2 ? String(page - 1) : undefined })}
+          >
+            ← Previous
+          </button>
+          <button
+            className="btn"
+            disabled={page >= totalPages}
+            onClick={() => updateParams({ page: String(page + 1) })}
+          >
+            Next →
+          </button>
         </div>
       )}
     </>

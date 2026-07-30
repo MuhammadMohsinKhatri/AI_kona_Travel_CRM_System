@@ -60,6 +60,20 @@ def _minimum_label(event: dict[str, Any]) -> str:
     return f"{_hours_prefix(event)}Minimum Adjustment".strip()
 
 
+def _waived_fee_label(waived: dict[str, Any]) -> str:
+    """Name the waived-fee line the way the office says it out loud.
+
+    The name is read from the notes ("waived $50 destination fee" -> "destination
+    fee"), so it follows whatever wording was used rather than a fixed list.
+    Falls back to "Destination Fee" because that is the standing term for this in
+    the business — it is the discount's name, not a real travel charge.
+    """
+    name = str(waived.get("name") or "").strip()
+    if not name:
+        return "Destination Fee"
+    return " ".join(w[0].upper() + w[1:] if w else w for w in name.split())
+
+
 def _fixed_package_label(event: dict[str, Any], base_amount: float) -> str:
     """Name the fixed-package charge after the reason the client owes it.
 
@@ -221,6 +235,27 @@ def build_invoice_payload(
 
     if location_fee > 0:
         add_item("Location / Destination Fee", location_fee, 1, location_fee, True)
+
+    # A "waived" fee is a PRESENTATION, not an omission (Brett, 2026-07-30): the
+    # fee goes on the invoice at full price and the same amount comes straight
+    # back off as a discount, so the client can see they were given one. "There
+    # is no destination fee in and of itself — we use that terminology so the
+    # customer realizes we did give them a discount."
+    #
+    # The pair nets to zero, so the subtotal, tax and grand total below are
+    # untouched — this changes what the document SHOWS, never what is owed.
+    # Both lines are taxable so the tax base nets out too; KonaOS recomputes the
+    # total from the line items and must land on the same figure we sent.
+    #
+    # Leaving the fee off entirely, which is what this used to do, threw away the
+    # only reason the office writes it down.
+    for waived in (e.get("WAIVED_FEES") or []):
+        amount = _num(waived.get("amount"))
+        if amount <= 0:
+            continue
+        label = _waived_fee_label(waived)
+        add_item(label, amount, 1, amount, True)
+        add_item(f"{label} Discount", -amount, 1, -amount, True)
 
     # Flat add-on / extra charge (e.g. ice cream) as its own taxable line item.
     addon_amount = _num(calc.get("ADDON_AMOUNT"))
