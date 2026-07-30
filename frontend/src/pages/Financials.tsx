@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, FinancialRow, FinancialsResponse, getToken } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { Badge, BulkDeleteButton, DeleteButton, Empty, InfoTip, Loading, money } from "../components/ui";
 
 /** Today in America/New_York — the business's day, not the browser's. Matches
@@ -398,8 +399,14 @@ export default function Financials() {
                     <Num v={r.square_tips_card} g="g-sq" />
                     <Num v={r.square_cc_fee} g="g-sq" />
                     <CashCell row={r} onSaved={reload} />
-                    <Num v={r.cash_tax} g="g-cash" />
-                    <Num v={r.cash_pre_tax} g="g-cash" />
+                    {/* Both are split out of Cash Collected, so their history is
+                        that figure's history — say so rather than repeat it. */}
+                    <Num v={r.cash_tax} g="g-cash"
+                      title={"Tax inside the cash taken — split out of Cash Collected, not entered separately."
+                        + cashHistoryText(r)} />
+                    <Num v={r.cash_pre_tax} g="g-cash"
+                      title={"Cash Collected minus its tax — split out of Cash Collected, not entered separately."
+                        + cashHistoryText(r)} />
                     <Num v={r.check_invoice} g="g-inv" sep cls="key" />
                     <DepositCell row={r} onSaved={reload} />
                     <ToggleCell
@@ -564,6 +571,7 @@ function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const counted = isSet(row, "cash_collected");
+  const { user } = useAuth();
 
   async function save() {
     const n = Number(draft);
@@ -571,7 +579,9 @@ function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<
     setBusy(true);
     setErr("");
     try {
-      await api.setEventCash(row.crm_event_id, n);
+      // Name the person, not just "manual". A history line reading "by a user"
+      // is useless when the whole reason to look is finding out who.
+      await api.setEventCash(row.crm_event_id, n, user?.full_name || user?.email || "");
       setEditing(false);
       await onSaved();
     } catch (e: any) {
@@ -608,9 +618,10 @@ function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<
       className={"right g-cash sep cash-cell editable" + (row.cash_collected ? "" : " zero")}
       onClick={(e) => { e.stopPropagation(); setDraft(String(row.cash_collected ?? 0)); setEditing(true); }}
       title={
-        counted
+        (counted
           ? `Cash counted — ${sourceLabel(row, "cash_collected")}. Click to change.`
-          : "Not counted yet — this is only what the AI read from the driver's notes. Click to enter the real figure."
+          : "Not counted yet — this is only what the AI read from the driver's notes. Click to enter the real figure.")
+        + cashHistoryText(row)
       }
     >
       <span className={"cash-dot" + (counted ? " counted" : "")} />
@@ -624,6 +635,37 @@ function CashCell({ row, onSaved }: { row: FinancialRow; onSaved: () => Promise<
 function isSet(row: FinancialRow, field: string): boolean {
   const s = row.sources?.[field];
   return s === "api" || s === "manual";
+}
+
+/** The cash figure's history, appended to the cell's hover tooltip.
+ *
+ *  A bare "$7.00" in this column doesn't say whether somebody counted the till,
+ *  a bot posted it, or the AI guessed it from the driver's notes — and those are
+ *  very different levels of trust. The dot marks provenance but not WHO, which
+ *  is the question actually asked when a figure looks wrong.
+ *
+ *  A native title (not a custom popover) on purpose: this cell sits in a
+ *  horizontally-scrolling table and is click-to-edit, so an overlay would fight
+ *  both. Returns "" when there's nothing to add, leaving the tooltip untouched. */
+function cashHistoryText(row: FinancialRow): string {
+  const log = row.cash_history ?? [];
+  if (!log.length) return "";
+  const lines = log.map((h) => {
+    const who = h.by || (h.source === "api" ? "an automation" : "a user");
+    const from = h.previous != null ? `${money(h.previous)} → ` : "";
+    const to = h.amount != null ? money(h.amount) : "—";
+    return `• ${fmtLogTime(h.at)} — ${from}${to} by ${who}`;
+  });
+  return `\n\nWho set this:\n${lines.join("\n")}`;
+}
+
+function fmtLogTime(iso: string | null): string {
+  if (!iso) return "unknown time";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+  });
 }
 
 function sourceLabel(row: FinancialRow, field: string): string {
@@ -728,11 +770,14 @@ function ToggleCell({
  *  lands on the columns that actually carry an amount — most rows only use a
  *  handful of the 18 figures. `sep` marks the first column of a header group. */
 function Num({
-  v, sep, cls, g,
-}: { v: number | null | undefined; sep?: boolean; cls?: string; g?: string }) {
+  v, sep, cls, g, title,
+}: { v: number | null | undefined; sep?: boolean; cls?: string; g?: string; title?: string }) {
   const empty = !v;
   return (
-    <td className={["right", g, sep && "sep", cls, empty && "zero"].filter(Boolean).join(" ")}>
+    <td
+      className={["right", g, sep && "sep", cls, empty && "zero"].filter(Boolean).join(" ")}
+      title={title}
+    >
       {money(v)}
     </td>
   );

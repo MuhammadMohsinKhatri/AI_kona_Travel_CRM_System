@@ -184,6 +184,8 @@ def list_entries(
             cl = cleaned or {}
             ev_times[eid] = (cl.get("EVENT_STARTED"), cl.get("EVENT_ENDED"))
 
+    cash_log = _cash_history(db, [e.crm_event_id for e in items])
+
     def row(e: FinancialEntry) -> dict:
         started, ended = ev_times.get(e.event_id, (None, None))
         return {
@@ -218,6 +220,10 @@ def list_entries(
             # Per-field provenance so the UI can mark which figures a human or
             # a bot actually set, versus what the classifier guessed.
             "sources": _sources(e),
+            # Who set the cash figure, when, and what it was before — so hovering
+            # the Cash Collected cell answers "where did this number come from?"
+            # without a trip to the change log.
+            "cash_history": cash_log.get(e.crm_event_id, []),
             "awaiting_cash": e.awaiting_cash,
             "minimum_required": e.minimum_required,
             # Billing (14-22)
@@ -586,6 +592,51 @@ def set_fields_by_event(
         "sources": _sources(entry),
         "recalculated": False,
     }
+
+
+# Cash-history entries shown on hover. Deep history belongs in the change log;
+# the tooltip only needs the recent ones to answer "who put this here?"
+_CASH_HISTORY_LIMIT = 5
+
+
+def _cash_history(db: Session, crm_event_ids: list[str]) -> dict[str, list[dict]]:
+    """Recent cash_updated audit rows, newest first, keyed by KonaOS event id.
+
+    One query for the whole page rather than one per row — the ledger renders
+    every event for a month at a time, so an N+1 here would be felt.
+
+    The audit table is the record of who posted a figure (a person typing it, or
+    an automation passing ``by``), which is exactly what the ledger's Cash
+    Collected column can't show on its own: a bare $7.00 doesn't say whether it
+    was counted, guessed from the notes, or posted by the bot.
+    """
+    if not crm_event_ids:
+        return {}
+    rows = (
+        db.query(CrmAuditEntry)
+        .filter(
+            CrmAuditEntry.action == "cash_updated",
+            CrmAuditEntry.crm_event_id.in_(set(crm_event_ids)),
+        )
+        .order_by(CrmAuditEntry.created_at.desc(), CrmAuditEntry.id.desc())
+        .all()
+    )
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        bucket = out.setdefault(r.crm_event_id, [])
+        if len(bucket) >= _CASH_HISTORY_LIMIT:
+            continue
+        detail = r.detail or {}
+        bucket.append({
+            "at": r.created_at.isoformat() if r.created_at else None,
+            # "" when the caller didn't say who; the UI falls back on `source`
+            # rather than inventing a name.
+            "by": str(detail.get("by") or ""),
+            "source": str(detail.get("source") or ""),
+            "previous": detail.get("previous"),
+            "amount": (detail.get("values") or {}).get("cash_collected"),
+        })
+    return out
 
 
 def _sources(entry: FinancialEntry) -> dict[str, str]:

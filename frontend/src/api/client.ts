@@ -244,12 +244,28 @@ export interface FieldsUpdateResult {
   recalculated: boolean;
 }
 
+/** One recorded change to an event's cash figure, from the CRM audit trail.
+ *  `by` is whoever the caller identified itself as — a person's name when typed
+ *  in the dashboard, or the automation's name when posted over the API. It is
+ *  "" when the caller didn't say, so `source` is the fallback. */
+export interface CashLogEntry {
+  at: string | null;
+  by: string;
+  source: string;
+  previous: number | null;
+  amount: number | null;
+}
+
 export interface FinancialRow {
   id: number;
   event_id: number;
   crm_event_id: string;
   /** Per-field provenance, keyed by field name (cash_collected, deposit, …). */
   sources?: Record<string, FieldSource>;
+  /** Recent cash_updated log entries (newest first) — who set the figure, when,
+   *  and what it was before. Empty when nobody has posted a cash figure, in
+   *  which case whatever is shown came from the classifier reading the notes. */
+  cash_history?: CashLogEntry[];
   awaiting_cash?: boolean;
   minimum_required?: number;
   event_date: string | null;
