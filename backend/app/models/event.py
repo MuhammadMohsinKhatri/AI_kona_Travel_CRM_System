@@ -55,6 +55,21 @@ class Event(Base):
         Integer, index=True, nullable=True
     )
 
+    # ── Source-change detection (app/tasks/watch_tasks.py) ───────────────────
+    # Hash of the KonaOS fields this event's invoice was derived from, as of the
+    # last time the pipeline processed it. The watcher re-fetches the event and
+    # re-runs it when the hash moves — that is how a driver's serving count typed
+    # in after the fact stops leaving a $0 invoice behind.
+    source_fingerprint: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    # When the watcher last compared this event against KonaOS. Ordering by it
+    # (oldest first) makes the per-pass cap a round-robin instead of a window
+    # that only ever re-checks the same few events.
+    source_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

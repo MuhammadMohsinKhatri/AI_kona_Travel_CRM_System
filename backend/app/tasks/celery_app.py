@@ -18,6 +18,7 @@ celery = Celery(
         "app.tasks.pipeline_tasks",
         "app.tasks.konaos_tasks",
         "app.tasks.cash_tasks",
+        "app.tasks.watch_tasks",
     ],
 )
 
@@ -64,6 +65,19 @@ celery.conf.beat_schedule = {
     # event is flagged on Needs Attention rather than being auto-invoiced on
     # incomplete figures. Read-only apart from writing alerts, so it is safe
     # to leave running while the nightly pipeline stays paused.
+    # Notes get filled in after an event is processed — a driver's serving count
+    # typed in the next morning used to leave a $0 invoice behind with nothing
+    # saying the source had moved on. This re-checks recent events against
+    # KonaOS hourly and re-runs the ones that changed.
+    #
+    # Hourly, not minutely, and capped per pass on purpose: KonaOS has no bulk
+    # change feed (the grid carries no notes and no updatedAt), so detection
+    # costs one GET per event, and bursts of requests have destabilised the
+    # session key before. See app/tasks/watch_tasks.py.
+    "rerun-changed-events": {
+        "task": "app.tasks.watch_tasks.rerun_changed_events",
+        "schedule": crontab(minute=15),  # every hour at :15
+    },
     "flag-events-awaiting-cash": {
         "task": "app.tasks.cash_tasks.flag_events_awaiting_cash",
         "schedule": crontab(hour=9, minute=0),  # morning, so it's actionable

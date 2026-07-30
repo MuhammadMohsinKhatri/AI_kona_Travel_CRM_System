@@ -128,6 +128,71 @@ def test_form_invoice_against_package_is_not_a_mismatch():
     assert not any("EVENT TYPE" in x["issue"] for x in v), _issues(v)
 
 
+THRIFTBOOKS_NOTES = {
+    "EVENT_NOTES_HTML": (
+        "EVENT TYPE Invoice ATTENDEES 50 associates  SERVE & KEEP COUNT 12oz "
+        "green cups  PAYMENT send pdf inv to thriftbooks@bill.com"
+    ),
+    "ADMIN_NOTES": "$4 12oz Kona / waived $50 destination fee",
+    "DRIVER_NOTES": "Served 31 Konas. Send invoice ",
+}
+
+
+def _thriftbooks():
+    return _check(THRIFTBOOKS_NOTES, {
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_PER_SERVING",
+        "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 31, "LOCATION_FEE": 0,
+        "BASE_AMOUNT": 0, "TAXABLE": "YES",
+    })
+
+
+def test_a_waived_fee_is_not_a_dropped_price():
+    """ThriftBooks: "waived $50 destination fee". The $50 doing no work in the
+    invoice is the notes being obeyed, not a figure going missing."""
+    assert not any("50.00" in x["issue"] for x in _thriftbooks()), _issues(_thriftbooks())
+
+
+def test_the_waiver_does_not_excuse_other_figures():
+    """The window is per-figure: a waiver next to one fee must not silence a
+    genuinely dropped one elsewhere in the same notes."""
+    notes = {
+        **THRIFTBOOKS_NOTES,
+        "ADMIN_NOTES": "waived $50 destination fee / $99 setup fee applies",
+    }
+    v = _check(notes, {
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_PER_SERVING",
+        "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 31, "BASE_AMOUNT": 0,
+        "TAXABLE": "YES",
+    })
+    assert any("99.00" in x["issue"] for x in v), _issues(v)
+    assert not any("50.00" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_figure_waived_once_but_charged_elsewhere_still_flags():
+    """Same number twice, only one of them waived — the other really was dropped."""
+    notes = {
+        **THRIFTBOOKS_NOTES,
+        "ADMIN_NOTES": "waived $50 destination fee / $50 cleaning fee applies",
+    }
+    v = _check(notes, {
+        "EVENT_TYPE": "package", "BILLING_MODEL": "PACKAGE_PER_SERVING",
+        "RATE_PER_SERVING": 4, "UNITS_SERVED_TOTAL": 31, "BASE_AMOUNT": 0,
+        "TAXABLE": "YES",
+    })
+    assert any("50.00" in x["issue"] for x in v), _issues(v)
+
+
+def test_a_destination_fee_that_was_charged_rides_the_location_fee():
+    """The same event with the fee NOT waived needs no different billing model:
+    PACKAGE_PER_SERVING already adds LOCATION_FEE, so $50 does work as-is."""
+    calc = billing.calculate_invoice({
+        "BILLING_MODEL": "PACKAGE_PER_SERVING", "RATE_PER_SERVING": 4,
+        "UNITS_SERVED_TOTAL": 31, "LOCATION_FEE": 50, "TAXABLE": "YES",
+        "PAYMENT_METHOD": "CHECK",
+    })
+    assert calc["SUBTOTAL"] == 174.00
+
+
 def test_dropped_base_fee_is_held():
     """The generalised catch: the $99 is stated and the chosen model ignores it."""
     v = _check(BASE_PLUS_SERVINGS_NOTES, {

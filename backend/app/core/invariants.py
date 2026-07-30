@@ -62,6 +62,16 @@ _COUNT_FIELDS = (
     "TOTAL_EVENT_HOURS",
 )
 
+# A fee the notes explicitly cancel. Deliberately narrow: "removed", "dropped"
+# and "discount" all appear in notes that mean something else entirely, and a
+# loose pattern here silences the very check that catches a dropped base fee.
+_CLAUSE_SPLIT_RE = re.compile(r"[/;\n]|\.(?=\s|$)")
+_WAIVER_PATTERNS = (
+    r"waiv\w*",            # waive / waived / waiving / waiver
+    r"comp(?:ed|'d|ped)\b",
+    r"no charge", r"free of charge", r"at no cost", r"not charging",
+)
+
 # "no extra taxes or fees" and friends. Kept tight — a loose pattern here would
 # hold events whose notes merely mention the word "tax".
 _ALL_IN_PATTERNS = (
@@ -129,12 +139,62 @@ def _notes_text(cleaned: dict[str, Any]) -> str:
     return _TAG_RE.sub(" ", " ".join(parts))
 
 
+def _clause_spans(text: str) -> list[tuple[int, int]]:
+    """Character ranges of the note's separate clauses.
+
+    Admin notes are written as slash-delimited fragments ("$4 12oz Kona /
+    waived $50 destination fee"), which is the natural unit for deciding what a
+    waiver applies to. A fixed character window can't do it: "waived $50
+    destination fee / $99 setup fee" puts "waived" within 30 characters of the
+    $99 that really was dropped. Commas are NOT delimiters — they appear inside
+    figures ("$1,200").
+    """
+    spans, start = [], 0
+    for m in _CLAUSE_SPLIT_RE.finditer(text):
+        spans.append((start, m.start()))
+        start = m.end()
+    spans.append((start, len(text)))
+    return spans
+
+
+def _is_waived(text: str, position: int) -> bool:
+    """Do the notes cancel the figure at this position?
+
+    True when the clause the figure sits in also carries waiver language, in
+    either order — "waived $50 destination fee" and "$50 destination fee was
+    waived" both read the same way to a person.
+    """
+    for start, end in _clause_spans(text):
+        if start <= position < end:
+            return any(re.search(p, text[start:end].lower())
+                       for p in _WAIVER_PATTERNS)
+    return False
+
+
 def _stated_amounts(text: str) -> list[float]:
+    """Distinct dollar figures the notes state, minus any the notes waive.
+
+    A waived fee is a figure that SHOULD do no work in the billing, so flagging
+    it asks a person to re-confirm a decision the notes already record. Left in,
+    it fired on every event with "waived $50 destination fee" in the admin notes
+    — the kind of standing false positive that trains people to ignore the gate.
+    """
+    occurrences = [
+        (_num(m.group(1)), _is_waived(text, m.start()))
+        for m in _AMOUNT_RE.finditer(text)
+        if _num(m.group(1)) > 0
+    ]
+
     seen: list[float] = []
-    for raw in _AMOUNT_RE.findall(text):
-        amount = _num(raw)
-        if amount > 0 and not any(abs(amount - s) <= _TOL for s in seen):
-            seen.append(amount)
+    for amount, _ in occurrences:
+        if any(abs(amount - s) <= _TOL for s in seen):
+            continue
+        # Waived only if EVERY mention is waived: "waived the $50 destination
+        # fee" alongside a separate "$50 setup fee" must still be flagged,
+        # because one of the two really was dropped from the arithmetic.
+        if all(w for a, w in occurrences if abs(a - amount) <= _TOL):
+            continue
+        seen.append(amount)
     return seen
 
 

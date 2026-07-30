@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.core import billing, event_cleaner, invoice_builder, notify, overrides
+from app.core import (billing, event_cleaner, invoice_builder, notify,
+                      overrides, source_fingerprint)
 from app.core.alerts import check_alerts
 from app.core.equipment import map_equipment
 from app.core.ledger import derive_sales_columns, host_billed_applies
@@ -648,6 +649,11 @@ def _upsert_event(
     event.final_status = cleaned.get("FINAL_EVENT_STATUS", "")
     event.raw = raw
     event.cleaned = cleaned
+    # Baseline for source-change detection. Recorded on EVERY run (nightly,
+    # manual, watcher-triggered) so whatever we just billed from is what the
+    # watcher compares against next — otherwise a watcher-triggered re-run would
+    # re-trigger itself forever.
+    event.source_fingerprint = source_fingerprint.fingerprint(cleaned)
     event.status = status
     event.status_reason = status_reason
     event.run_id = run.id
