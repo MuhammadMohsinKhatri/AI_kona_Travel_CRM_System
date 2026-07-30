@@ -349,6 +349,114 @@ def test_dry_run_writes_nothing_and_says_so():
         db.close()
 
 
+# ── what may settle itself, with nobody looking ──────────────────────────────
+
+def test_an_exactly_matching_check_settles_itself():
+    """The ordinary case, and the whole point: photo in, nothing typed, done."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+        ok, why = svc.auto_applicable_check(review)
+        assert ok, why
+    finally:
+        db.close()
+
+
+def test_a_check_read_with_no_payer_still_matches_on_its_amount():
+    """A grand total matching to the cent identifies the invoice on its own —
+    and it survives OCR better than handwriting does. Refusing to match without
+    a payer name threw away readable checks over the one unreadable field that
+    mattered least."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="", amount=WITHOUT_FEE))
+        assert review.plan is not None
+        assert svc.auto_applicable_check(review)[0]
+    finally:
+        db.close()
+
+
+def test_two_invoices_for_the_same_total_are_never_settled_automatically():
+    """What makes an amount-only match safe is that it is unique. Two customers
+    owing the same figure is precisely when guessing pays the wrong invoice."""
+    db = _fresh_db()
+    try:
+        _, a = _seed(db, crm_event_id="ev-a", crm_invoice_id="inv-a", name="Acme Corp")
+        _, b = _seed(db, crm_event_id="ev-b", crm_invoice_id="inv-b", name="Beta LLC")
+        review = svc.review_check(
+            db, FakeCRM([a, b]), CheckRead(payer_name="", amount=WITHOUT_FEE))
+        assert review.plan is None
+        ok, why = svc.auto_applicable_check(review)
+        assert not ok and why
+    finally:
+        db.close()
+
+
+def test_a_check_that_does_not_pay_in_full_waits_for_a_person():
+    """Short or over is either a part payment or a 3 misread as an 8 — the same
+    thing on screen, a very different thing in the ledger."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=100.00),
+            invoice_id="inv-thrift")
+        ok, why = svc.auto_applicable_check(review)
+        assert not ok
+        assert "short" in why.lower()
+    finally:
+        db.close()
+
+
+def test_a_check_whose_fee_cannot_be_recomputed_waits_for_a_person():
+    """A warning on the plan changes what applying MEANS — here, that the
+    invoice would be marked paid with the 4% still on it."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db, classification={**CLASSIFICATION,
+                                           "CHECK_INVOICE_AMOUNT": 136.40})
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=WITH_FEE))
+        ok, why = svc.auto_applicable_check(review)
+        assert not ok
+        assert "4%" in why
+    finally:
+        db.close()
+
+
+def test_an_unreadable_image_settles_nothing():
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(error="This is not an image of a check."))
+        assert not svc.auto_applicable_check(review)[0]
+    finally:
+        db.close()
+
+
+def test_a_matched_cash_line_posts_itself_and_an_unmatched_one_does_not():
+    db = _fresh_db()
+    try:
+        _seed(db, crm_event_id="ev-pikes", crm_invoice_id="inv-pikes",
+              name="Pikesville Farmers Market", event_date="2026-07-25",
+              raw={"id": "ev-pikes", "name": "Pikesville Farmers Market"})
+        matched, missing = svc.review_cash(db, [
+            CashEntry(query="Pikesville farmers market", amount=7.0, date="2026-07-25"),
+            CashEntry(query="somewhere nobody has heard of", amount=9.0,
+                      date="2026-07-25"),
+        ])
+        assert svc.auto_applicable_cash(matched)[0]
+        ok, why = svc.auto_applicable_cash(missing)
+        assert not ok and why
+    finally:
+        db.close()
+
+
 # ── cash ─────────────────────────────────────────────────────────────────────
 
 def test_a_spoken_phrase_matches_the_event_it_names():
@@ -433,5 +541,54 @@ def test_an_event_picked_by_hand_is_matched_directly():
 
         assert review.ready
         assert review.event.crm_event_id == "ev-pikes"
+    finally:
+        db.close()
+
+
+# ── the wiring the upload actually goes through ──────────────────────────────
+
+def test_uploading_a_check_records_it_without_anything_else_being_pressed():
+    """End to end through the real route: photo in, invoice paid, fee off.
+
+    The policy above decides; this proves the endpoint acts on it. The vision
+    call is stubbed because the point under test is the wiring, not OCR.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import get_current_user
+    from app.api.routes import intake
+    from app.db.base import get_db
+    from app.integrations.factory import get_crm
+    from app.main import app
+    from app.models import User
+
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: User(
+            id=1, email="office@example.com", hashed_password="x", is_active=True)
+        real_read, real_crm = intake.read_check, intake.get_crm
+        intake.read_check = lambda *a, **k: CheckRead(
+            payer_name="ThriftBooks", amount=WITHOUT_FEE, confidence="high")
+        intake.get_crm = lambda: crm
+        try:
+            client = TestClient(app)
+            body = client.post(
+                "/api/intake/check",
+                files={"file": ("check.jpg", b"not-really-a-jpeg", "image/jpeg")},
+            ).json()
+        finally:
+            intake.read_check, intake.get_crm = real_read, real_crm
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+            get_crm.cache_clear()
+
+        assert body["applied"]["ok"] is True
+        assert "4% processing fee" in body["applied"]["summary"]
+        assert crm.paid[0]["partial"] is False
+        assert db.query(Invoice).one().status == "paid"
     finally:
         db.close()

@@ -134,13 +134,19 @@ def review_check(
     ``invoice_id`` overrides the matcher — that is the reviewer picking one of
     the near-misses off the screen, which must always beat the score.
     """
-    if not check.usable and not invoice_id:
+    # An amount alone is enough to try. A grand total matching an open invoice
+    # to the cent is the strongest signal a check carries — stronger than a name
+    # read out of handwriting — and where two invoices share a total the
+    # ambiguity guard stops rather than picks. Refusing to match without a payer
+    # name threw away readable checks whose only unreadable field was the one we
+    # needed least.
+    if check.amount <= 0 and not check.payer_name.strip() and not invoice_id:
         return CheckReview(
             check=check,
             match=InvoiceMatch(
                 None,
-                check.error or "The check needs a payer name and an amount "
-                               "before it can be matched. Type them in.",
+                check.error or "Nothing could be read off that image — no payer "
+                               "and no amount. Try a clearer photo, or type them in.",
                 [],
                 needs_choice=True,
             ),
@@ -178,6 +184,48 @@ def review_check(
     )
     plan.payment_method = "CHECK"
     return CheckReview(check=check, match=match, plan=plan)
+
+
+def auto_applicable_check(review: CheckReview) -> tuple[bool, str]:
+    """Whether this check may settle itself, with nobody looking.
+
+    The photograph is read by a model, so what makes this safe is not the
+    model's own confidence — it is corroboration. An amount that matches an open
+    invoice's total to the cent, on the only invoice that matches, is evidence no
+    misreading survives: a wrong amount lands on nothing, and a total two
+    customers share is caught by the ambiguity guard instead of picked.
+
+    So the bar is the arithmetic agreeing exactly. A check that is short or over
+    might genuinely be a part payment — or might be a 3 read as an 8, which is
+    the same thing on screen and a very different thing in the ledger. Those come
+    back to a person. Everything else applies on upload.
+    """
+    if review.plan is None or review.match.needs_choice:
+        return False, review.match.reason
+    if review.plan.status != "exact":
+        return False, (
+            f"The check is {'short of' if review.plan.variance < 0 else 'more than'} "
+            f"the amount due, so it hasn't been recorded — check the amount was "
+            f"read right, then apply it below."
+        )
+    if review.plan.warnings:
+        # The fee couldn't be recomputed, or the invoice isn't linked to an
+        # event. Both change what applying MEANS, so a person should see it.
+        return False, review.plan.warnings[0]
+    return True, ""
+
+
+def auto_applicable_cash(review: CashReview) -> tuple[bool, str]:
+    """Whether this spoken line may post itself.
+
+    Cash has no second figure to check itself against — nothing corroborates
+    "seven bucks" the way an invoice total corroborates a check. What carries it
+    is that the event matched unambiguously and the amount is a plain overwrite
+    of a field a person can see and change on Event Financials afterwards.
+    """
+    if not review.ready:
+        return False, review.blocked or review.match.reason
+    return True, ""
 
 
 def _fee_free_payload(db: Session, invoice: Invoice) -> Optional[dict[str, Any]]:
@@ -505,11 +553,19 @@ def _candidate_json(c: Candidate) -> dict[str, Any]:
     }
 
 
-def check_review_json(review: CheckReview) -> dict[str, Any]:
+def check_review_json(
+    review: CheckReview, applied: Optional[dict[str, Any]] = None,
+    held_because: str = "",
+) -> dict[str, Any]:
     check, match, plan = review.check, review.match, review.plan
     return {
         "kind": "check",
         "ready": review.ready,
+        # Set when this settled itself on upload — the screen then reports what
+        # happened instead of asking for a confirmation of something already done.
+        "applied": applied,
+        # Why it did NOT settle itself, in words for the person now looking at it.
+        "held_because": held_because,
         "check": {
             "payer_name": check.payer_name,
             "payer_address": check.payer_address,
@@ -551,11 +607,16 @@ def check_review_json(review: CheckReview) -> dict[str, Any]:
     }
 
 
-def cash_review_json(review: CashReview) -> dict[str, Any]:
+def cash_review_json(
+    review: CashReview, applied: Optional[dict[str, Any]] = None,
+    held_because: str = "",
+) -> dict[str, Any]:
     event = review.event
     return {
         "kind": "cash",
         "ready": review.ready,
+        "applied": applied,
+        "held_because": held_because,
         "heard": {
             "query": review.entry.query,
             "amount": review.entry.amount,

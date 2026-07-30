@@ -38,6 +38,15 @@ router = APIRouter(prefix="/api/intake", tags=["intake"])
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 
 
+def _result_json(result: svc.ApplyResult) -> dict[str, Any]:
+    return {
+        "ok": result.ok, "kind": "check", "summary": result.summary,
+        "invoice_id": result.invoice_id, "crm_event_id": result.crm_event_id,
+        "dry_run": result.dry_run, "warnings": result.warnings,
+        "detail": result.detail,
+    }
+
+
 async def _read_upload(file: UploadFile, what: str) -> bytes:
     data = await file.read()
     if len(data) > MAX_UPLOAD_BYTES:
@@ -56,18 +65,33 @@ async def _read_upload(file: UploadFile, what: str) -> bytes:
 async def review_check_upload(
     file: UploadFile = File(..., description="Photo of the check"),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Read a photographed check and say which invoice it pays.
+    """Read a photographed check, find its invoice, and settle it.
 
-    Writes nothing. A failed read comes back as a review with empty fields and
-    the reason on it, not as an error — the answer is always "check these
-    details", never a 500 on an upload that cannot be retried any differently.
+    The whole job from one upload: the fee comes off, the payment is recorded,
+    the invoice reads paid. Nothing is typed and nothing is confirmed — see
+    ``svc.auto_applicable_check`` for what makes that safe, which is not the
+    model's confidence in itself but the check's amount agreeing exactly with an
+    open invoice that no other invoice matches.
+
+    When that agreement isn't there the upload becomes a review instead: what was
+    read, what it nearly matched, and why it stopped. A failed read is a review
+    too, never a 500 — the person is holding a check they cannot re-photograph
+    any differently, so the answer has to be something they can act on.
     """
     image = await _read_upload(file, "photo")
     check = read_check(image, file.content_type or "image/jpeg")
-    review = svc.review_check(db, get_crm(), check)
-    return svc.check_review_json(review)
+    crm = get_crm()
+    review = svc.review_check(db, crm, check)
+
+    ok, held = svc.auto_applicable_check(review)
+    if not ok or review.plan is None:
+        return svc.check_review_json(review, held_because=held)
+
+    result = svc.apply_check(db, crm, review.plan, by=user.email or "dashboard",
+                             dry_run=settings.pipeline_dry_run)
+    return svc.check_review_json(review, applied=_result_json(result))
 
 
 class CheckDetails(BaseModel):
@@ -123,14 +147,36 @@ class CashSpeech(BaseModel):
 
 def _cash_payload(
     db: Session, transcript: str, entries: list[CashEntry], default_date: str,
-    notes: str = "", error: str = "",
+    by: str, notes: str = "", error: str = "",
 ) -> dict[str, Any]:
+    """Match every line the recording contained, and post the ones that are sure.
+
+    Bulk is the whole point — an admin reads off a day's takings in one breath
+    and expects the day to be done. Lines that matched one event unambiguously
+    post themselves; a line that matched nothing, matched two things equally, or
+    landed on an event with no ledger row stays on screen for a person. The two
+    outcomes are reported per line rather than as one number, so "six of seven
+    went in" is visible instead of implied.
+    """
     reviews = svc.review_cash(db, entries, default_date=default_date)
+    items: list[dict[str, Any]] = []
+    for review in reviews:
+        ok, held = svc.auto_applicable_cash(review)
+        if not ok or review.event is None:
+            items.append(svc.cash_review_json(review, held_because=held))
+            continue
+        applied = _apply_cash(
+            db,
+            ApplyItem(kind="cash", amount=review.entry.amount,
+                      crm_event_id=review.event.crm_event_id),
+            by,
+        )
+        items.append(svc.cash_review_json(review, applied=applied))
     return {
         "transcript": transcript,
         "notes": notes,
         "error": error,
-        "items": [svc.cash_review_json(r) for r in reviews],
+        "items": items,
     }
 
 
@@ -139,13 +185,13 @@ async def review_cash_voice(
     file: UploadFile = File(..., description="Recording of the takings"),
     default_date: str = Form(default=""),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Transcribe a dictated sentence and match every event it mentions.
+    """Transcribe one recording of a day's takings and post every event in it.
 
-    One recording covers several events — "Pikesville took seven bucks, Camp
-    Lollipop was twelve fifty" is two lines on the review screen, each matched
-    and each approvable on its own.
+    "Pikesville took seven bucks, Camp Lollipop was twelve fifty" is two events,
+    both matched and both recorded, from one press of the button. Only the lines
+    the matcher won't call come back for a person.
     """
     audio = await _read_upload(file, "recording")
     transcript, error = transcribe(audio, file.filename or "speech.webm")
@@ -155,7 +201,7 @@ async def review_cash_voice(
     speech = parse_cash_speech(transcript)
     return _cash_payload(
         db, transcript or speech.transcript, speech.entries, default_date,
-        notes=speech.notes, error=speech.error,
+        user.email or "dashboard", notes=speech.notes, error=speech.error,
     )
 
 
@@ -163,14 +209,14 @@ async def review_cash_voice(
 def review_cash_text(
     body: CashSpeech,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """The same, from typed text — for when the room is loud or the mic isn't
     allowed. The split-into-entries step is identical."""
     speech = parse_cash_speech(body.transcript)
     return _cash_payload(
         db, body.transcript, speech.entries, body.default_date,
-        notes=speech.notes, error=speech.error,
+        user.email or "dashboard", notes=speech.notes, error=speech.error,
     )
 
 

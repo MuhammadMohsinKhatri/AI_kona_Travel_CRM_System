@@ -33,7 +33,7 @@ from app.config import settings
 VISION_MODEL = "gpt-4o"
 TRANSCRIBE_MODEL = "whisper-1"
 
-_CHECK_PROMPT = """You read photographs of US paper checks and return JSON.
+_CHECK_PROMPT = """You read US paper checks and return JSON.
 
 Return exactly:
 {
@@ -48,11 +48,21 @@ Return exactly:
 }
 
 Rules that matter:
+- The image may be a phone snap at an angle, a flatbed scan, a fax, a screenshot
+  of one, or a check sitting on a desk among other paper. All of those are
+  checks: read them. Say it is not a check ONLY when no check is present at all.
 - payer_name is the PAYER (top-left), never the payee ("Kona Ice", "Travelin'
-  Tom's"). Getting this backwards makes the check unmatchable.
+  Tom's", "Beverly Ann's"). Getting this backwards makes the check unmatchable.
+  It is usually an organisation — a school, a PTA, a company, an HOA — printed
+  above an address block. If that block is cut off or smudged, take the account
+  holder's name from the address block or the pre-printed signature line, and
+  say in notes where you got it. Do not take it from handwriting alone.
 - amount: prefer the numeric box; if the written words disagree with the box,
   report the WRITTEN words as the amount and say so in notes — the written
   amount is legally controlling.
+- Report every field you CAN read even when others defeat you. A check with a
+  clear amount and an unreadable payer is far more useful than an empty answer:
+  the amount alone often identifies the invoice.
 - Never invent. Anything you cannot read is "" and confidence drops.
 - Return only the JSON object.
 """

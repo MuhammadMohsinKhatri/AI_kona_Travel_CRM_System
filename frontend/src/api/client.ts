@@ -174,10 +174,13 @@ export const api = {
   testTelegram: () =>
     request<TelegramTestResult>("/api/settings/telegram/test", { method: "POST" }),
   // ── Recording payments that arrive off-system ──────────────────────────
-  // Every call below either REVIEWS (reads and matches, writes nothing) or
-  // APPLIES (writes one plan a person has approved on screen). The review
-  // calls are safe to repeat after every edit.
-  /** Read a photographed check and match it to an open invoice. */
+  // The intake calls settle what they can on their own and hand back what they
+  // won't. `applied` on a result means it is already done in KonaOS; absent,
+  // `held_because` says what stopped it and the line waits for a person.
+  // The `rematch*` calls never write — they are the correction path, safe to
+  // repeat after every edit.
+  /** Read a photographed check, match it, and settle it if the amount agrees
+   *  exactly with one open invoice. Writes when it is sure. */
   reviewCheckPhoto: (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -190,8 +193,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  /** Transcribe dictated takings and match every event mentioned. One
-   *  recording routinely covers several events. */
+  /** Transcribe dictated takings, match every event mentioned, and post the
+   *  ones that matched unambiguously. One recording, a day's takings done. */
   reviewCashVoice: (file: File, defaultDate = "") => {
     const form = new FormData();
     form.append("file", file);
@@ -463,6 +466,12 @@ export interface CheckReview {
   kind: "check";
   /** True when Apply has something unambiguous to do. */
   ready: boolean;
+  /** Set when the upload settled itself: the fee is off, the payment is
+   *  recorded, and there is nothing left to confirm. */
+  applied: ApplyResult | null;
+  /** Why it did NOT settle itself — shown so a held check explains itself
+   *  rather than just sitting there. */
+  held_because: string;
   check: CheckDetails;
   reason: string;
   needs_choice: boolean;
@@ -482,6 +491,9 @@ export interface EventCandidate {
 export interface CashReview {
   kind: "cash";
   ready: boolean;
+  /** Set when this line posted itself off the recording. */
+  applied: ApplyResult | null;
+  held_because: string;
   heard: { query: string; amount: number; brand: string; date: string };
   reason: string;
   needs_choice: boolean;

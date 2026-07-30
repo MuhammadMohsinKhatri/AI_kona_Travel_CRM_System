@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import {
   ApplyItem,
   ApplyResponse,
+  ApplyResult,
   CashReview,
   CashReviewResponse,
   CheckReview,
@@ -12,16 +13,22 @@ import { Empty, money } from "../components/ui";
 /** Recording payments that arrive off-system: a check in the post, cash counted
  *  in a truck.
  *
- *  Two Telegram bots used to do this, and both wrote immediately — a model read
- *  the photo or the sentence and the payment was recorded, so a misread amount
- *  became a payment against the wrong customer, found whenever somebody next
- *  looked. Here the reading and the writing are separated by this screen. Every
- *  figure below is editable, every match can be overruled, and nothing reaches
- *  KonaOS until Apply.
+ *  The happy path has no interaction in it at all. A photo of a check is read,
+ *  matched, stripped of its 4% card fee and recorded; one recording of a day's
+ *  takings posts every event it names. The screen's job on that path is to say
+ *  what happened, not to ask for a confirmation of it — hence <Done>, which
+ *  replaces the plan-and-approve card outright rather than sitting beside it.
  *
- *  Apply is one click for the whole batch, not one per line — but it is still a
- *  click, and the server recomputes every derived figure when it runs. This
- *  screen can only say which invoice and how much. */
+ *  What is left is the exceptions, and they are the reason this is a screen and
+ *  not a background job. A check the matcher won't call, an amount that doesn't
+ *  settle the invoice, an event nobody has processed yet: those come back with
+ *  their near-misses and their scoring, editable and overrulable, and are
+ *  applied as a batch. The rule the whole page turns on is that the system acts
+ *  where the evidence is unambiguous and asks where it isn't — never the other
+ *  way round, because a wrong match here marks another customer's invoice paid.
+ *
+ *  Nothing derived is computed here. The browser says which invoice and how
+ *  much; the server recomputes the fee, the variance and the paid decision. */
 
 type Tab = "check" | "cash";
 
@@ -39,6 +46,32 @@ function Score({ flags }: { flags: string[] }) {
     <span className="muted" style={{ fontSize: 11 }}>
       {flags.join(" · ")}
     </span>
+  );
+}
+
+/** What happened, for something that has already happened. Shown in place of a
+ *  plan-and-approve card, because asking someone to confirm a payment already
+ *  recorded is how the same check gets recorded twice. */
+function Done({ result }: { result: ApplyResult }) {
+  return (
+    <div
+      className="card"
+      style={{
+        background: "var(--surface-2)",
+        marginTop: 10,
+        borderLeft: `3px solid var(--${result.ok ? "ok" : "crit"})`,
+      }}
+    >
+      <div style={{ fontWeight: 700 }}>
+        {result.ok ? (result.dry_run ? "⚠ Dry run" : "✅ Recorded") : "❌ Not recorded"}
+      </div>
+      <p style={{ marginBottom: 0 }}>{result.summary}</p>
+      {result.warnings?.map((w) => (
+        <p key={w} className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+          ⚠ {w}
+        </p>
+      ))}
+    </div>
   );
 }
 
@@ -90,9 +123,10 @@ export default function Payments() {
     <>
       <h1 className="page-title">Record Payments</h1>
       <p className="page-sub">
-        A check that arrived in the post, or cash counted at the truck. Upload or
-        dictate it, check what was read, then apply the lot in one click. Nothing
-        is written to KonaOS until you press Apply.
+        A check that arrived in the post, or cash counted at the truck. Photograph
+        the check, or say the takings once — the system finds the invoice or the
+        event, takes the 4% card fee off a check, and records it. Anything it
+        can't settle on its own waits here for you rather than guessing.
       </p>
 
       <div className="toolbar" style={{ gap: 8, marginBottom: 16 }}>
@@ -141,8 +175,12 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
   function load(next: CheckReview) {
     setReview(next);
-    setPayer(next.check.payer_name);
-    setAmount(next.check.amount ? String(next.check.amount) : "");
+    // Once it has settled itself there is nothing left to correct, and leaving
+    // the last check's payer in the box is how the next one gets re-matched
+    // against the wrong name.
+    const settled = !!next.applied?.ok;
+    setPayer(settled ? "" : next.check.payer_name);
+    setAmount(settled ? "" : next.check.amount ? String(next.check.amount) : "");
   }
 
   async function upload(file: File) {
@@ -179,6 +217,9 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   }
 
   const plan = review?.plan ?? null;
+  // Set when the upload settled itself. The plan-and-approve card is then the
+  // wrong thing to show: it invites confirming a payment already recorded.
+  const applied = review?.applied ?? null;
 
   return (
     <div className="card" style={{ marginBottom: 18 }}>
@@ -199,7 +240,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
           📷 Photograph or upload a check
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
-          {busy || "Front of the check, flat and in focus."}
+          {busy || "Front of the check, flat and in focus. Nothing to type — it records itself."}
         </span>
       </div>
 
@@ -218,11 +259,11 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         </p>
       )}
 
-      {/* Always on screen, not just after a successful read. A photo is a
-          shortcut to filling these two boxes — when it's blurry, when the
-          camera isn't to hand, or when someone is working from the check
-          itself, typing them has to be a first-class way in rather than a
-          dead end. */}
+      {/* The fallback, always on screen rather than only after a failed read.
+          A photo normally fills these two and settles the check without them
+          being looked at — but when it's blurry, when the camera isn't to
+          hand, or when someone is working from the check itself, typing them
+          has to be a way in rather than a dead end. */}
       <div className="flex" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
         <label style={{ fontSize: 12 }}>
           <div className="muted">Payer (top-left of the check)</div>
@@ -260,9 +301,16 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         )}
       </div>
 
-      {review && (
+      {applied && <Done result={applied} />}
+
+      {review && !applied && (
         <>
           <p style={{ marginTop: 14, marginBottom: 6 }}>{review.reason}</p>
+          {review.held_because && (
+            <p className="muted" style={{ color: "var(--warn)", marginTop: -2 }}>
+              Not recorded automatically — {review.held_because}
+            </p>
+          )}
 
           {plan && (
             <div className="card" style={{ background: "var(--surface-2)", marginTop: 10 }}>
@@ -458,7 +506,7 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
           />
         </label>
         <span className="muted" style={{ fontSize: 12 }}>
-          {busy || "One go covers several events — “Pikesville took seven bucks, Camp Lollipop was twelve fifty”."}
+          {busy || "One go covers several events — “Pikesville took seven bucks, Camp Lollipop was twelve fifty” records both."}
         </span>
       </div>
 
@@ -483,6 +531,16 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
       {result?.error && <p className="muted" style={{ color: "var(--warn)" }}>{result.error}</p>}
       {result?.notes && (
         <p className="muted" style={{ fontSize: 12 }}>Heard, with a caveat: {result.notes}</p>
+      )}
+
+      {result && result.items.length > 0 && (
+        <p style={{ marginTop: 14, marginBottom: 0, fontWeight: 600 }}>
+          {result.items.filter((i) => i.applied?.ok).length} of {result.items.length}{" "}
+          recorded automatically
+          {result.items.some((i) => !i.applied?.ok)
+            ? " — the rest are below, they need a person."
+            : "."}
+        </p>
       )}
 
       {result?.items.map((item, i) => (
@@ -512,6 +570,8 @@ function CashLineCard({
   const [state, setState] = useState(line);
   const [amount, setAmount] = useState(line.heard.amount ? String(line.heard.amount) : "");
   const [busy, setBusy] = useState(false);
+  // Posted off the recording. Re-matching it would only offer to post it again.
+  const applied = state.applied;
 
   async function rematch(crmEventId = "") {
     setBusy(true);
@@ -528,6 +588,17 @@ function CashLineCard({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (applied) {
+    return (
+      <div className="card" style={{ background: "var(--surface-2)", marginTop: 12 }}>
+        <div style={{ fontWeight: 600 }}>
+          “{state.heard.query}” → {state.event?.event_name}
+        </div>
+        <Done result={applied} />
+      </div>
+    );
   }
 
   return (
@@ -555,6 +626,11 @@ function CashLineCard({
       </div>
 
       <p style={{ marginTop: 10, marginBottom: 6 }}>{state.reason}</p>
+      {state.held_because && !state.blocked && (
+        <p className="muted" style={{ color: "var(--warn)", fontSize: 12 }}>
+          Not recorded automatically — {state.held_because}
+        </p>
+      )}
       {state.blocked && (
         <p className="muted" style={{ color: "var(--warn)", fontSize: 12 }}>⚠ {state.blocked}</p>
       )}
@@ -656,7 +732,7 @@ function BatchPanel({
       </div>
 
       {batch.length === 0 ? (
-        <Empty text="Approved checks and cash lines collect here. Apply writes them to KonaOS in one go." />
+        <Empty text="Anything the system wouldn't record on its own collects here — approve it above and it lands in one go." />
       ) : (
         <div className="table-wrap" style={{ marginTop: 12 }}>
           <table>
