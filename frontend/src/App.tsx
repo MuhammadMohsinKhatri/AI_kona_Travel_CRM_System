@@ -14,6 +14,7 @@ import Guide from "./pages/Guide";
 import Invoices from "./pages/Invoices";
 import Login from "./pages/Login";
 import NewEvent from "./pages/NewEvent";
+import Payments from "./pages/Payments";
 import Runs from "./pages/Runs";
 import Settings from "./pages/Settings";
 
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/invoices" element={<Invoices />} />
         <Route path="/financials" element={<Financials />} />
+        <Route path="/payments" element={<Payments />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/settings" element={<Settings />} />

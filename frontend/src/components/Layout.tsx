@@ -10,6 +10,7 @@ const links = [
   { to: "/events", label: "Events", icon: "📅" },
   { to: "/invoices", label: "Invoices", icon: "🧾" },
   { to: "/financials", label: "Event Financials", icon: "💰" },
+  { to: "/payments", label: "Record Payments", icon: "💵" },
   { to: "/alerts", label: "Needs Attention", icon: "⚠️" },
   { to: "/runs", label: "Automation Runs", icon: "⚙️" },
   { to: "/crm-activity", label: "KonaOS Change Log", icon: "📝" },

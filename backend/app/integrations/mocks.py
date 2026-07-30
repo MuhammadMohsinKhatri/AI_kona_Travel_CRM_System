@@ -167,8 +167,32 @@ class MockCRMClient(CRMClient):
         self._invoices[inv_id] = record
         return record
 
+    def update_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _lag()
+        inv_id = str(payload.get("id") or payload.get("invoiceId") or "")
+        record = self._invoices.get(inv_id)
+        if record is None:
+            return {"error": f"No invoice {inv_id}"}
+        record.update(payload)
+        return record
+
     def delete_invoice(self, invoice_id: str) -> None:
         self._invoices.pop(invoice_id, None)
+
+    def mark_invoice_paid(
+        self, invoice_id: str, *, paid_amount: float, partial: bool = False,
+        note: str = "",
+    ) -> dict[str, Any]:
+        _lag()
+        record = self._invoices.get(invoice_id)
+        if record is None:
+            return {"error": f"No invoice {invoice_id}"}
+        record["invoiceStatus"] = "partially_paid" if partial else "paid"
+        record["status"] = record["invoiceStatus"]
+        record["manuallyMarkedAsPaid"] = not partial
+        record["paidAmount"] = paid_amount
+        record["paymentNote"] = note
+        return record
 
     def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if event_id in self._events:

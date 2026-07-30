@@ -173,6 +173,51 @@ export const api = {
     }),
   testTelegram: () =>
     request<TelegramTestResult>("/api/settings/telegram/test", { method: "POST" }),
+  // ── Recording payments that arrive off-system ──────────────────────────
+  // Every call below either REVIEWS (reads and matches, writes nothing) or
+  // APPLIES (writes one plan a person has approved on screen). The review
+  // calls are safe to repeat after every edit.
+  /** Read a photographed check and match it to an open invoice. */
+  reviewCheckPhoto: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<CheckReview>("/api/intake/check", { method: "POST", body: form });
+  },
+  /** Re-match after correcting a misread field, or against an invoice the
+   *  reviewer picked off the screen (`invoice_id` beats the score). */
+  rematchCheck: (body: CheckRematchInput) =>
+    request<CheckReview>("/api/intake/check/rematch", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Transcribe dictated takings and match every event mentioned. One
+   *  recording routinely covers several events. */
+  reviewCashVoice: (file: File, defaultDate = "") => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("default_date", defaultDate);
+    return request<CashReviewResponse>("/api/intake/cash/voice", {
+      method: "POST",
+      body: form,
+    });
+  },
+  reviewCashText: (transcript: string, defaultDate = "") =>
+    request<CashReviewResponse>("/api/intake/cash/text", {
+      method: "POST",
+      body: JSON.stringify({ transcript, default_date: defaultDate }),
+    }),
+  rematchCash: (body: CashRematchInput) =>
+    request<CashReview>("/api/intake/cash/rematch", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Apply the whole approved batch. The server recomputes every derived
+   *  figure — this sends only which invoice/event, and how much. */
+  applyPayments: (items: ApplyItem[]) =>
+    request<ApplyResponse>("/api/intake/apply", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {
@@ -365,6 +410,149 @@ export interface FinancialsResponse {
     check_invoice: number;
     units_served: number;
   };
+}
+
+// ── Recording payments ────────────────────────────────────────────────────
+
+/** What the vision model made of the check. Every field is a suggestion the
+ *  reviewer can overwrite — `confidence` is the model's own, not a promise. */
+export interface CheckDetails {
+  payer_name: string;
+  payer_address: string;
+  amount: number;
+  check_date: string;
+  check_number: string;
+  memo: string;
+  confidence: string;
+  notes: string;
+  error: string;
+}
+
+/** An invoice the check might be paying, with the scoring that put it here.
+ *  Shown even when nothing matched, so a failure says what it nearly picked. */
+export interface InvoiceCandidate {
+  id: string;
+  invoice_number: string;
+  business_name: string;
+  grand_total: number;
+  score: number;
+  flags: string[];
+}
+
+/** Exactly what applying this check would change. Nothing has happened yet. */
+export interface SettlePlan {
+  invoice_id: string;
+  invoice_number: string;
+  event_id: string;
+  business_name: string;
+  check_amount: number;
+  /** As KonaOS holds it now, 4% processing fee included. */
+  invoice_total: number;
+  /** The 4% that comes off because this is a check, not a card. */
+  cc_fee_removed: number;
+  /** What the client actually owes once the fee is off — the figure the
+   *  office quotes, and therefore what a correct check is written for. */
+  amount_due_after_fee: number;
+  variance: number;
+  status: "exact" | "underpaid" | "overpaid";
+  fully_paid: boolean;
+  warnings: string[];
+}
+
+export interface CheckReview {
+  kind: "check";
+  /** True when Apply has something unambiguous to do. */
+  ready: boolean;
+  check: CheckDetails;
+  reason: string;
+  needs_choice: boolean;
+  candidates: InvoiceCandidate[];
+  plan: SettlePlan | null;
+}
+
+export interface EventCandidate {
+  id: string;
+  name: string;
+  score: number;
+  flags: string[];
+  event_date: string;
+  city: string;
+}
+
+export interface CashReview {
+  kind: "cash";
+  ready: boolean;
+  heard: { query: string; amount: number; brand: string; date: string };
+  reason: string;
+  needs_choice: boolean;
+  /** Why this line can't be applied even though an event was matched — no
+   *  ledger row yet, or no amount heard. Empty when it's fine. */
+  blocked: string;
+  candidates: EventCandidate[];
+  event: {
+    crm_event_id: string;
+    event_name: string;
+    event_date: string | null;
+    brand: string;
+    billing_model: string;
+  } | null;
+  previous_cash: number;
+  ledger_found: boolean;
+}
+
+export interface CashReviewResponse {
+  transcript: string;
+  notes: string;
+  error: string;
+  items: CashReview[];
+}
+
+export interface CheckRematchInput {
+  payer_name: string;
+  amount: number;
+  check_date?: string;
+  check_number?: string;
+  memo?: string;
+  /** Set when the reviewer picked an invoice by hand. */
+  invoice_id?: string;
+}
+
+export interface CashRematchInput {
+  query: string;
+  amount: number;
+  brand?: string;
+  date?: string;
+  /** Set when the reviewer picked an event by hand. */
+  crm_event_id?: string;
+}
+
+/** One approved line. Deliberately thin: which invoice or event, and how
+ *  much. Every derived figure is recomputed server-side. */
+export interface ApplyItem {
+  kind: "check" | "cash";
+  amount: number;
+  invoice_id?: string;
+  payer_name?: string;
+  crm_event_id?: string;
+}
+
+export interface ApplyResult {
+  ok: boolean;
+  kind: "check" | "cash";
+  summary: string;
+  invoice_id?: string;
+  crm_event_id?: string;
+  dry_run?: boolean;
+  warnings?: string[];
+  detail?: Record<string, unknown>;
+}
+
+export interface ApplyResponse {
+  applied: number;
+  failed: number;
+  /** True when the system is in dry-run mode: nothing was written anywhere. */
+  dry_run: boolean;
+  results: ApplyResult[];
 }
 
 export interface KonaosSessionStatus {

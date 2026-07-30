@@ -35,8 +35,32 @@ class CRMClient(ABC):
         """Create an invoice draft; return CRM response incl. an id."""
 
     @abstractmethod
+    def update_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Update an existing invoice in place; ``payload`` carries its ``id``.
+
+        Editing beats delete-and-recreate for a draft that already exists: the
+        invoice keeps its number and its link to the event, and there is no
+        window in which the create half has run and the delete half hasn't.
+        """
+
+    @abstractmethod
     def delete_invoice(self, invoice_id: str) -> None:
         ...
+
+    @abstractmethod
+    def mark_invoice_paid(
+        self,
+        invoice_id: str,
+        *,
+        paid_amount: float,
+        partial: bool = False,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Record a payment against an invoice.
+
+        ``partial`` when the money received doesn't clear the balance — the
+        invoice stays open for the remainder rather than reading as settled.
+        """
 
     @abstractmethod
     def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:

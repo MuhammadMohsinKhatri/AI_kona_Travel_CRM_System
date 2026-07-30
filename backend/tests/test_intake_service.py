@@ -1,0 +1,437 @@
+"""Applying a check to an invoice, and a spoken cash total to an event.
+
+The behaviours here are the ones where being wrong costs real money — a payment
+recorded against the wrong customer, a check recorded twice, or a client chased
+for a cent they don't owe — so each has a test naming the failure it prevents.
+"""
+import os
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test_konaice.db")
+os.environ.setdefault("PIPELINE_RUN_INLINE", "true")
+os.environ.setdefault("MOCK_LATENCY_S", "0")
+os.environ["CRM_PROVIDER"] = "mock"
+os.environ["SQUARE_PROVIDER"] = "mock"
+os.environ["OPENAI_PROVIDER"] = "mock"
+os.environ["TELEGRAM_PROVIDER"] = "mock"
+os.environ["PIPELINE_DRY_RUN"] = "false"
+
+from typing import Any  # noqa: E402
+
+from app.core import intake_service as svc  # noqa: E402
+from app.core.intake_readers import CashEntry, CheckRead  # noqa: E402
+from app.db.base import Base, SessionLocal, engine  # noqa: E402
+from app.models import (CrmAuditEntry, Event, FinancialEntry,  # noqa: E402
+                        Invoice)
+
+# ThriftBooks as it actually stands: 62 servings at $2.00 = $124.00,
+# +6% tax = $7.44, +4% processing fee = $4.96 → $136.40.
+# Take the fee off and the client owes $131.44 — the figure the office quotes,
+# and therefore the figure a correctly-written check carries.
+WITH_FEE = 136.40
+WITHOUT_FEE = 131.44
+
+CLASSIFICATION = {
+    "EVENT_ID": "ev-thrift",
+    "EVENT_NAME": "ThriftBooks",
+    "EVENT_TYPE": "PACKAGE",
+    "BILLING_MODEL": "PACKAGE_PER_SERVING",
+    "UNITS_SERVED_TOTAL": 62,
+    "RATE_PER_SERVING": 2.00,
+    "TAXABLE": "YES",
+    "PAYMENT_METHOD": "CHECK",
+    "PAID_STATUS": "FALSE",
+    "CONTACT_EMAIL": "office@thriftbooks.example",
+}
+
+
+def setup_module(_):
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
+class FakeCRM:
+    """A CRM that records what it was told to do, so the test can assert on the
+    writes rather than on our own copy of them."""
+
+    def __init__(self, invoices: list[dict[str, Any]]):
+        self.invoices = invoices
+        self.updated: list[dict[str, Any]] = []
+        self.paid: list[dict[str, Any]] = []
+
+    def list_invoices(self) -> list[dict[str, Any]]:
+        return self.invoices
+
+    def update_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.updated.append(payload)
+        return {"ok": True}
+
+    def mark_invoice_paid(self, invoice_id, *, paid_amount, partial=False, note=""):
+        self.paid.append({"invoice_id": invoice_id, "paid_amount": paid_amount,
+                          "partial": partial, "note": note})
+        return {"ok": True}
+
+
+def _seed(db, *, crm_event_id="ev-thrift", crm_invoice_id="inv-thrift",
+          classification=None, event_date="2026-07-25", name="ThriftBooks",
+          ledger=True, raw=None):
+    """One processed event with the draft invoice it produced."""
+    from app.core.billing import calculate_invoice
+    from app.core.invoice_builder import build_invoice_payload
+
+    cls = dict(classification or CLASSIFICATION)
+    cls["EVENT_ID"] = crm_event_id
+    cls["EVENT_NAME"] = name
+    calc = calculate_invoice(cls)
+    cleaned = {"EVENT_NAME": name, "DATE": event_date, "LOCATION": "1 Main St, Pikesville, MD, 21208"}
+    raw_event = raw if raw is not None else {"id": crm_event_id, "name": name,
+                                             "city": "Pikesville", "zipCode": "21208"}
+    payload = build_invoice_payload({**cls, "calculations": calc}, cleaned, raw_event)
+
+    event = Event(
+        crm_event_id=crm_event_id, event_name=name, event_date=event_date,
+        brand="Kona Ice", event_type="PACKAGE", billing_model=cls["BILLING_MODEL"],
+        status="processed", raw=raw_event, cleaned=cleaned,
+        classification=cls, calculations=calc,
+        final_invoice_amount=calc["FINAL_INVOICE_AMOUNT"],
+    )
+    db.add(event)
+    db.flush()
+
+    invoice = Invoice(
+        event_id=event.id, crm_invoice_id=crm_invoice_id,
+        invoice_number=payload.get("invoiceNumber"), title=name, status="draft",
+        grand_total=calc["FINAL_INVOICE_AMOUNT"], subtotal=calc["SUBTOTAL"],
+        payload=payload,
+    )
+    db.add(invoice)
+    if ledger:
+        db.add(FinancialEntry(
+            event_id=event.id, crm_event_id=crm_event_id, event_name=name,
+            event_date=event_date, billing_model=cls["BILLING_MODEL"],
+        ))
+    db.commit()
+
+    return event, {
+        "id": crm_invoice_id,
+        "invoiceNumber": payload.get("invoiceNumber"),
+        "eventId": crm_event_id,
+        "businessName": name,
+        "grandTotal": calc["FINAL_INVOICE_AMOUNT"],
+        "invoiceStatus": "draft",
+    }
+
+
+def _fresh_db():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    return SessionLocal()
+
+
+# ── the fee-free figure ──────────────────────────────────────────────────────
+
+def test_fee_free_total_comes_from_the_engine_not_from_subtracting_4_percent():
+    """$136.40 less 4% is $130.94; the right answer is $131.44.
+
+    The fee is charged on the PRE-TAX subtotal, so arithmetic on the grand total
+    is wrong by half a dollar here — and by a cent in the ordinary case, which
+    is enough to turn a check that paid in full into "underpaid by $0.01".
+    """
+    db = _fresh_db()
+    try:
+        _seed(db)
+        assert svc.fee_free_total(db, "inv-thrift") == WITHOUT_FEE
+        assert round(WITH_FEE * 0.96, 2) != WITHOUT_FEE   # the tempting shortcut
+    finally:
+        db.close()
+
+
+def test_no_fee_free_figure_when_the_total_was_stated_rather_than_calculated():
+    """An amount typed in the notes overrides the engine, so waiving the fee
+    changes nothing. Reporting "no fee to remove" there would be a guess — say
+    we can't work it out instead."""
+    db = _fresh_db()
+    try:
+        _seed(db, classification={**CLASSIFICATION,
+                                  "CHECK_INVOICE_AMOUNT": 136.40})
+        assert svc.fee_free_total(db, "inv-thrift") is None
+    finally:
+        db.close()
+
+
+# ── reviewing a check ────────────────────────────────────────────────────────
+
+def test_a_check_for_the_fee_free_amount_reads_as_paid_in_full():
+    """The normal case. If this scored as an underpayment, every correctly
+    written check would park its event on Needs Attention."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+
+        assert review.ready
+        assert review.plan.invoice_id == "inv-thrift"
+        assert review.plan.status == "exact"
+        assert review.plan.fully_paid
+        assert review.plan.cc_fee_removed == 4.96
+        assert review.plan.amount_due_after_fee == WITHOUT_FEE
+    finally:
+        db.close()
+
+
+def test_review_writes_nothing():
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        svc.review_check(db, crm, CheckRead(payer_name="ThriftBooks",
+                                            amount=WITHOUT_FEE))
+        assert crm.updated == [] and crm.paid == []
+    finally:
+        db.close()
+
+
+def test_an_unreadable_check_asks_for_the_details_instead_of_matching():
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(error="Couldn't read the check: blurry"))
+        assert review.plan is None
+        assert review.match.needs_choice
+    finally:
+        db.close()
+
+
+def test_an_invoice_picked_by_hand_beats_the_score():
+    """The reviewer is looking at the paper. Their choice is the answer."""
+    db = _fresh_db()
+    try:
+        _, thrift = _seed(db)
+        _, jones = _seed(db, crm_event_id="ev-jones", crm_invoice_id="inv-jones",
+                         name="Jones Elementary PTA")
+        review = svc.review_check(
+            db, FakeCRM([thrift, jones]),
+            CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE),
+            invoice_id="inv-jones",
+        )
+        assert review.plan.invoice_id == "inv-jones"
+    finally:
+        db.close()
+
+
+# ── applying a check ─────────────────────────────────────────────────────────
+
+def test_applying_takes_the_fee_off_the_invoice_then_records_the_payment():
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+        result = svc.apply_check(db, crm, review.plan, by="office@example.com")
+
+        assert result.ok
+        # The invoice was edited in place — same id, no fee line, smaller total.
+        assert len(crm.updated) == 1
+        pushed = crm.updated[0]
+        assert pushed["id"] == "inv-thrift"
+        assert pushed["grandTotal"] == WITHOUT_FEE
+        assert not any("Processing Fee" in i["name"]
+                       for i in pushed["clientInvoiceItems"])
+        # …and then paid in full, not partially.
+        assert crm.paid == [{"invoice_id": "inv-thrift", "paid_amount": WITHOUT_FEE,
+                             "partial": False,
+                             "note": "Check 131.44 — applied by office@example.com"}]
+
+        invoice = db.query(Invoice).one()
+        assert invoice.status == "paid"
+        assert invoice.grand_total == WITHOUT_FEE
+        assert db.query(FinancialEntry).one().paid is True
+        assert db.query(CrmAuditEntry).filter_by(action="check_applied").count() == 1
+    finally:
+        db.close()
+
+
+def test_editing_the_invoice_never_issues_it():
+    """Taking a fee off changes the figures. It must not also send a client a
+    document nobody asked to send — the draft stays a draft."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+        svc.apply_check(db, crm, review.plan)
+        assert crm.updated[0]["saveAsDraft"] is True
+        assert crm.updated[0]["invoiceStatus"] == "draft"
+    finally:
+        db.close()
+
+
+def test_a_check_already_recorded_in_konaos_is_not_recorded_again():
+    """The regression this guards: the review was built minutes ago, and in the
+    meantime someone keyed the same check in by hand. Applying now would take
+    the payment twice."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+
+        inv["invoiceStatus"] = "paid"          # someone got there first
+        result = svc.apply_check(db, crm, review.plan)
+
+        assert not result.ok
+        assert "already been marked paid" in result.summary
+        assert crm.updated == [] and crm.paid == []
+    finally:
+        db.close()
+
+
+def test_a_check_that_matches_no_amount_is_not_matched_on_the_name_alone():
+    """$100 against a $136.40 invoice: the payer name fits and nothing else
+    does. A name is OCR of handwriting — on its own it is not enough to mark
+    somebody's invoice paid, so this asks instead of deciding."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=100.00))
+
+        assert review.plan is None
+        assert review.match.needs_choice
+        assert review.match.candidates[0].id == "inv-thrift"   # shown, not chosen
+    finally:
+        db.close()
+
+
+def test_a_short_check_leaves_the_balance_open():
+    """$100 against $131.44 owed is a part payment. Marking it settled would
+    close a balance the client still owes.
+
+    Reached by hand-picking the invoice — a check for an amount matching nothing
+    is exactly the case the matcher refuses to call (above)."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=100.00),
+            invoice_id="inv-thrift")
+
+        assert review.plan.status == "underpaid"
+        assert review.plan.fully_paid is False
+
+        svc.apply_check(db, crm, review.plan)
+        assert crm.paid[0]["partial"] is True
+        assert db.query(Invoice).one().status == "partially_paid"
+        assert db.query(FinancialEntry).one().paid is False
+    finally:
+        db.close()
+
+
+def test_dry_run_writes_nothing_and_says_so():
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+        result = svc.apply_check(db, crm, review.plan, dry_run=True)
+
+        assert result.ok and result.dry_run
+        assert crm.updated == [] and crm.paid == []
+        assert db.query(Invoice).one().status == "draft"
+    finally:
+        db.close()
+
+
+# ── cash ─────────────────────────────────────────────────────────────────────
+
+def test_a_spoken_phrase_matches_the_event_it_names():
+    db = _fresh_db()
+    try:
+        _seed(db, crm_event_id="ev-pikes", crm_invoice_id="inv-pikes",
+              name="Pikesville Farmers Market", event_date="2026-07-25",
+              raw={"id": "ev-pikes", "name": "Pikesville Farmers Market",
+                   "city": "Pikesville", "zipCode": "21208"})
+        [review] = svc.review_cash(
+            db, [CashEntry(query="Pikesville farmers market", amount=7.0,
+                           date="2026-07-25")])
+
+        assert review.ready
+        assert review.event.crm_event_id == "ev-pikes"
+        assert review.previous_cash == 0.0
+    finally:
+        db.close()
+
+
+def test_cash_for_an_event_we_have_not_processed_is_blocked_not_guessed():
+    """No ledger row means nothing to post to. Saying so beats matching it to
+    whatever else happens to be on that date."""
+    db = _fresh_db()
+    try:
+        _seed(db, crm_event_id="ev-pikes", crm_invoice_id="inv-pikes",
+              name="Pikesville Farmers Market", event_date="2026-07-25",
+              ledger=False,
+              raw={"id": "ev-pikes", "name": "Pikesville Farmers Market"})
+        [review] = svc.review_cash(
+            db, [CashEntry(query="Pikesville farmers market", amount=7.0,
+                           date="2026-07-25")])
+
+        assert not review.ready
+        assert "hasn't been processed" in review.blocked
+    finally:
+        db.close()
+
+
+def test_two_events_matching_equally_well_ask_rather_than_pick():
+    db = _fresh_db()
+    try:
+        for i, code in enumerate(("a", "b")):
+            _seed(db, crm_event_id=f"ev-{code}", crm_invoice_id=f"inv-{code}",
+                  name="Milford Mill Elementary", event_date="2026-07-25",
+                  raw={"id": f"ev-{code}", "name": "Milford Mill Elementary"})
+        [review] = svc.review_cash(
+            db, [CashEntry(query="Milford Mill", amount=25.0, date="2026-07-25")])
+
+        assert not review.ready
+        assert review.match.needs_choice
+        assert len(review.match.candidates) >= 2
+    finally:
+        db.close()
+
+
+def test_an_amount_heard_with_no_event_is_kept_for_a_person_to_place():
+    """The workflow's own hard case: the admin said a figure but nothing
+    identifiable. Dropping it loses money quietly."""
+    db = _fresh_db()
+    try:
+        _seed(db, crm_event_id="ev-pikes", crm_invoice_id="inv-pikes",
+              name="Pikesville Farmers Market", event_date="2026-07-25",
+              raw={"id": "ev-pikes", "name": "Pikesville Farmers Market"})
+        [review] = svc.review_cash(
+            db, [CashEntry(query="", amount=12.50, date="2026-07-25")])
+
+        assert not review.ready
+        assert review.entry.amount == 12.50
+    finally:
+        db.close()
+
+
+def test_an_event_picked_by_hand_is_matched_directly():
+    db = _fresh_db()
+    try:
+        _seed(db, crm_event_id="ev-pikes", crm_invoice_id="inv-pikes",
+              name="Pikesville Farmers Market", event_date="2026-07-25",
+              raw={"id": "ev-pikes", "name": "Pikesville Farmers Market"})
+        review = svc.review_cash_for_event(
+            db, "ev-pikes", CashEntry(query="the one on Tuesday", amount=7.0))
+
+        assert review.ready
+        assert review.event.crm_event_id == "ev-pikes"
+    finally:
+        db.close()

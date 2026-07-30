@@ -91,8 +91,26 @@ class KonaOSDirectCRMClient(CRMClient):
         clean = {k: v for k, v in payload.items() if not k.startswith("_")}
         return self._run(self._kc.create_invoice(clean)) or {}
 
+    def update_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+        clean = {k: v for k, v in payload.items() if not k.startswith("_")}
+        return self._run(self._kc.update_invoice(clean)) or {}
+
     def delete_invoice(self, invoice_id: str) -> None:
         self._run(self._kc.delete_invoice(invoice_id))
+
+    def mark_invoice_paid(
+        self, invoice_id: str, *, paid_amount: float, partial: bool = False,
+        note: str = "",
+    ) -> dict[str, Any]:
+        body = {
+            "partialPaid": bool(partial),
+            "paidAmount": round(float(paid_amount or 0), 2),
+            "depositeTransaction": False,  # KonaOS spelling — do NOT rename
+            "paymentNote": note or "",
+        }
+        return self._run(
+            self._kc.update_invoice_status(invoice_id, body, is_mark_as_paid=True)
+        ) or {}
 
     def update_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         fields = {k: v for k, v in payload.items() if k != "EVENT_ID"}
