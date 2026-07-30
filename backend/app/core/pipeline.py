@@ -14,8 +14,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.core import (billing, event_cleaner, invoice_builder, notify,
-                      overrides, source_fingerprint)
+from app.core import (billing, event_cleaner, invoice_builder, notes_money,
+                      notify, overrides, source_fingerprint)
 from app.core.alerts import check_alerts
 from app.core.equipment import map_equipment
 from app.core.ledger import derive_sales_columns, host_billed_applies
@@ -996,6 +996,18 @@ def _event_window_utc(cls: dict[str, Any], cleaned: dict[str, Any]) -> tuple[Opt
     return start, end
 
 
+def _notes_blob(cleaned: dict[str, Any]) -> str:
+    """All the note fields as one plain-text blob, tags stripped.
+
+    Same source the pre-invoice gate reads, so a waiver it recognises is the same
+    waiver shown in the breakdown — two different readings of the same notes is
+    how a figure ends up flagged and displayed as handled at the same time.
+    """
+    from app.core.invariants import _notes_text
+
+    return _notes_text(cleaned)
+
+
 def _declared_event_type(cleaned: dict[str, Any] | None) -> str:
     """The EVENT_TYPE the booking form itself declares, or "" if absent.
 
@@ -1040,6 +1052,16 @@ def _normalize_classification(
     method = str(cls.get("PAYMENT_METHOD", "")).strip().upper()
     if event_type == "selling" and method in ("", "CHECK"):
         cls["PAYMENT_METHOD"] = "CREDIT_CARD"
+
+    # Fees the notes state and then cancel ("waived $50 destination fee"). Read
+    # deterministically rather than asked of the classifier, and recorded so the
+    # subtotal breakdown can show an explicit $0.00 line: a waived fee is absent
+    # from the arithmetic by design, which reads as an omission — the notes say
+    # $50 and the invoice mentions no $50 anywhere.
+    if cleaned:
+        waived = notes_money.waived_fees(_notes_blob(cleaned))
+        if waived:
+            cls["WAIVED_FEES"] = waived
 
     canonical = billing.canonical_billing_model(cls.get("BILLING_MODEL"), cls)
     if canonical and canonical != str(cls.get("BILLING_MODEL") or "").upper().strip():

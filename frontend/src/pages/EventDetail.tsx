@@ -297,6 +297,23 @@ interface SubtotalLine {
   note?: string;
 }
 
+/** A fee the notes state and then cancel, read out of the notes by the backend
+ *  (app/core/notes_money.py waived_fees). `name` is derived from the wording, so
+ *  it can be "" when the clause names no fee. */
+interface WaivedFee {
+  amount: number;
+  name: string;
+  phrase: string;
+}
+
+/** "destination fee" → "Destination fee". Only the first letter: the office
+ *  writes fee names in lower case and title-casing every word gives
+ *  "Destination Fee", which reads like a proper noun it isn't. */
+function titleCase(s: string): string {
+  const t = s.trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
+
 /** Shows how the Subtotal is built up, line by line — derived directly from
  *  the classification inputs + calculation outputs (calculate_invoice's
  *  per-model formulas in billing.py), so it renders for every processed
@@ -396,6 +413,18 @@ function SubtotalBreakdown({
 
   if (locationFee) items.push({ label: "Location / Destination Fee", amount: locationFee });
   if (addonAmount) items.push({ label: String(calc.ADDON_LABEL || "Add-on"), amount: addonAmount });
+
+  // A fee the notes state and then cancel ("waived $50 destination fee"). It
+  // contributes nothing by design, which is exactly why it needs a line: with no
+  // line, the notes name a $50 that appears nowhere in the invoice and the
+  // reader can't tell whether it was handled or dropped.
+  for (const w of (cls.WAIVED_FEES as WaivedFee[] | undefined) ?? []) {
+    items.push({
+      label: `${titleCase(w.name || "Fee")} (waived)`,
+      amount: 0,
+      note: `Stated as ${money(w.amount)} in the notes — waived, so nothing is charged.`,
+    });
+  }
 
   if (!items.length) return null;
 
