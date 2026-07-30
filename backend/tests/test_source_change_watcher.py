@@ -14,8 +14,9 @@ os.environ.setdefault("CRM_PROVIDER", "mock")
 
 from app.core.source_fingerprint import (BILLING_SOURCE_FIELDS,  # noqa: E402
                                          fingerprint)
+from app.core.source_fingerprint import changed_fields  # noqa: E402
 from app.db.base import Base, SessionLocal, engine  # noqa: E402
-from app.models import Event, PipelineRun  # noqa: E402
+from app.models import CrmAuditEntry, Event, PipelineRun  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
 
@@ -132,7 +133,28 @@ def _run(monkeypatch, crm, **kwargs):
 def _clear(db):
     db.query(Event).delete()
     db.query(PipelineRun).delete()
+    db.query(CrmAuditEntry).delete()
     db.commit()
+
+
+# ── what changed, in plain English ───────────────────────────────────────────
+
+def test_changed_fields_names_the_field_in_plain_english():
+    diffs = changed_fields(
+        THRIFTBOOKS, {**THRIFTBOOKS, "DRIVER_NOTES": "Served 31 Konas."}
+    )
+    assert [d["label"] for d in diffs] == ["Driver notes"]
+    assert diffs[0]["before"] == ""
+    assert diffs[0]["after"] == "Served 31 Konas."
+
+
+def test_changed_fields_ignores_unwatched_edits():
+    assert changed_fields(THRIFTBOOKS, {**THRIFTBOOKS, "TIP_AMOUNT": 12}) == []
+
+
+def test_long_notes_are_truncated_for_the_log():
+    diffs = changed_fields(THRIFTBOOKS, {**THRIFTBOOKS, "ADMIN_NOTES": "x" * 5000})
+    assert len(diffs[0]["after"]) <= 300
 
 
 def test_a_changed_event_is_re_run(monkeypatch):
@@ -157,6 +179,64 @@ def test_a_changed_event_is_re_run(monkeypatch):
         # the re-processed event, so a re-run that dies is retried next pass.
         db.refresh(ev)
         assert ev.source_fingerprint == fingerprint(stale)
+    finally:
+        _clear(db)
+        db.close()
+
+
+def test_the_change_is_written_to_the_konaos_change_log(monkeypatch):
+    """"How would I know this happened?" — the answer has to be a row somebody
+    can find, not a figure quietly moving on the event page."""
+    db = SessionLocal()
+    try:
+        _clear(db)
+        stale = {**THRIFTBOOKS, "DRIVER_NOTES": ""}
+        ev = _seed(db, "kos-log", fp=fingerprint(stale))
+        crm = _Crm({"kos-log": {"cleaned": {**THRIFTBOOKS,
+                                            "DRIVER_NOTES": "Served 31 Konas."}}})
+
+        _run(monkeypatch, crm)
+
+        entry = db.query(CrmAuditEntry).filter(
+            CrmAuditEntry.crm_event_id == "kos-log").one()
+        assert entry.action == "source_changed"
+        assert entry.event_id == ev.id
+        assert entry.event_name == "ThriftBooks"
+        assert "Driver notes" in entry.summary
+        assert entry.detail["fields_changed"] == ["Driver notes"]
+        # Before/after is the payoff — it explains why the invoice moved.
+        assert entry.detail["changes"][0]["after"] == "Served 31 Konas."
+    finally:
+        _clear(db)
+        db.close()
+
+
+def test_no_change_writes_no_change_log_row(monkeypatch):
+    """A log that fills up with "nothing happened" is a log nobody reads."""
+    db = SessionLocal()
+    try:
+        _clear(db)
+        _seed(db, "kos-quiet", fp=fingerprint(THRIFTBOOKS))
+        crm = _Crm({"kos-quiet": {"cleaned": dict(THRIFTBOOKS)}})
+
+        _run(monkeypatch, crm)
+
+        assert db.query(CrmAuditEntry).count() == 0
+    finally:
+        _clear(db)
+        db.close()
+
+
+def test_baselining_writes_no_change_log_row(monkeypatch):
+    db = SessionLocal()
+    try:
+        _clear(db)
+        _seed(db, "kos-base", fp=None)
+        crm = _Crm({"kos-base": {"cleaned": dict(THRIFTBOOKS)}})
+
+        _run(monkeypatch, crm)
+
+        assert db.query(CrmAuditEntry).count() == 0
     finally:
         _clear(db)
         db.close()

@@ -28,6 +28,9 @@ export function Badge({ kind, children }: { kind: string; children: ReactNode })
     invoice_deferred: "amber",
     cash_updated: "green",
     event_updated: "blue",
+    // Inbound, not ours: KonaOS was edited after we processed the event. Amber
+    // because it means a figure on screen was computed from an older snapshot.
+    source_changed: "amber",
   };
   const cls = map[children as string] ?? map[kind] ?? "gray";
   return <span className={`badge ${cls}`}>{children}</span>;
@@ -87,6 +90,25 @@ function formatAuditValue(field: string, value: unknown): string {
  *  Activity page and the per-event "KonaOS activity" section on EventDetail
  *  so both read this exactly the same way. Renders nothing for entries with
  *  no structured detail (e.g. invoice created/deleted/skipped). */
+/** One watched field that moved in Kona OS, as written by the source watcher
+ *  (backend/app/core/source_fingerprint.py changed_fields). */
+interface SourceChange {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+/** Notes are long and this renders inside a table cell. An emptied or
+ *  newly-filled field shows as "(empty)" rather than nothing at all — the
+ *  before side of a driver's note is usually blank, and blank-to-something is
+ *  exactly the change worth seeing. */
+function snip(text: string, max = 90): string {
+  const t = (text || "").trim();
+  if (!t) return "(empty)";
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 export function AuditDetail({ detail }: { detail: Record<string, unknown> | null | undefined }) {
   if (!detail) return null;
   const values = (detail.values as Record<string, unknown>) || {};
@@ -95,11 +117,26 @@ export function AuditDetail({ detail }: { detail: Record<string, unknown> | null
   const hasStaff = "staff_names" in detail;
   const equipNames = (detail.equipment_names as string[]) || [];
   const staffNames = (detail.staff_names as string[]) || [];
+  // Inbound source edits (action=source_changed): what Kona OS looked like
+  // before, and what it says now. Seeing the driver's count appear out of an
+  // empty field is the whole explanation for why the invoice moved.
+  const changes = (detail.changes as SourceChange[]) || [];
 
-  if (!valueEntries.length && !hasEquip && !hasStaff) return null;
+  if (!valueEntries.length && !hasEquip && !hasStaff && !changes.length) return null;
 
   return (
     <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6 }}>
+      {changes.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {changes.map((c) => (
+            <div key={c.field}>
+              <span className="muted">{c.label}:</span>{" "}
+              <s style={{ opacity: 0.65 }}>{snip(c.before)}</s>{" → "}
+              <strong>{snip(c.after)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
       {valueEntries.length > 0 && (
         <div>
           {valueEntries.map(([k, v]) => (

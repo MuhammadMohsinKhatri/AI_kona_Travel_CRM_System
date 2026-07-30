@@ -38,11 +38,16 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 from app.core import event_cleaner
-from app.core.source_fingerprint import fingerprint
+from app.core.source_fingerprint import changed_fields, fingerprint
 from app.db.base import SessionLocal
 from app.integrations import factory
-from app.models import Event, PipelineRun
+from app.models import CrmAuditEntry, Event, PipelineRun
 from app.tasks.celery_app import celery
+
+# The change log's action key for an INBOUND edit. Every other action in that
+# table is something we did TO KonaOS; this one is something KonaOS did to us,
+# which is why it gets its own key rather than reusing event_updated.
+AUDIT_ACTION = "source_changed"
 
 # How far back to watch. Billing corrections land within a couple of weeks of
 # the event; beyond that the books are closed and a re-run is a human decision.
@@ -62,6 +67,32 @@ SKIP_STATUSES = ("processing",)
 
 def _is_cancelled(event: Event) -> bool:
     return "cancel" in str(event.final_status or "").lower()
+
+
+def _log_source_change(db, event: Event, fresh: dict) -> list[dict[str, str]]:
+    """Record the inbound edit on the KonaOS Change Log.
+
+    Answers "how would I know this happened?" without having to notice a figure
+    moved. The row names the fields that changed and carries before/after in its
+    detail, so the log reads as a two-way history: what we wrote to KonaOS, and
+    what KonaOS changed under us.
+
+    Written from the watcher rather than the pipeline on purpose — by the time
+    the re-run stores the event, the old snapshot it differed from is gone.
+    """
+    diffs = changed_fields(event.cleaned or {}, fresh)
+    labels = sorted({d["label"] for d in diffs})
+    summary = (
+        f"Changed in Kona OS: {', '.join(labels)} — re-running this event"
+        if labels else "Changed in Kona OS — re-running this event"
+    )
+    db.add(CrmAuditEntry(
+        event_id=event.id, crm_event_id=event.crm_event_id,
+        event_name=event.event_name, event_date=event.event_date,
+        action=AUDIT_ACTION, summary=summary,
+        detail={"fields_changed": labels, "changes": diffs},
+    ))
+    return diffs
 
 
 @celery.task(name="app.tasks.watch_tasks.rerun_changed_events")
@@ -127,6 +158,7 @@ def rerun_changed_events(
             elif current != event.source_fingerprint:
                 changed += 1
                 changed_ids.append(event.crm_event_id)
+                _log_source_change(db, event, cleaned)
                 # The fingerprint is NOT written here. The pipeline writes it
                 # when it stores the re-processed event, so a re-run that fails
                 # leaves the event still marked as changed and gets picked up

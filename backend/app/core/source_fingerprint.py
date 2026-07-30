@@ -62,6 +62,64 @@ BILLING_SOURCE_FIELDS: tuple[str, ...] = (
 )
 
 
+# Plain English for the change log. A row saying "DRIVER_NOTES" makes the
+# reader translate; one saying "Driver notes" doesn't.
+FIELD_LABELS: dict[str, str] = {
+    "ADMIN_NOTES": "Admin notes",
+    "DRIVER_NOTES": "Driver notes",
+    "EVENT_NOTES_HTML": "Event notes",
+    "LOCATION_NOTES": "Location notes",
+    "DATE": "Event date",
+    "EVENT_STARTED": "Start time",
+    "EVENT_ENDED": "End time",
+    "EQUIPMENT": "Equipment",
+    "EQUIPMENT_IDS": "Equipment",
+    "STAFF_ASSIGNED": "Staff",
+    "STAFF_COUNT": "Staff count",
+    "EVENT_STATUS_MANUAL": "Status",
+    "EVENT_STATUS_SYSTEM": "Status (system)",
+    "FINAL_EVENT_STATUS": "Status",
+    "EVENT_TYPE": "Event type",
+    "PAYMENT_TERM": "Payment term",
+    "CLIENT_INVOICE": "Client invoice flag",
+    "DELIVERY_FEE": "Delivery fee",
+    "EVENT_NAME": "Event name",
+    "BRAND": "Brand",
+    "EVENT_LOCATION": "Location",
+}
+
+# Notes run long; a change-log row needs enough to recognise the edit, not the
+# whole field. The full current value is always on the event's detail page.
+_DETAIL_MAX = 300
+
+
+def _norm(value: Any) -> str:
+    return str(value if value is not None else "").strip()
+
+
+def changed_fields(
+    before: dict[str, Any], after: dict[str, Any]
+) -> list[dict[str, str]]:
+    """Which watched fields moved, with before/after, for the change log.
+
+    The fingerprint answers "did anything change"; this answers "what", which is
+    the part a person actually needs — "Driver notes changed" is actionable,
+    "the hash moved" is not.
+    """
+    out: list[dict[str, str]] = []
+    for field in BILLING_SOURCE_FIELDS:
+        was, now = _norm(before.get(field)), _norm(after.get(field))
+        if was == now:
+            continue
+        out.append({
+            "field": field,
+            "label": FIELD_LABELS.get(field, field),
+            "before": was[:_DETAIL_MAX],
+            "after": now[:_DETAIL_MAX],
+        })
+    return out
+
+
 def fingerprint(cleaned: dict[str, Any]) -> str:
     """Stable hash of the billing-relevant fields of a cleaned event.
 
@@ -69,9 +127,6 @@ def fingerprint(cleaned: dict[str, Any]) -> str:
     KonaOS re-serializing "Served 31 Konas. Send invoice " with a different
     trailing space doesn't read as an edit.
     """
-    payload = {
-        field: str(cleaned.get(field) if cleaned.get(field) is not None else "").strip()
-        for field in BILLING_SOURCE_FIELDS
-    }
+    payload = {field: _norm(cleaned.get(field)) for field in BILLING_SOURCE_FIELDS}
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

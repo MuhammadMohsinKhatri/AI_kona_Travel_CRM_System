@@ -3,8 +3,12 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CrmAuditResponse } from "../api/client";
 import { AuditDetail, Badge, Empty, Loading } from "../components/ui";
 
-/** Plain-language names for what the automation did. The backend keys stay
- *  as-is — this is display only. */
+/** Plain-language names for each logged change. The backend keys stay as-is —
+ *  this is display only.
+ *
+ *  source_changed is the one INBOUND action: somebody edited the booking in
+ *  Kona OS after we'd processed it. Everything else is something the automation
+ *  did TO Kona OS. */
 const ACTION_LABELS: Record<string, string> = {
   invoice_created: "Created an invoice",
   invoice_deleted: "Removed an invoice",
@@ -12,6 +16,7 @@ const ACTION_LABELS: Record<string, string> = {
   invoice_deferred: "Waiting for cash",
   cash_updated: "Cash recorded",
   event_updated: "Updated the event",
+  source_changed: "Edited in Kona OS",
   error: "Failed",
 };
 
@@ -77,10 +82,12 @@ export default function CrmAudit() {
     <>
       <h1 className="page-title">KonaOS Change Log</h1>
       <p className="page-sub">
-        Everything the automation has changed in KonaOS — figures written onto an event,
-        invoices created or removed — with the date and time it happened. Anything that
-        <strong> failed</strong> is listed too, with the reason. Use this to answer
-        "did the system change this, and when?"
+        A two-way history of every event. Outbound: what the automation changed in KonaOS —
+        figures written onto an event, invoices created or removed. Inbound: bookings
+        <strong> edited in KonaOS</strong> after we'd already processed them (a driver's
+        serving count typed in the next morning, a time moved) — those are re-run
+        automatically, and the row says which fields moved. Anything that
+        <strong> failed</strong> is listed too, with the reason.
       </p>
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
@@ -122,8 +129,10 @@ export default function CrmAudit() {
               <tr>
                 <th>Event date</th>
                 <th>Event</th>
-                <th>What the automation did</th>
-                <th>What changed in KonaOS</th>
+                {/* Not "what the automation did" — source_changed rows are
+                    KonaOS changing under us, the opposite direction. */}
+                <th>What happened</th>
+                <th>Details</th>
                 <th>When it happened</th>
               </tr>
             </thead>

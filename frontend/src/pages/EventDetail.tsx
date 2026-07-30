@@ -8,6 +8,7 @@ const ACTION_LABELS: Record<string, string> = {
   invoice_deleted: "Invoice deleted",
   invoice_skipped: "Invoice skipped",
   event_updated: "Event updated",
+  source_changed: "Edited in Kona OS",
 };
 
 export default function EventDetail() {
