@@ -37,11 +37,13 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timedelta, timezone
 
+from celery.signals import worker_ready
+
 from app.core import event_cleaner
 from app.core.source_fingerprint import changed_fields, fingerprint
 from app.db.base import SessionLocal
 from app.integrations import factory
-from app.models import CrmAuditEntry, Event, PipelineRun
+from app.models import CrmAuditEntry, Event, Invoice, PipelineRun
 from app.tasks.celery_app import celery
 
 # The change log's action key for an INBOUND edit. Every other action in that
@@ -186,6 +188,101 @@ def rerun_changed_events(
             "failed": failed,
             "changed_ids": changed_ids,
             "run_id": run_id,
+        }
+    finally:
+        db.close()
+
+
+@worker_ready.connect
+def _backfill_on_boot(**_kwargs) -> None:
+    """Queue the invoice-id backfill once at worker start.
+
+    The hourly schedule would fix things eventually, but a repair whose effect
+    only appears at some later :45 is indistinguishable from a repair that
+    didn't work. Deploying is the natural moment to run it, and it costs nothing
+    once there is nothing left to fill.
+
+    Queued, not called: worker_ready must not block on a KonaOS round-trip.
+    """
+    try:
+        backfill_invoice_ids.delay()
+    except Exception:  # noqa: BLE001 — never block worker boot
+        pass
+
+
+@celery.task(name="app.tasks.watch_tasks.backfill_invoice_ids")
+def backfill_invoice_ids(limit: int = 500) -> dict:
+    """Fill in crm_invoice_id on invoices stored without one.
+
+    KonaOS's invoice-create response does not reliably carry the new id, so every
+    invoice this system has created was stored with crm_invoice_id empty. The
+    record said "we made an invoice" without saying which one — no deep link, and
+    nothing to mark paid against.
+
+    The create path now resolves the id itself (pipeline.find_invoice_id), but
+    that only helps invoices created from here on. This repairs the ones already
+    stored, and keeps running as a safety net for any create whose id still
+    can't be resolved at the time.
+
+    ONE ``list_invoices`` call per pass regardless of how many rows need fixing,
+    and no call at all when none do — the KonaOS session does not tolerate being
+    hammered (see the pacing note at the top of this module).
+
+    Idempotent: a row that already has an id is never touched, so this converges
+    to doing nothing.
+    """
+    from app.core.pipeline import find_invoice_id
+
+    db = SessionLocal()
+    filled = unresolved = 0
+    try:
+        missing = (
+            db.query(Invoice)
+            .filter(Invoice.crm_invoice_id.is_(None))
+            .limit(limit)
+            .all()
+        )
+        if not missing:
+            return {"missing": 0, "filled": 0, "unresolved": 0}
+
+        crm = factory.get_crm()
+        # Fetched once and reused: find_invoice_id would otherwise re-list for
+        # every row, which is exactly the burst pattern to avoid.
+        try:
+            existing = crm.list_invoices() or []
+        except Exception as e:  # noqa: BLE001
+            return {"missing": len(missing), "filled": 0, "unresolved": len(missing),
+                    "error": str(e)}
+
+        by_event: dict[str, str] = {}
+        by_number: dict[str, str] = {}
+        for inv in existing:
+            iid = str(inv.get("id") or inv.get("invoiceId") or "")
+            if not iid:
+                continue
+            if inv.get("eventId"):
+                by_event.setdefault(str(inv["eventId"]), iid)
+            if inv.get("invoiceNumber"):
+                by_number.setdefault(str(inv["invoiceNumber"]), iid)
+
+        for row in missing:
+            event = db.get(Event, row.event_id)
+            crm_event_id = event.crm_event_id if event else ""
+            iid = by_event.get(str(crm_event_id or "")) or by_number.get(
+                str(row.invoice_number or "")
+            )
+            if iid:
+                row.crm_invoice_id = iid
+                filled += 1
+            else:
+                # Deleted in KonaOS, or never actually created. Left alone rather
+                # than guessed at — a wrong id links to someone else's invoice.
+                unresolved += 1
+
+        db.commit()
+        return {
+            "missing": len(missing), "filled": filled, "unresolved": unresolved,
+            "konaos_invoices_seen": len(existing),
         }
     finally:
         db.close()

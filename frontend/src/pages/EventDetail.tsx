@@ -47,6 +47,10 @@ export default function EventDetail() {
   const deviceLabel = equip.equipment_name
     ? `${equip.equipment_name} · ${squareMentioned ? "named by driver" : "assigned to event"}`
     : "—";
+  // An event has at most one invoice in practice; first-with-a-link is the one
+  // to surface in the header. Null until the invoice's KonaOS id is known, so
+  // the button appears the moment the backfill resolves it.
+  const invoiceUrl = ev.invoices.find((i) => i.konaos_url)?.konaos_url ?? null;
 
   return (
     <>
@@ -71,6 +75,19 @@ export default function EventDetail() {
               title="Open this booking in Kona OS to read the original notes"
             >
               Open in Kona OS ↗
+            </a>
+          )}
+          {/* Next to the event link, because that is where it gets looked for —
+              the copy further down on the invoice card is easy to miss. */}
+          {invoiceUrl && (
+            <a
+              className="btn"
+              href={invoiceUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="Open this event's drafted invoice in Kona OS"
+            >
+              Invoice in Kona OS ↗
             </a>
           )}
           <Badge kind={ev.status}>{ev.status}</Badge>

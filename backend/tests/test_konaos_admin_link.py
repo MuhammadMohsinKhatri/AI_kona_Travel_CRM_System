@@ -95,6 +95,55 @@ def test_invoice_schema_carries_the_link(monkeypatch):
     assert out.konaos_url and REAL_INVOICE_ID in out.konaos_url
 
 
+def test_find_invoice_id_matches_on_the_crm_foreign_key():
+    """KonaOS's create response doesn't reliably return the new invoice id, which
+    is why every stored invoice had crm_invoice_id empty and no link. eventId is
+    the CRM's own key, so it wins over the invoice number we chose ourselves."""
+    from app.core.pipeline import find_invoice_id
+
+    class _Crm:
+        def list_invoices(self):
+            return [
+                {"id": "other", "eventId": "someone-else", "invoiceNumber": "K1"},
+                {"id": REAL_INVOICE_ID, "eventId": REAL_ID, "invoiceNumber": "K2"},
+            ]
+
+    assert find_invoice_id(_Crm(), REAL_ID, "K2") == REAL_INVOICE_ID
+
+
+def test_find_invoice_id_falls_back_to_the_invoice_number():
+    from app.core.pipeline import find_invoice_id
+
+    class _Crm:
+        def list_invoices(self):
+            return [{"id": REAL_INVOICE_ID, "eventId": None, "invoiceNumber": "K530X9179333"}]
+
+    assert find_invoice_id(_Crm(), "no-match", "K530X9179333") == REAL_INVOICE_ID
+
+
+def test_find_invoice_id_returns_blank_rather_than_a_wrong_id():
+    """No match means no link. A guessed id would deep-link to someone else's
+    invoice, which is worse than a missing button."""
+    from app.core.pipeline import find_invoice_id
+
+    class _Crm:
+        def list_invoices(self):
+            return [{"id": "x", "eventId": "other", "invoiceNumber": "other"}]
+
+    assert find_invoice_id(_Crm(), REAL_ID, "K530X9179333") == ""
+
+
+def test_find_invoice_id_survives_a_crm_failure():
+    """A stale KonaOS session must cost us the link, not the pipeline run."""
+    from app.core.pipeline import find_invoice_id
+
+    class _Crm:
+        def list_invoices(self):
+            raise RuntimeError("KonaOS API error 401")
+
+    assert find_invoice_id(_Crm(), REAL_ID, "K1") == ""
+
+
 def test_detail_schema_carries_the_link(monkeypatch):
     """The property has to survive Pydantic's from_attributes conversion — the
     route returns the ORM object and never mentions konaos_url."""

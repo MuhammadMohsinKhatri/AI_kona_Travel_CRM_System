@@ -708,6 +708,67 @@ def _cash_override_for(db: Session, crm_event_id: str) -> Optional[float]:
     return entry.cash_pre_tax or 0.0
 
 
+def find_invoice_id(crm, crm_event_id: str, invoice_number: str | None) -> str:
+    """The KonaOS id of the invoice belonging to this event, or "".
+
+    Needed because KonaOS's invoice-create response does not reliably carry the
+    new id: every invoice this system created was stored with crm_invoice_id
+    empty, which left them unlinkable and un-markable-as-paid — the record said
+    "we made an invoice" without saying which one.
+
+    Matched on eventId first: it is the CRM's own foreign key. invoiceNumber is
+    the fallback because ours is set to the event code, which is unique per event
+    but is a value we chose rather than one KonaOS guarantees.
+    """
+    try:
+        existing = crm.list_invoices() or []
+    except Exception:  # noqa: BLE001 — a lookup failure must not fail the run
+        return ""
+    for inv in existing:
+        if crm_event_id and inv.get("eventId") == crm_event_id:
+            return str(inv.get("id") or inv.get("invoiceId") or "")
+    if invoice_number:
+        for inv in existing:
+            if inv.get("invoiceNumber") == invoice_number:
+                return str(inv.get("id") or inv.get("invoiceId") or "")
+    return ""
+
+
+def _num_or_zero(v: Any) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _store_protected_invoice(
+    db: Session, event: Event, match: dict[str, Any]
+) -> Invoice:
+    """Record an invoice KonaOS already holds and we deliberately did not touch.
+
+    The skip path used to store nothing at all, so an event whose invoice was
+    protected looked exactly like an event with no invoice — the opposite
+    conclusion from the same screen. Figures come from KonaOS's row, not from the
+    payload we chose not to send: showing our numbers under a status meaning "we
+    didn't send these" would be the same confusion one level down.
+    """
+    db.query(Invoice).filter(Invoice.event_id == event.id).delete()
+    invoice = Invoice(
+        event_id=event.id,
+        crm_invoice_id=str(match.get("id") or match.get("invoiceId") or "") or None,
+        invoice_number=match.get("invoiceNumber"),
+        title=match.get("title") or event.event_name or "",
+        invoice_type=str(match.get("invoiceType") or "Invoice"),
+        status="protected",
+        grand_total=_num_or_zero(match.get("grandTotal")),
+        due_amount=_num_or_zero(match.get("dueAmount")),
+        payload={"_protected": True, "konaos_invoice": match},
+    )
+    db.add(invoice)
+    db.flush()
+    return invoice
+
+
 def _store_local_invoice(
     db: Session, event: Event, payload: dict[str, Any],
     status: str = "draft", crm_invoice_id: str = "",
@@ -801,12 +862,31 @@ def _replace_draft(
             db, event, "invoice_skipped",
             f"Existing invoice(s) found: {', '.join(refs)} — protected, not replaced "
             "(conservative hold pending invoice-matching bug fix)",
-            detail={"matches": refs}, run_id=run_id,
+            detail={"matches": refs,
+                    "invoice_ids": [str(m.get("id") or "") for m in matches]},
+            run_id=run_id,
         )
+        # Record the invoice KonaOS actually holds. Skipping used to store
+        # nothing, so the event showed no invoice at all — and "we protected an
+        # existing invoice" then looked identical to "no invoice exists", which
+        # is the opposite conclusion. The figures come from KonaOS's own row, not
+        # from the payload we chose not to send.
+        _store_protected_invoice(db, event, matches[0])
         return f"skipped — {summary}"
 
     resp = crm.create_invoice(payload)
     new_id = str(resp.get("invoiceId") or resp.get("id") or "")
+    if not new_id:
+        # KonaOS's create response doesn't always carry the new id. Without it we
+        # hold an invoice we can't link to or mark paid, so re-read the list and
+        # find it — one extra call, only on the runs that need it.
+        new_id = find_invoice_id(crm, eid, event_code)
+        if new_id:
+            note(f"[{eid}] create response had no invoice id — resolved {new_id} "
+                 "from the invoice list")
+        else:
+            note(f"[{eid}] create response had no invoice id and it could not be "
+                 "resolved from the invoice list — the KonaOS link will be missing")
     note(f"[{eid}] created invoice {payload.get('invoiceNumber')} "
          f"(KonaOS id {new_id or 'unknown'}) — ${payload.get('grandTotal')}")
     _audit(

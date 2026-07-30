@@ -78,6 +78,14 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.watch_tasks.rerun_changed_events",
         "schedule": crontab(minute=15),  # every hour at :15
     },
+    # Repairs invoices stored without a KonaOS id (its create response doesn't
+    # reliably return one), which is what makes the "Open invoice in Kona OS"
+    # link and mark-as-paid possible. Converges to a no-op: one list call while
+    # anything is missing, none once nothing is.
+    "backfill-invoice-ids": {
+        "task": "app.tasks.watch_tasks.backfill_invoice_ids",
+        "schedule": crontab(minute=45),  # every hour at :45, away from the watcher
+    },
     "flag-events-awaiting-cash": {
         "task": "app.tasks.cash_tasks.flag_events_awaiting_cash",
         "schedule": crontab(hour=9, minute=0),  # morning, so it's actionable
