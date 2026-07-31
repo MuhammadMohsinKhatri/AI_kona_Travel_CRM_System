@@ -681,3 +681,66 @@ def test_the_speech_prompt_requires_an_english_query():
     filled = _SPEECH_PROMPT.format(today="2026-07-31")
     assert "query MUST be English" in filled
     assert "Arbutus Food Truck" in filled       # the transliteration example
+
+
+# ── the CRM adapter must never be driven from the event loop ─────────────────
+
+def test_uploading_a_check_does_not_call_the_crm_from_the_event_loop():
+    """From production: every check upload 500'd while every test passed.
+
+    The KonaOS adapter is a synchronous wrapper that drives its own asyncio loop
+    with run_until_complete. An `async def` route runs on the event loop thread,
+    and Python refuses to start a loop inside a running one — so the real CRM
+    raised "Cannot run the event loop while another loop is running" on every
+    upload. MockCRMClient has no loop, so nothing caught it.
+
+    This CRM stands in for that: it fails if it is ever called from a thread with
+    a running loop, which is exactly the condition the real one cannot survive.
+    """
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import get_current_user
+    from app.api.routes import intake
+    from app.db.base import get_db
+    from app.integrations.factory import get_crm
+    from app.main import app
+    from app.models import User
+
+    class LoopHostileCRM(FakeCRM):
+        def list_invoices(self):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return super().list_invoices()      # good: no loop on this thread
+            raise RuntimeError(
+                "Cannot run the event loop while another loop is running")
+
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = LoopHostileCRM([inv])
+
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: User(
+            id=1, email="office@example.com", hashed_password="x", is_active=True)
+        real_read, real_crm = intake.read_check, intake.get_crm
+        intake.read_check = lambda *a, **k: CheckRead(
+            payer_name="ThriftBooks", amount=WITHOUT_FEE, confidence="high")
+        intake.get_crm = lambda: crm
+        try:
+            response = TestClient(app).post(
+                "/api/intake/check",
+                files={"file": ("check.jpg", b"not-really-a-jpeg", "image/jpeg")},
+            )
+        finally:
+            intake.read_check, intake.get_crm = real_read, real_crm
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+            get_crm.cache_clear()
+
+        assert response.status_code == 200, response.text
+        assert response.json()["applied"]["ok"] is True
+    finally:
+        db.close()

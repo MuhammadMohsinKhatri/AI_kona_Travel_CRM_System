@@ -58,8 +58,13 @@ def _result_json(result: svc.ApplyResult) -> dict[str, Any]:
     }
 
 
-async def _read_upload(file: UploadFile, what: str, limit: int = MAX_UPLOAD_BYTES) -> bytes:
-    data = await file.read()
+def _read_upload(file: UploadFile, what: str, limit: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Read an upload from a SYNC route.
+
+    ``file.file`` is the underlying spooled temp file, so this needs no await —
+    which is the point. See the routes below for why they must not be async.
+    """
+    data = file.file.read()
     if len(data) > limit:
         raise HTTPException(
             status_code=413,
@@ -82,8 +87,16 @@ def _audio_name(filename: str) -> str:
 # ── checks ───────────────────────────────────────────────────────────────────
 
 
+# DELIBERATELY SYNC — see _read_upload. Making this `async def` puts it on the
+# event loop thread, and the KonaOS adapter is a synchronous wrapper that drives
+# its own loop via run_until_complete. Python refuses to start a loop inside a
+# running one ("Cannot run the event loop while another loop is running"), so
+# every upload 500s against the real CRM while passing every test, because the
+# mock CRM has no loop to conflict with. That is precisely how this shipped.
+# A plain `def` route runs in FastAPI's threadpool, where there is no running
+# loop — and it also keeps a multi-second vision call off the event loop.
 @router.post("/check")
-async def review_check_upload(
+def review_check_upload(
     file: UploadFile = File(..., description="Photo of the check"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -101,7 +114,7 @@ async def review_check_upload(
     too, never a 500 — the person is holding a check they cannot re-photograph
     any differently, so the answer has to be something they can act on.
     """
-    image = await _read_upload(file, "photo")
+    image = _read_upload(file, "photo")
     check = read_check(image, file.content_type or "image/jpeg")
     crm = get_crm()
     review = svc.review_check(db, crm, check)
@@ -201,8 +214,11 @@ def _cash_payload(
     }
 
 
+# Sync for the same reason as /check: _apply_cash re-runs a single event through
+# the pipeline, which reaches the synchronous CRM adapter. It also keeps a
+# multi-second transcription off the event loop.
 @router.post("/cash/voice")
-async def review_cash_voice(
+def review_cash_voice(
     file: UploadFile = File(..., description="Recording of the takings"),
     default_date: str = Form(default=""),
     db: Session = Depends(get_db),
@@ -214,7 +230,7 @@ async def review_cash_voice(
     both matched and both recorded, from one press of the button. Only the lines
     the matcher won't call come back for a person.
     """
-    audio = await _read_upload(file, "recording", MAX_AUDIO_BYTES)
+    audio = _read_upload(file, "recording", MAX_AUDIO_BYTES)
     name = _audio_name(file.filename or "")
     if not name:
         return {
