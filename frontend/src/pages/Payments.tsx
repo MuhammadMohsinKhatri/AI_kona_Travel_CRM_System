@@ -163,6 +163,136 @@ export default function Payments() {
 
 // ── checks ──────────────────────────────────────────────────────────────────
 
+/** A camera in the page, for photographing a check at a desk.
+ *
+ *  A file input with `capture` already opens the camera on a phone, but desktop
+ *  browsers ignore that attribute entirely and show a file dialog — so on the
+ *  machine the office actually sits at, "photograph a check" meant "go and find
+ *  a photo somebody else took". This is the missing half.
+ *
+ *  Resolution is asked for deliberately: a check is read by OCR, and the amount
+ *  and the payer are small print. A 640x480 webcam grab of a check is a wasted
+ *  round trip. */
+function CheckCamera({
+  onPhoto,
+  disabled,
+}: {
+  onPhoto: (file: File) => void;
+  disabled: boolean;
+}) {
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [error, setError] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  function stop() {
+    setStream((current) => {
+      current?.getTracks().forEach((t) => t.stop());
+      return null;
+    });
+  }
+
+  // The <video> only exists once `stream` is set, so the element is attached
+  // here rather than at getUserMedia time — this effect runs after that render.
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      void videoRef.current.play().catch(() => {});
+    }
+  }, [stream]);
+
+  // A camera left running after the panel has gone is a live webcam with no UI
+  // attached to it — and, on most laptops, an indicator light nobody can explain.
+  useEffect(() => stop, []);
+
+  async function open() {
+    setError("");
+    try {
+      setStream(
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            // A phone should use the rear camera; a laptop has only the one and
+            // ignores this.
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        })
+      );
+    } catch (e) {
+      setError(
+        (e as Error)?.name === "NotAllowedError"
+          ? "The camera was blocked. Allow it for this site in the address bar, then try again."
+          : "Couldn't open a camera. Upload a photo of the check instead."
+      );
+    }
+  }
+
+  function capture() {
+    const video = videoRef.current;
+    // videoWidth stays 0 until the first frame has actually arrived. Capturing
+    // before that yields a 0x0 canvas, which toBlob turns into nothing at all —
+    // a silent no-op on the one button the whole feature hangs off.
+    if (!video?.videoWidth) {
+      setError("The camera hasn't started yet — give it a second and try again.");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    // The video's own dimensions, not the size it is displayed at: the preview
+    // is deliberately small and the photo must not be.
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        stop();
+        if (blob) onPhoto(new File([blob], "check.jpg", { type: "image/jpeg" }));
+        else setError("That photo came out empty. Try again.");
+      },
+      "image/jpeg",
+      0.92
+    );
+  }
+
+  if (!stream) {
+    return (
+      <>
+        <button className="btn primary" onClick={open} disabled={disabled}>
+          📷 Take a photo
+        </button>
+        {error && (
+          <span className="muted" style={{ color: "var(--crit)", fontSize: 12 }}>
+            {error}
+          </span>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="check-cam">
+      <video ref={videoRef} playsInline muted />
+      <div className="check-cam-actions">
+        <button className="btn primary" onClick={capture}>
+          ⬤ Capture
+        </button>
+        <button className="btn" onClick={stop}>
+          Cancel
+        </button>
+        {/* The live view has to show errors too. Capture refuses when no frame
+            has arrived yet, and without this that refusal was invisible — the
+            button simply appeared to do nothing, which is worse than the
+            failure it was guarding against. */}
+        <span
+          className="muted"
+          style={{ fontSize: 12, color: error ? "var(--crit)" : undefined }}
+        >
+          {error || "Fill the frame with the check, flat and in focus."}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -220,6 +350,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   // Set when the upload settled itself. The plan-and-approve card is then the
   // wrong thing to show: it invites confirming a payment already recorded.
   const applied = review?.applied ?? null;
+  const canCapture = captureIsPossible();
 
   return (
     <div className="card" style={{ marginBottom: 18 }}>
@@ -236,8 +367,17 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
             e.target.value = "";
           }}
         />
-        <button className="btn primary" onClick={() => fileRef.current?.click()}>
-          📷 Photograph or upload a check
+        {/* Two ways in, because they cover different rooms. The in-page camera
+            is for someone at a desk with the check in hand; the file input is
+            for a phone (where `capture` opens the camera directly) and for a
+            photo that already exists. The camera needs https, the file input
+            does not — so on production only the second appears. */}
+        {canCapture && <CheckCamera onPhoto={upload} disabled={!!busy} />}
+        <button
+          className={"btn" + (canCapture ? "" : " primary")}
+          onClick={() => fileRef.current?.click()}
+        >
+          📷 {canCapture ? "Upload a photo" : "Photograph or upload a check"}
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
           {busy || "Front of the check, flat and in focus. Nothing to type — it records itself."}
@@ -421,16 +561,20 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
 // ── cash ────────────────────────────────────────────────────────────────────
 
-/** Whether this browser will hand us a microphone at all.
+/** Whether this browser will hand us a camera or a microphone at all.
  *
  *  getUserMedia only exists on a secure context — https, or localhost. Served
- *  over plain http on an IP, as this is, Chrome does not expose
+ *  over plain http on an IP, as production is, Chrome does not expose
  *  navigator.mediaDevices in the first place, so there is no permission for the
  *  user to grant and no amount of clicking Allow will produce one. Detecting
- *  that up front matters: "couldn't reach the microphone" after a failed
- *  attempt reads as a glitch to retry, when the honest answer is that this page
- *  needs to be on https before the button can ever work. */
-function micIsPossible(): boolean {
+ *  that up front matters: "couldn't reach the camera" after a failed attempt
+ *  reads as a glitch to retry, when the honest answer is that this page needs
+ *  to be on https before the button can ever work.
+ *
+ *  Note this is only about capturing INSIDE the page. A file input with
+ *  `capture` opens the phone's own camera or recorder and works fine on http —
+ *  which is why both panels keep one. */
+function captureIsPossible(): boolean {
   return (
     typeof window !== "undefined" &&
     window.isSecureContext &&
@@ -615,7 +759,7 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [onDate, setOnDate] = useState("");
   const [result, setResult] = useState<CashReviewResponse | null>(null);
   const audioRef = useRef<HTMLInputElement>(null);
-  const canRecord = micIsPossible();
+  const canRecord = captureIsPossible();
 
   async function sendAudio(file: File) {
     setBusy("Listening back…");

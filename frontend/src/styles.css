@@ -835,3 +835,18 @@ code.inline {
   .voice-dot { animation: none; }
   .voice-wave > span { transition: none; }
 }
+
+/* ── In-page check camera (Record Payments → Check in the post) ───────────── */
+.check-cam { display: flex; flex-direction: column; gap: 10px; flex: 1 1 100%; }
+.check-cam video {
+  width: 100%;
+  /* Capped so a 1080p stream doesn't push the rest of the panel off-screen —
+     the CAPTURE is full resolution regardless of what the preview shows. */
+  max-width: 520px;
+  max-height: 340px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: #000;
+  object-fit: contain;
+}
+.check-cam-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
