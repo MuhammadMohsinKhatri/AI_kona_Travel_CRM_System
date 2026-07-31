@@ -787,3 +787,51 @@ code.inline {
   .page-title { font-size: 18px; }
   .content, .content.wide { padding: 14px 12px; }
 }
+
+/* ── Voice note (Record Payments → Cash counted) ─────────────────────────── */
+/* Modelled on a chat app's recording bar, because that is the interaction
+   everyone already knows: a bin on the left to throw it away, a running clock,
+   a meter proving the mic is hearing you, and send on the right. */
+.voice-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.voice-bin {
+  border: 0; background: transparent; cursor: pointer; font-size: 16px;
+  line-height: 1; padding: 6px; border-radius: 50%; color: var(--text-dim);
+}
+.voice-bin:hover { background: var(--surface); color: var(--crit); }
+.voice-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--crit);
+  flex: none; animation: voice-pulse 1.3s ease-in-out infinite;
+}
+@keyframes voice-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.voice-time {
+  font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-dim);
+  flex: none; min-width: 34px;
+}
+/* The meter fills whatever room is left, so the bar adapts from a phone to a
+   wide desktop without the clock or the buttons moving. */
+.voice-wave {
+  flex: 1 1 auto; display: flex; align-items: center; gap: 2px;
+  height: 26px; min-width: 0; overflow: hidden;
+}
+.voice-wave > span {
+  flex: 1 1 0; min-width: 2px; border-radius: 2px; background: var(--brand);
+  opacity: .75; transition: height 90ms linear;
+}
+.voice-send { flex: none; border-radius: 999px; }
+
+/* Reduced motion: keep the meter (it carries information) and drop the pulse
+   (it is decoration). */
+@media (prefers-reduced-motion: reduce) {
+  .voice-dot { animation: none; }
+  .voice-wave > span { transition: none; }
+}

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ApplyItem,
   ApplyResponse,
@@ -438,14 +438,182 @@ function micIsPossible(): boolean {
   );
 }
 
+/** Longest we will record in one go. A day's takings is a sentence or two; a
+ *  button left running in a pocket is an upload the transcriber refuses. */
+const MAX_RECORD_SECONDS = 180;
+/** How many level samples the waveform shows, and how often one is taken. */
+const WAVE_BARS = 28;
+const SAMPLE_MS = 90;
+
+/** The extension has to match what MediaRecorder actually produced — Chrome
+ *  gives webm/opus, Safari gives mp4 — because the extension is how the format
+ *  is declared to the transcriber, and the server refuses what it can't read. */
+function recordingFilename(mimeType: string): string {
+  return mimeType.includes("mp4") || mimeType.includes("mpeg")
+    ? "takings.mp4"
+    : "takings.webm";
+}
+
+function clock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** A voice note, the way a chat app does it: press record, watch the meter move,
+ *  stop to send, or bin it and start again.
+ *
+ *  The meter is not decoration. Dictating into a page that gives no feedback,
+ *  you cannot tell a muted microphone from a silent room until the transcript
+ *  comes back empty — and by then whoever counted the cash has walked off. */
+function VoiceRecorder({
+  onAudio,
+  disabled,
+}: {
+  onAudio: (file: File) => void;
+  disabled: boolean;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [error, setError] = useState("");
+  const rig = useRef<{
+    rec: MediaRecorder;
+    stream: MediaStream;
+    ctx: AudioContext;
+    timer: number;
+  } | null>(null);
+  // Set before stop() when a recording is being thrown away, so onstop knows not
+  // to send it. A ref, not state: onstop reads it outside React's render.
+  const binned = useRef(false);
+
+  function teardown() {
+    const r = rig.current;
+    if (!r) return;
+    window.clearInterval(r.timer);
+    r.stream.getTracks().forEach((t) => t.stop());
+    void r.ctx.close().catch(() => {});
+    rig.current = null;
+  }
+
+  // A recorder still holding the microphone after its panel has gone is a live
+  // mic with no UI attached to it. Release it on the way out, always.
+  useEffect(() => teardown, []);
+
+  async function start() {
+    setError("");
+    setLevels([]);
+    setElapsed(0);
+    binned.current = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+
+      const chunks: BlobPart[] = [];
+      const rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      rec.onstop = () => {
+        const type = rec.mimeType || "audio/webm";
+        teardown();
+        setRecording(false);
+        if (binned.current) return;
+        const blob = new Blob(chunks, { type });
+        if (!blob.size) {
+          setError("That recording came out empty. Try again.");
+          return;
+        }
+        onAudio(new File([blob], recordingFilename(type), { type }));
+      };
+
+      const startedAt = Date.now();
+      const timer = window.setInterval(() => {
+        analyser.getByteTimeDomainData(buf);
+        // RMS around the 128 midpoint — loudness, not frequency.
+        let sum = 0;
+        for (const v of buf) sum += (v - 128) ** 2;
+        const level = Math.min(1, Math.sqrt(sum / buf.length) / 40);
+        setLevels((prev) => [...prev, level].slice(-WAVE_BARS));
+
+        const secs = (Date.now() - startedAt) / 1000;
+        setElapsed(secs);
+        if (secs >= MAX_RECORD_SECONDS) rec.stop();
+      }, SAMPLE_MS);
+
+      rig.current = { rec, stream, ctx, timer };
+      rec.start();
+      setRecording(true);
+    } catch (e) {
+      teardown();
+      setRecording(false);
+      // The mic exists, but this browser or this person said no.
+      setError(
+        (e as Error)?.name === "NotAllowedError"
+          ? "The microphone was blocked. Allow it for this site in the address bar, then press record again."
+          : "Couldn't start recording. Upload a voice memo or type the takings."
+      );
+    }
+  }
+
+  function stopAndSend() {
+    binned.current = false;
+    rig.current?.rec.stop();
+  }
+
+  function bin() {
+    binned.current = true;
+    rig.current?.rec.stop();
+    setRecording(false);
+  }
+
+  if (!recording) {
+    return (
+      <>
+        <button className="btn primary" onClick={start} disabled={disabled}>
+          🎙 Record the takings
+        </button>
+        {error && (
+          <span className="muted" style={{ color: "var(--crit)", fontSize: 12 }}>
+            {error}
+          </span>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="voice-note">
+      <button className="voice-bin" onClick={bin} title="Discard this recording">
+        🗑
+      </button>
+      <span className="voice-dot" aria-hidden="true" />
+      <span className="voice-time">{clock(elapsed)}</span>
+      <div className="voice-wave" aria-hidden="true">
+        {Array.from({ length: WAVE_BARS }, (_, i) => {
+          // Right-aligned, so the newest sample sits nearest the send button —
+          // the way a chat app scrolls its waveform.
+          const level = levels[levels.length - WAVE_BARS + i] ?? 0;
+          return <span key={i} style={{ height: `${Math.max(8, level * 100)}%` }} />;
+        })}
+      </div>
+      <button className="btn primary voice-send" onClick={stopAndSend}>
+        ➤ Send
+      </button>
+    </div>
+  );
+}
+
 function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [recording, setRecording] = useState(false);
   const [typed, setTyped] = useState("");
   const [onDate, setOnDate] = useState("");
   const [result, setResult] = useState<CashReviewResponse | null>(null);
-  const recorder = useRef<MediaRecorder | null>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   const canRecord = micIsPossible();
 
@@ -461,35 +629,6 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
     } finally {
       setBusy("");
     }
-  }
-
-  async function startRecording() {
-    setError("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const chunks: BlobPart[] = [];
-      const rec = new MediaRecorder(stream);
-      rec.ondataavailable = (e) => chunks.push(e.data);
-      rec.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        sendAudio(new File([blob], "speech.webm", { type: "audio/webm" }));
-      };
-      recorder.current = rec;
-      rec.start();
-      setRecording(true);
-    } catch {
-      // The mic exists but this browser or this person said no.
-      setError(
-        "The microphone was blocked. Allow it for this site, upload a voice " +
-        "memo, or type what was taken."
-      );
-    }
-  }
-
-  function stopRecording() {
-    recorder.current?.stop();
-    setRecording(false);
   }
 
   async function readTyped() {
@@ -512,17 +651,7 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
             it is an ordinary file upload — so on an insecure origin that is the
             path offered rather than a button that cannot work. Same endpoint,
             same result: talk once, everything posts. */}
-        {canRecord ? (
-          recording ? (
-            <button className="btn danger" onClick={stopRecording}>
-              ⏹ Stop and read it back
-            </button>
-          ) : (
-            <button className="btn primary" onClick={startRecording}>
-              🎙 Record the takings
-            </button>
-          )
-        ) : null}
+        {canRecord && <VoiceRecorder onAudio={sendAudio} disabled={!!busy} />}
 
         <input
           ref={audioRef}
