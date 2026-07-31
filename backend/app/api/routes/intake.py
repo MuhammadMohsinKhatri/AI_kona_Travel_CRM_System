@@ -36,6 +36,17 @@ router = APIRouter(prefix="/api/intake", tags=["intake"])
 # A phone photo of a check is a couple of megabytes; a minute of dictation less.
 # The cap is here so a mis-picked video doesn't get base64'd into an API call.
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+# Voice memos off a phone are longer and fatter than a recording made in the
+# page — and uploading one is the only route to this feature until the dashboard
+# is on https, so the cap follows Whisper's own 25 MB limit rather than sitting
+# under it and rejecting audio the transcriber would happily have taken.
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+# What Whisper will accept. The extension is how the format is declared, so a
+# file it can't read has to be caught here — the alternative is surfacing a raw
+# API error to someone who just wants to know their .amr won't do.
+AUDIO_SUFFIXES = (".flac", ".m4a", ".mp3", ".mp4", ".mpeg", ".mpga", ".oga",
+                  ".ogg", ".wav", ".webm")
 
 
 def _result_json(result: svc.ApplyResult) -> dict[str, Any]:
@@ -47,15 +58,25 @@ def _result_json(result: svc.ApplyResult) -> dict[str, Any]:
     }
 
 
-async def _read_upload(file: UploadFile, what: str) -> bytes:
+async def _read_upload(file: UploadFile, what: str, limit: int = MAX_UPLOAD_BYTES) -> bytes:
     data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
+    if len(data) > limit:
         raise HTTPException(
             status_code=413,
             detail=f"That {what} is {len(data) / 1_000_000:.1f} MB — the limit is "
-                   f"{MAX_UPLOAD_BYTES // 1_000_000} MB.",
+                   f"{limit // 1_000_000} MB.",
         )
     return data
+
+
+def _audio_name(filename: str) -> str:
+    """The name to hand the transcriber, or "" if it won't be able to read it.
+
+    The extension is what declares the format, so it has to survive: calling a
+    phone's .m4a "speech.webm" makes an unreadable file out of a fine one.
+    """
+    name = (filename or "").strip() or "speech.webm"
+    return name if name.lower().endswith(AUDIO_SUFFIXES) else ""
 
 
 # ── checks ───────────────────────────────────────────────────────────────────
@@ -193,8 +214,17 @@ async def review_cash_voice(
     both matched and both recorded, from one press of the button. Only the lines
     the matcher won't call come back for a person.
     """
-    audio = await _read_upload(file, "recording")
-    transcript, error = transcribe(audio, file.filename or "speech.webm")
+    audio = await _read_upload(file, "recording", MAX_AUDIO_BYTES)
+    name = _audio_name(file.filename or "")
+    if not name:
+        return {
+            "transcript": "", "notes": "", "items": [],
+            "error": f"\"{file.filename}\" isn't an audio format we can "
+                     f"transcribe. Send one of {', '.join(AUDIO_SUFFIXES)} — or "
+                     f"type the takings instead.",
+        }
+
+    transcript, error = transcribe(audio, name)
     if error:
         return {"transcript": transcript, "notes": "", "error": error, "items": []}
 

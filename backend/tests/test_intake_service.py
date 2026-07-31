@@ -592,3 +592,24 @@ def test_uploading_a_check_records_it_without_anything_else_being_pressed():
         assert db.query(Invoice).one().status == "paid"
     finally:
         db.close()
+
+
+# ── voice memos off a phone ──────────────────────────────────────────────────
+
+def test_a_phone_voice_memo_keeps_its_own_format():
+    """The extension is how the format is declared to the transcriber. Calling
+    an iPhone's .m4a "speech.webm" makes an unreadable file out of a fine one —
+    and uploading a memo is the only way in to this feature while the dashboard
+    is served over plain http."""
+    from app.api.routes.intake import _audio_name
+
+    assert _audio_name("Voice 004.m4a") == "Voice 004.m4a"
+    assert _audio_name("takings.ogg") == "takings.ogg"
+    assert _audio_name("") == "speech.webm"
+
+
+def test_audio_we_cannot_transcribe_is_refused_in_words_not_an_api_error():
+    from app.api.routes.intake import _audio_name
+
+    assert _audio_name("old-nokia.amr") == ""
+    assert _audio_name("check.jpg") == ""

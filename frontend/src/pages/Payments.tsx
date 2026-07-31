@@ -421,6 +421,23 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
 // ── cash ────────────────────────────────────────────────────────────────────
 
+/** Whether this browser will hand us a microphone at all.
+ *
+ *  getUserMedia only exists on a secure context — https, or localhost. Served
+ *  over plain http on an IP, as this is, Chrome does not expose
+ *  navigator.mediaDevices in the first place, so there is no permission for the
+ *  user to grant and no amount of clicking Allow will produce one. Detecting
+ *  that up front matters: "couldn't reach the microphone" after a failed
+ *  attempt reads as a glitch to retry, when the honest answer is that this page
+ *  needs to be on https before the button can ever work. */
+function micIsPossible(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.isSecureContext &&
+    !!navigator.mediaDevices?.getUserMedia
+  );
+}
+
 function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -429,6 +446,22 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [onDate, setOnDate] = useState("");
   const [result, setResult] = useState<CashReviewResponse | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const audioRef = useRef<HTMLInputElement>(null);
+  const canRecord = micIsPossible();
+
+  async function sendAudio(file: File) {
+    setBusy("Listening back…");
+    setError("");
+    try {
+      const next = await api.reviewCashVoice(file, onDate);
+      setResult(next);
+      setTyped(next.transcript);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function startRecording() {
     setError("");
@@ -440,26 +473,16 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunks, { type: "audio/webm" });
-        setBusy("Listening back…");
-        try {
-          const next = await api.reviewCashVoice(
-            new File([blob], "speech.webm", { type: "audio/webm" }),
-            onDate
-          );
-          setResult(next);
-          setTyped(next.transcript);
-        } catch (e) {
-          setError((e as Error).message);
-        } finally {
-          setBusy("");
-        }
+        sendAudio(new File([blob], "speech.webm", { type: "audio/webm" }));
       };
       recorder.current = rec;
       rec.start();
       setRecording(true);
     } catch {
+      // The mic exists but this browser or this person said no.
       setError(
-        "Couldn't reach the microphone. Type what was taken in the box instead."
+        "The microphone was blocked. Allow it for this site, upload a voice " +
+        "memo, or type what was taken."
       );
     }
   }
@@ -485,15 +508,41 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        {recording ? (
-          <button className="btn danger" onClick={stopRecording}>
-            ⏹ Stop and read it back
-          </button>
-        ) : (
-          <button className="btn primary" onClick={startRecording}>
-            🎙 Record the takings
-          </button>
-        )}
+        {/* Recording in the page needs https. Uploading a voice memo does not —
+            it is an ordinary file upload — so on an insecure origin that is the
+            path offered rather than a button that cannot work. Same endpoint,
+            same result: talk once, everything posts. */}
+        {canRecord ? (
+          recording ? (
+            <button className="btn danger" onClick={stopRecording}>
+              ⏹ Stop and read it back
+            </button>
+          ) : (
+            <button className="btn primary" onClick={startRecording}>
+              🎙 Record the takings
+            </button>
+          )
+        ) : null}
+
+        <input
+          ref={audioRef}
+          type="file"
+          accept="audio/*"
+          capture
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) sendAudio(file);
+            e.target.value = "";
+          }}
+        />
+        <button
+          className={"btn" + (canRecord ? "" : " primary")}
+          onClick={() => audioRef.current?.click()}
+        >
+          🎤 Upload a voice memo
+        </button>
+
         <label className="muted" style={{ fontSize: 12 }}>
           Events on{" "}
           <input
@@ -509,6 +558,16 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
           {busy || "One go covers several events — “Pikesville took seven bucks, Camp Lollipop was twelve fifty” records both."}
         </span>
       </div>
+
+      {!canRecord && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
+          Recording straight into the page needs the dashboard on <code>https</code>
+          — browsers won't hand a microphone to an unencrypted page, so there is
+          no permission to grant here. Until then: record a voice memo on your
+          phone and upload it, or type the takings below. Both do exactly the
+          same thing once the audio arrives.
+        </p>
+      )}
 
       <div style={{ marginTop: 12 }}>
         <textarea
