@@ -850,3 +850,25 @@ code.inline {
   object-fit: contain;
 }
 .check-cam-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── What the photo said (Record Payments → Check in the post) ────────────── */
+/* A <dl> rather than a table: these are five labelled facts about one thing,
+   not rows of comparable records. Wraps to one per line on a phone. */
+.check-read {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.check-read > div { min-width: 130px; }
+.check-read dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+}
+.check-read dd { margin: 2px 0 0; font-weight: 600; }

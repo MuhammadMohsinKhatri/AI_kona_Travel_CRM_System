@@ -439,7 +439,16 @@ export interface InvoiceCandidate {
   id: string;
   invoice_number: string;
   business_name: string;
+  /** The event this invoice bills for — what actually tells two invoices for
+   *  the same business apart. */
+  event_name: string;
+  event_date: string;
+  invoice_date: string;
+  status: string;
   grand_total: number;
+  /** What this invoice comes to with the 4% card fee removed — i.e. what a
+   *  cheque for it is normally written for. null when it can't be computed. */
+  total_without_fee: number | null;
   score: number;
   flags: string[];
 }

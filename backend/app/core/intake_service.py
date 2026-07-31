@@ -115,6 +115,11 @@ class CheckReview:
     check: CheckRead
     match: InvoiceMatch
     plan: Optional[SettlePlan] = None
+    # Fee-free total per invoice id, for every candidate shown. Carried on the
+    # review so the screen can show what each invoice comes to when paid by
+    # check — routinely the figure written on the cheque, and therefore the
+    # column that explains why something did or didn't match.
+    without_fee: dict[str, float] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
@@ -175,7 +180,7 @@ def review_check(
         )
 
     if match.invoice is None:
-        return CheckReview(check=check, match=match)
+        return CheckReview(check=check, match=match, without_fee=without_fee)
 
     plan = build_settle_plan(
         match.invoice,
@@ -183,7 +188,8 @@ def review_check(
         fee_free_total=without_fee.get(match.invoice_id),
     )
     plan.payment_method = "CHECK"
-    return CheckReview(check=check, match=match, plan=plan)
+    return CheckReview(check=check, match=match, plan=plan,
+                       without_fee=without_fee)
 
 
 def auto_applicable_check(review: CheckReview) -> tuple[bool, str]:
@@ -559,6 +565,75 @@ def review_cash_for_event(
 # ── serialisation for the review screen ──────────────────────────────────────
 
 
+def _konaos_date(value: Any) -> str:
+    """A KonaOS date field as YYYY-MM-DD, or "".
+
+    Dates arrive as epoch milliseconds, but not always — the grid is not
+    documented and different endpoints have handed us strings before. Accept
+    both rather than showing a reviewer "1746316800000" where a date should be.
+    """
+    if value in (None, "", 0):
+        return ""
+    text = str(value).strip()
+    if text.isdigit():
+        try:
+            from datetime import datetime, timezone
+
+            return datetime.fromtimestamp(
+                int(text) / 1000, tz=timezone.utc
+            ).date().isoformat()
+        except (ValueError, OSError, OverflowError):
+            return ""
+    # Already a date, possibly with a time on the end. Anything that isn't
+    # shaped like one is dropped rather than displayed — a stray field printed
+    # in a column headed "date" is worse than a blank, because it reads as data.
+    head = text[:10]
+    try:
+        from datetime import date as _date
+
+        _date.fromisoformat(head)
+    except ValueError:
+        return ""
+    return head
+
+
+def _first(source: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _invoice_candidate_json(
+    c: InvoiceCandidate, without_fee: Optional[float] = None
+) -> dict[str, Any]:
+    """One invoice the check might be paying, with everything needed to choose.
+
+    A reviewer deciding between two invoices for the same business needs the
+    event and the date to tell them apart — the invoice number alone means
+    nothing to anybody, and the business name is identical by definition when
+    the choice is hard. The fee-free figure is here because that is what a check
+    is normally written for, so it is often the column that matches.
+    """
+    inv = c.invoice
+    return {
+        "id": c.id,
+        "invoice_number": c.number,
+        "business_name": c.business,
+        "event_name": str(_first(inv, "eventName", "eventTitle", "title", "name")),
+        "event_date": _konaos_date(_first(inv, "eventDate", "eventStartDate")),
+        "invoice_date": _konaos_date(_first(inv, "invoiceDate", "createdDate")),
+        "status": str(_first(inv, "invoiceStatus", "status")),
+        "grand_total": c.total,
+        # What the client owes if they pay by check. Often the figure on the
+        # cheque itself, and therefore the one that explains a "no match".
+        "total_without_fee": without_fee,
+        "score": c.score,
+        "flags": c.flags,
+    }
+
+
 def _candidate_json(c: Candidate) -> dict[str, Any]:
     return {
         "id": c.id,
@@ -597,14 +672,7 @@ def check_review_json(
         "reason": match.reason,
         "needs_choice": match.needs_choice,
         "candidates": [
-            {
-                "id": c.id,
-                "invoice_number": c.number,
-                "business_name": c.business,
-                "grand_total": c.total,
-                "score": c.score,
-                "flags": c.flags,
-            }
+            _invoice_candidate_json(c, review.without_fee.get(c.id))
             for c in match.candidates
         ],
         "plan": None if plan is None else {

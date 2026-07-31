@@ -399,6 +399,38 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         </p>
       )}
 
+      {/* Everything the photo gave up, stated plainly and together. The date and
+          the check number never feed the match — it goes on payer and amount —
+          but they are how a person confirms this is the cheque in their hand
+          before a payment is recorded against somebody's invoice. Hiding them
+          next to a button, which is where they were, is not showing them. */}
+      {review && !review.check.error && (
+        <dl className="check-read">
+          <div>
+            <dt>Payer</dt>
+            <dd>{review.check.payer_name || <span className="muted">not read</span>}</dd>
+          </div>
+          <div>
+            <dt>Amount</dt>
+            <dd>{review.check.amount ? money(review.check.amount) : <span className="muted">not read</span>}</dd>
+          </div>
+          <div>
+            <dt>Date on the check</dt>
+            <dd>{review.check.check_date || <span className="muted">not read</span>}</dd>
+          </div>
+          <div>
+            <dt>Check number</dt>
+            <dd>{review.check.check_number || <span className="muted">not read</span>}</dd>
+          </div>
+          {review.check.memo && (
+            <div>
+              <dt>Memo</dt>
+              <dd>{review.check.memo}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+
       {/* The fallback, always on screen rather than only after a failed read.
           A photo normally fills these two and settles the check without them
           being looked at — but when it's blurry, when the camera isn't to
@@ -433,12 +465,6 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         >
           {review ? "Re-match" : "Find the invoice"}
         </button>
-        {review?.check.check_number && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            Check #{review.check.check_number}
-            {review.check.check_date ? ` · ${review.check.check_date}` : ""}
-          </span>
-        )}
       </div>
 
       {applied && <Done result={applied} />}
@@ -529,8 +555,14 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                 <thead>
                   <tr>
                     <th>Invoice</th>
+                    <th>Event</th>
                     <th>Business</th>
+                    <th>Event date</th>
                     <th>Total</th>
+                    {/* A check is normally written for the fee-free figure, so
+                        when nothing matched this is usually the column that
+                        explains why — and the one that turns out to agree. */}
+                    <th>If paid by check</th>
                     <th>Why it's here</th>
                     <th />
                   </tr>
@@ -538,9 +570,20 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                 <tbody>
                   {review.candidates.map((c) => (
                     <tr key={c.id}>
-                      <td>{c.invoice_number || c.id}</td>
+                      <td className="keep">{c.invoice_number || c.id}</td>
+                      <td>{c.event_name || <span className="muted">—</span>}</td>
                       <td>{c.business_name}</td>
-                      <td>{money(c.grand_total)}</td>
+                      <td className="keep">
+                        {c.event_date || <span className="muted">—</span>}
+                      </td>
+                      <td className="keep">{money(c.grand_total)}</td>
+                      <td className="keep">
+                        {c.total_without_fee == null ? (
+                          <span className="muted">—</span>
+                        ) : (
+                          money(c.total_without_fee)
+                        )}
+                      </td>
                       <td><Score flags={c.flags} /></td>
                       <td>
                         <button className="btn" onClick={() => rematch(c.id)}>
