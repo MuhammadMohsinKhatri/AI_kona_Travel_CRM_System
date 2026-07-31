@@ -188,8 +188,31 @@ def review_check(
         fee_free_total=without_fee.get(match.invoice_id),
     )
     plan.payment_method = "CHECK"
+    _name_the_event(db, plan, match.invoice)
     return CheckReview(check=check, match=match, plan=plan,
                        without_fee=without_fee)
+
+
+def _name_the_event(
+    db: Session, plan: SettlePlan, invoice: dict[str, Any]
+) -> None:
+    """Fill in which event this check settles, for the screen and the audit line.
+
+    Our own records first: the local invoice knows its event, and that event has
+    the name and date the rest of the dashboard shows, so the same event reads
+    the same everywhere. The KonaOS payload is the fallback for an invoice we
+    didn't draft.
+    """
+    local = _local_invoice(db, plan.invoice_id)
+    event = db.get(Event, local.event_id) if local is not None else None
+    if event is not None:
+        plan.event_name = event.event_name or ""
+        plan.event_date = event.event_date or ""
+        if not plan.event_id:
+            plan.event_id = event.crm_event_id or ""
+        return
+    plan.event_name = str(_first(invoice, "eventName", "eventTitle", "title"))
+    plan.event_date = _konaos_date(_first(invoice, "eventDate", "eventStartDate"))
 
 
 def auto_applicable_check(review: CheckReview) -> tuple[bool, str]:
@@ -382,9 +405,15 @@ def apply_check(
 
     event = db.get(Event, local.event_id) if local is not None else None
     who = by or "a user"
+    # Name the event, not just the invoice. "Invoice 00084 is paid" is only
+    # checkable by someone willing to go and look it up; "Featherbed Lane,
+    # 2026-05-08" is recognised on sight by whoever booked it.
+    against = plan.invoice_number or plan.invoice_id
+    if plan.event_name:
+        against += f" ({plan.event_name}"
+        against += f", {plan.event_date})" if plan.event_date else ")"
     summary = (
-        f"Check for ${plan.check_amount:,.2f} recorded against invoice "
-        f"{plan.invoice_number or plan.invoice_id}"
+        f"Check for ${plan.check_amount:,.2f} recorded against invoice {against}"
         + (f" — 4% processing fee (${plan.cc_fee_removed:,.2f}) removed first"
            if fee_removed else "")
         + f", by {who}"
@@ -679,6 +708,8 @@ def check_review_json(
             "invoice_id": plan.invoice_id,
             "invoice_number": plan.invoice_number,
             "event_id": plan.event_id,
+            "event_name": plan.event_name,
+            "event_date": plan.event_date,
             "business_name": plan.business_name,
             "check_amount": plan.check_amount,
             "invoice_total": plan.invoice_total,

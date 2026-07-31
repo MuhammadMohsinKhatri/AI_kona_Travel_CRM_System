@@ -480,7 +480,18 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
           {plan && (
             <div className="card" style={{ background: "var(--surface-2)", marginTop: 10 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>
+                {plan.event_name || plan.business_name}
+                {plan.event_date && (
+                  <span className="muted" style={{ fontWeight: 400 }}>
+                    {" · "}{plan.event_date}
+                  </span>
+                )}
+              </div>
+              {/* The invoice number identifies the document; the line above
+                  identifies the job. Both, in that order — somebody checking
+                  this recognises the event, then verifies the invoice. */}
+              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
                 {plan.business_name} · invoice {plan.invoice_number || plan.invoice_id}
               </div>
               <table style={{ fontSize: 13 }}>

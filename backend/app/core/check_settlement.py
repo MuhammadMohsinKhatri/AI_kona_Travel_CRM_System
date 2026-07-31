@@ -210,6 +210,13 @@ class SettlePlan:
     invoice_number: str = ""
     event_id: str = ""
     business_name: str = ""
+    # Which event this settles. An invoice number identifies the document; the
+    # event and its date are what a person recognises — and the only way to tell
+    # this is the right one when a customer has several invoices open. Filled by
+    # the caller from our own records, which know the event; the invoice payload
+    # does not reliably carry it.
+    event_name: str = ""
+    event_date: str = ""
 
     check_amount: float = 0.0
     invoice_total: float = 0.0          # as KonaOS holds it now, fee included

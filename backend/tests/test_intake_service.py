@@ -781,3 +781,27 @@ def test_a_url_that_is_not_a_workbook_is_left_alone():
 
     assert _workbook_tab_urls("https://example.com/data.csv") == [
         "https://example.com/data.csv"]
+
+
+def test_a_settled_check_names_the_event_not_just_the_invoice():
+    """"Invoice 00084 is paid" is only checkable by someone willing to go and
+    look it up. "ThriftBooks, 2026-07-25" is recognised on sight by whoever
+    booked it — and it is how you catch a payment landing on the wrong job."""
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        crm = FakeCRM([inv])
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+
+        assert review.plan.event_name == "ThriftBooks"
+        assert review.plan.event_date == "2026-07-25"
+
+        payload = svc.check_review_json(review)
+        assert payload["plan"]["event_name"] == "ThriftBooks"
+        assert payload["plan"]["event_date"] == "2026-07-25"
+
+        result = svc.apply_check(db, crm, review.plan, by="office@example.com")
+        assert "ThriftBooks" in result.summary and "2026-07-25" in result.summary
+    finally:
+        db.close()

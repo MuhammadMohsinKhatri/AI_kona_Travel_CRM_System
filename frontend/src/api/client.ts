@@ -463,6 +463,10 @@ export interface SettlePlan {
   invoice_id: string;
   invoice_number: string;
   event_id: string;
+  /** Which event this check settles — what a person recognises, where an
+   *  invoice number only identifies the document. */
+  event_name: string;
+  event_date: string;
   business_name: string;
   check_amount: number;
   /** As KonaOS holds it now, 4% processing fee included. */
