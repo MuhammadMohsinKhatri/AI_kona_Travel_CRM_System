@@ -475,8 +475,25 @@ def review_cash(
     for entry in entries:
         on_date = entry.date or default_date
         events = _cash_candidates(db, on_date)
+
+        # A stated date that matches no event at all is far more likely to be a
+        # misheard or mis-resolved date than a real claim that the day was empty
+        # — "29th July" with the wrong year lands on a day that has never had an
+        # event on it. Dead-ending there tells the user their event doesn't
+        # exist, which is both wrong and unactionable. Widen to the recent window
+        # instead and let the name do the work the date failed to do.
+        widened = False
+        if on_date and not events:
+            events = _cash_candidates(db, "")
+            widened = bool(events)
+
         by_crm_id = {e.crm_event_id: e for e in events}
         result = match_event([_match_row(e) for e in events], entry.query, entry.brand)
+        if widened:
+            result.reason = (
+                f"Nothing on {on_date}, so this looked across the last "
+                f"{CASH_LOOKBACK_DAYS} days instead. {result.reason}"
+            )
 
         review = CashReview(entry=entry, match=result)
         if result.event is not None:

@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Optional
 
 from app.config import settings
@@ -71,14 +72,16 @@ _SPEECH_PROMPT = """You turn a dictated sentence about cash collected at events
 into a JSON list. The speaker is an office admin reading off takings, often for
 several events at once.
 
+TODAY IS {today}. Every date you return must be resolved against that.
+
 Return exactly:
-{
+{{
   "entries": [
-    {"query": "what identifies the event, in their words", "amount": 7.00,
-     "brand": "kona ice | travelin toms | \\"\\"", "date": "YYYY-MM-DD or \\"\\""}
+    {{"query": "what identifies the event, in their words", "amount": 7.00,
+     "brand": "kona ice | travelin toms | \\"\\"", "date": "YYYY-MM-DD or \\"\\""}}
   ],
   "notes": "anything you could not confidently split — one short sentence"
-}
+}}
 
 Rules that matter:
 - One entry per event mentioned. "Pikesville took seven, Lollipop was twelve" is
@@ -86,9 +89,15 @@ Rules that matter:
 - amount is a number of dollars. "seven bucks" -> 7.0, "twelve fifty" -> 12.50,
   "two hundred" -> 200.0.
 - query keeps their wording, including any town or zip they said — that is what
-  identifies the event downstream. Do not tidy it into something shorter.
-- brand only if actually said. date only if actually said; a bare "yesterday" or
-  "Tuesday" goes in notes rather than being guessed into a date.
+  identifies the event downstream. Do not tidy it into something shorter. Leave
+  the date out of query if you resolved it into the date field.
+- date: resolve what they said against TODAY. "29th July" or "the 29th" means the
+  most recent 29th July that is NOT in the future. "yesterday" and "Tuesday" mean
+  exactly that, counting back from today. Events are being reported AFTER they
+  happened, so never resolve a date into the future — step back a year rather
+  than forward. If they named no date at all, return "" and do not guess one: an
+  invented date searches a day with no events on it and finds nothing.
+- brand only if actually said.
 - An amount with no identifiable event still gets an entry with query "" so a
   person sees it was heard and can say which event it was.
 - Return only the JSON object.
@@ -215,17 +224,25 @@ def transcribe(audio_bytes: bytes, filename: str = "speech.webm") -> tuple[str, 
         return "", f"Couldn't transcribe the recording: {e}"
 
 
-def parse_cash_speech(transcript: str) -> SpeechRead:
-    """Split a dictated sentence into one entry per event mentioned."""
+def parse_cash_speech(transcript: str, today: str = "") -> SpeechRead:
+    """Split a dictated sentence into one entry per event mentioned.
+
+    ``today`` (YYYY-MM-DD) is what "29th July" or "yesterday" get resolved
+    against. Without it the model has no year to work from and quietly invents
+    one — usually from its training data — which then searches a day with no
+    events on it and reports that nothing matched. The date is the one part of
+    this a model cannot infer from the sentence, so it has to be supplied.
+    """
     text = str(transcript or "").strip()
     if not text:
         return SpeechRead(error="Nothing was said.")
     if settings.openai_provider != "live":
         return SpeechRead(transcript=text,
                           error="Voice input needs OPENAI_PROVIDER=live.")
+    prompt = _SPEECH_PROMPT.format(today=today or date.today().isoformat())
     try:
         data = _json_reply(VISION_MODEL, [
-            {"role": "system", "content": _SPEECH_PROMPT},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": text},
         ])
     except Exception as e:  # noqa: BLE001

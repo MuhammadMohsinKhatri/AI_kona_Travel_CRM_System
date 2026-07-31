@@ -613,3 +613,45 @@ def test_audio_we_cannot_transcribe_is_refused_in_words_not_an_api_error():
 
     assert _audio_name("old-nokia.amr") == ""
     assert _audio_name("check.jpg") == ""
+
+
+# ── a date the model got wrong must not become "your event doesn't exist" ────
+
+def test_a_wrong_date_widens_to_the_recent_window_instead_of_dead_ending():
+    """Reported from production: "add cash in Arbutus food truck of 29th July,
+    $63" answered "No events on that date to match against" — while Arbutus
+    Food Truck sat on 2026-07-29 in the ledger.
+
+    The sentence never carried a year, and the prompt never said what today was,
+    so the model resolved "29th July" against nothing and picked a year of its
+    own. Telling somebody their event doesn't exist, because of a year they
+    never said, is both wrong and unactionable.
+    """
+    db = _fresh_db()
+    try:
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        _seed(db, crm_event_id="ev-arb", crm_invoice_id="inv-arb",
+              name="Arbutus Food Truck", event_date=today,
+              raw={"id": "ev-arb", "name": "Arbutus Food Truck"})
+
+        [review] = svc.review_cash(db, [CashEntry(
+            query="Arbutus food truck", amount=63.0, date="2024-07-29")])
+
+        assert review.event is not None, review.match.reason
+        assert review.event.crm_event_id == "ev-arb"
+        assert "looked across the last" in review.match.reason
+    finally:
+        db.close()
+
+
+def test_the_speech_prompt_states_todays_date():
+    """The one thing a model cannot infer from the sentence. Without it,
+    "29th July" has no year and any answer is a guess."""
+    from app.core.intake_readers import _SPEECH_PROMPT
+
+    filled = _SPEECH_PROMPT.format(today="2026-07-31")
+    assert "TODAY IS 2026-07-31" in filled
+    assert "never resolve a date into the future" in filled
+    # The JSON shape must survive .format() — doubled braces, not stray ones.
+    assert '"entries": [' in filled and '{"query"' in filled
