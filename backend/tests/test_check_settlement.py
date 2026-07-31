@@ -206,3 +206,40 @@ def test_an_invoice_with_no_event_warns_that_event_fields_stay_put():
     orphan = {**THRIFTBOOKS, "eventId": ""}
     plan = build_settle_plan(orphan, 131.44, fee_free_total=FEE_FREE_THRIFTBOOKS)
     assert any("isn't linked to an event" in w for w in plan.warnings)
+
+
+# ── the memo says which events a cheque is for ───────────────────────────────
+
+def test_memo_dates_are_read_and_outrank_the_cheques_own_date():
+    """From production: a cheque dated 2026-07-24 with the memo "Kona Ice on 7/9
+    and 7/21". The date in the corner is when somebody sat down with the
+    chequebook; the memo states which events are being paid for."""
+    from app.core.check_settlement import memo_dates
+
+    assert memo_dates("Kona Ice on 7/9 and 7/21", "2026-07-24") == [
+        "2026-07-09", "2026-07-21"]
+    assert memo_dates("July 9 and July 21", "2026-07-24") == [
+        "2026-07-09", "2026-07-21"]
+    # A bare M/D takes the cheque's year, stepping back when that would put the
+    # event in the future — a memo describes what has already happened.
+    assert memo_dates("event 12/20", "2026-01-05") == ["2025-12-20"]
+    assert memo_dates("Teacher Appreciation Week", "2026-05-04") == []
+    assert memo_dates("", "2026-05-04") == []
+
+
+def test_an_invoice_the_memo_names_outscores_one_merely_near_the_cheque_date():
+    """Two events for one customer: the memo names the first, the cheque was
+    written nearer the second. The memo wins — it is a statement, not a
+    coincidence of timing."""
+    named = {**JONES, "id": "inv-named"}
+    nearer = {**JONES, "id": "inv-nearer", "invoiceNumber": "00851"}
+    r = match_invoice(
+        [named, nearer], "JONES ELEMENTARY SCHOOL PTA", 9999.00,
+        check_date="2026-07-24", memo="Kona Ice on 7/9",
+        event_meta={
+            "inv-named": {"event_name": "Field Day", "event_date": "2026-07-09"},
+            "inv-nearer": {"event_name": "Fun Run", "event_date": "2026-07-22"},
+        },
+    )
+    assert r.invoice_id == "inv-named"
+    assert any("memo names 2026-07-09" in f for f in r.candidates[0].flags)

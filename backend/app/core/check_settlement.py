@@ -6,13 +6,22 @@ the caller shows the plan, a person agrees, and only then does it happen.
 
 Two departures from the n8n workflow this replaces, both deliberate:
 
-**Matched on payer + amount, not on date.** The workflow searched events by the
-CHECK's date, which only works because checks usually arrive near the event.
-They don't always: a school pays in three weeks and the search window misses the
-event entirely. An invoice already carries the payer's business name and its
-grand total, and a check carries the same two facts — so match those directly and
-take the event from the invoice. No date guessing, and it lands on the invoice we
-actually need rather than reaching it through the event.
+**Matched on WHO and WHEN; the amount corroborates.** The workflow searched
+events by the CHECK's date, which only works because checks usually arrive near
+the event — a school paying three weeks later misses the window entirely. We
+score the payer against the invoice's business AND event names, and the dates
+the cheque carries against the event's, with the amount as supporting evidence
+rather than the only way in. It was the only way in once, and it is the field
+least often in agreement: a cheque covers two events at once, or arrives before
+the invoice is drafted, or the client rounds.
+
+Dates come from the memo first and the cheque's own date second. "Kona Ice on
+7/9 and 7/21" states which events are being paid for; the date in the corner
+only says when somebody sat down with the chequebook.
+
+None of this decides whether a match may be WRITTEN unattended — that still
+requires the figures to agree to the cent. See
+``intake_service.auto_applicable_check``. Matching is generous; writing is not.
 
 **A check means the 4% processing fee comes off.** Card processing is what the
 fee pays for; a paper check doesn't incur it, so the invoice is recomputed
@@ -59,6 +68,10 @@ _DATE_NEAR_DAYS = 45
 _DATE_WIDE_DAYS = 120
 _DATE_NEAR_POINTS = 20
 _DATE_WIDE_POINTS = 10
+# A date written in the MEMO — "Kona Ice on 7/9 and 7/21" — says which event is
+# being paid for, where the cheque's own date only says when somebody sat down
+# with the chequebook. Worth more, but still short of the floor on its own.
+_MEMO_DATE_POINTS = 35
 
 # Below this, we are guessing. A wrong match marks another customer's invoice
 # paid, so the floor is deliberately high.
@@ -124,13 +137,83 @@ def _name_points(
     return points, f"name+{points} {detail} ({which})"
 
 
-def _date_points(check_date: str, event_date: str) -> tuple[int, str]:
-    """How close the check's date sits to the event's.
+_MEMO_MD = re.compile(r"\b(\d{1,2})\s*/\s*(\d{1,2})(?:\s*/\s*(\d{2,4}))?\b")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july",
+           "august", "september", "october", "november", "december")
+_MEMO_MONTH_DAY = re.compile(
+    r"\b(" + "|".join(_MONTHS) + r")\w*\s+(\d{1,2})\b", re.I)
 
-    Both are ISO YYYY-MM-DD or empty. Absent either, this contributes nothing
-    rather than penalising — plenty of checks are undated, and a missing field
-    is not evidence against a match.
+
+def memo_dates(memo: str, check_date: str = "") -> list[str]:
+    """Event dates named in the memo line, as ISO strings.
+
+    "Kona Ice on 7/9 and 7/21" is the payer telling us exactly which events this
+    cheque covers — better evidence than any inference from the date it was
+    written, which is merely when somebody sat down with the chequebook.
+
+    A bare "7/9" carries no year, so it takes the check's. Where that would put
+    the date in the future relative to the cheque — "12/20" on a cheque written
+    in January — it steps back a year, because a memo describes events that have
+    happened.
     """
+    text = (memo or "").strip()
+    if not text:
+        return []
+    from datetime import date as _date
+
+    try:
+        base = _date.fromisoformat(check_date[:10]) if check_date else None
+    except ValueError:
+        base = None
+    year = base.year if base else _date.today().year
+
+    found: list[str] = []
+    pairs = [(int(m), int(d), yy) for m, d, yy in _MEMO_MD.findall(text)]
+    pairs += [(_MONTHS.index(name.lower()[:3] and
+                            next(mn for mn in _MONTHS
+                                 if mn.startswith(name.lower()[:3]))) + 1,
+               int(day), None)
+              for name, day in _MEMO_MONTH_DAY.findall(text)]
+
+    for month, day, raw_year in pairs:
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            continue
+        y = year
+        if raw_year:
+            y = int(raw_year)
+            if y < 100:
+                y += 2000
+        try:
+            candidate = _date(y, month, day)
+        except ValueError:
+            continue
+        # A memo describes what has already happened.
+        if base and candidate > base and not raw_year:
+            try:
+                candidate = _date(y - 1, month, day)
+            except ValueError:
+                continue
+        iso = candidate.isoformat()
+        if iso not in found:
+            found.append(iso)
+    return found
+
+
+def _date_points(
+    check_date: str, event_date: str, named: Optional[list[str]] = None
+) -> tuple[int, str]:
+    """How well the dates line up.
+
+    A date the MEMO names is worth more than the cheque's own date, because it
+    states which event is being paid for rather than merely when the payment was
+    written. Deliberately not enough on its own to clear the floor — a memo date
+    with a payer matching nothing is still a guess.
+
+    Absent any date this contributes nothing rather than penalising: plenty of
+    cheques are undated, and a missing field is not evidence against a match.
+    """
+    if event_date and named and event_date[:10] in named:
+        return _MEMO_DATE_POINTS, f"date+{_MEMO_DATE_POINTS} memo names {event_date[:10]}"
     if not check_date or not event_date:
         return 0, "date+0"
     try:
@@ -197,6 +280,7 @@ def match_invoice(
     without_fee_amounts: Optional[dict[str, float]] = None,
     check_date: str = "",
     event_meta: Optional[dict[str, dict[str, str]]] = None,
+    memo: str = "",
 ) -> InvoiceMatch:
     """Which open invoice this check pays.
 
@@ -213,6 +297,7 @@ def match_invoice(
     """
     without_fee = without_fee_amounts or {}
     meta = event_meta or {}
+    named_dates = memo_dates(memo, check_date)
     candidates: list[InvoiceCandidate] = []
 
     for inv in invoices:
@@ -233,7 +318,8 @@ def match_invoice(
         flags.append(name_flag)
 
         # WHEN. The check's date against the event's.
-        date_pts, date_flag = _date_points(check_date, inv_meta.get("event_date", ""))
+        date_pts, date_flag = _date_points(
+            check_date, inv_meta.get("event_date", ""), named_dates)
         score += date_pts
         flags.append(date_flag)
 

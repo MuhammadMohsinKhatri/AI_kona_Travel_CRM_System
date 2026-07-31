@@ -436,6 +436,10 @@ export interface CheckDetails {
   confidence: string;
   notes: string;
   error: string;
+  /** Event dates the memo names ("Kona Ice on 7/9 and 7/21"). These outrank the
+   *  cheque's own date when matching — the memo says what the payment is FOR,
+   *  the date only says when it was written. */
+  memo_dates: string[];
 }
 
 /** An invoice the check might be paying, with the scoring that put it here.

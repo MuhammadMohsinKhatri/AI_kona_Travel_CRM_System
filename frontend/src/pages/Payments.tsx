@@ -428,6 +428,15 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
               <dd>{review.check.memo}</dd>
             </div>
           )}
+          {/* What the memo turned into. A memo naming "7/9 and 7/21" outranks
+              the cheque's own date when matching, so showing the dates read out
+              of it is showing the reasoning, not decoration. */}
+          {review.check.memo_dates?.length > 0 && (
+            <div>
+              <dt>Events named in the memo</dt>
+              <dd>{review.check.memo_dates.join(" · ")}</dd>
+            </div>
+          )}
         </dl>
       )}
 

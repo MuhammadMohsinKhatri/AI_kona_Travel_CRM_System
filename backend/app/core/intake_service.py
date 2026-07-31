@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.core import billing, invoice_builder
 from app.core.check_settlement import (InvoiceMatch, SettlePlan,
                                        build_settle_plan, is_settled,
-                                       match_invoice)
+                                       match_invoice, memo_dates)
 from app.core.event_matcher import Candidate, MatchResult, match_event
 from app.core.intake_readers import CashEntry, CheckRead
 from app.models import Event, FinancialEntry, Invoice
@@ -205,6 +205,7 @@ def review_check(
             without_fee_amounts=without_fee,
             check_date=check.check_date,
             event_meta=event_meta,
+            memo=check.memo,
         )
 
     if match.invoice is None:
@@ -736,6 +737,10 @@ def check_review_json(
             "confidence": check.confidence,
             "notes": check.notes,
             "error": check.error,
+            # Event dates the memo names ("Kona Ice on 7/9 and 7/21"). Shown so
+            # a reviewer can see the system read them — they outrank the
+            # cheque's own date when scoring, and that is worth being visible.
+            "memo_dates": memo_dates(check.memo, check.check_date),
         },
         "reason": match.reason,
         "needs_choice": match.needs_choice,
