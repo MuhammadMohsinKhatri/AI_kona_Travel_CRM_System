@@ -65,6 +65,8 @@ export const api = {
     request<{
       status: string;
       environment: string;
+      /** Short commit the running backend was built from ("dev" locally). */
+      build: string;
       pipeline_dry_run: boolean;
       providers: Record<string, string>;
     }>("/health"),

@@ -61,6 +61,12 @@ jobs:
         with:
           context: ./backend
           push: true
+          # Stamped into the image so /health reports which commit is actually
+          # serving. A backend-only change moves no frontend hash and no route
+          # signature; this is the only way to tell a landed deploy from a
+          # pending one without shell access to the VPS.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.BACKEND_IMAGE }}:latest
             ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
