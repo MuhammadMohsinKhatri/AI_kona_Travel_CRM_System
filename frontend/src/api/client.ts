@@ -432,6 +432,9 @@ export interface CheckDetails {
   amount: number;
   check_date: string;
   check_number: string;
+  /** An invoice number printed on the cheque or its remittance slip. An exact
+   *  hit settles the match outright — a key, not a score. */
+  invoice_number: string;
   memo: string;
   confidence: string;
   notes: string;
@@ -449,9 +452,17 @@ export interface InvoiceCandidate {
   invoice_number: string;
   business_name: string;
   /** The event this invoice bills for — what actually tells two invoices for
-   *  the same business apart. */
+   *  the same business apart. Held in two places, so each field reports where
+   *  its value came from: "both agree", "differs from KonaOS", "ours only —
+   *  not in KonaOS", or "KonaOS only". A disagreement means our snapshot and
+   *  the CRM have drifted apart, which is worth seeing. */
   event_name: string;
+  event_name_source: string;
+  /** KonaOS's value, when it differs from the one shown. */
+  event_name_konaos: string;
   event_date: string;
+  event_date_source: string;
+  event_date_konaos: string;
   invoice_date: string;
   status: string;
   grand_total: number;
@@ -502,8 +513,23 @@ export interface CheckReview {
   /** An invoice that fits this cheque but is ALREADY marked paid. Present means
    *  "you have recorded this before" — the cheque needs no action. */
   already_paid: InvoiceCandidate | null;
+  /** Several invoices whose fee-free totals sum EXACTLY to this cheque — one
+   *  payment covering two events. Mutually exclusive with `plan`. */
+  split: SplitPart[];
+  split_total: number;
   candidates: InvoiceCandidate[];
   plan: SettlePlan | null;
+}
+
+export interface SplitPart {
+  invoice_id: string;
+  invoice_number: string;
+  event_name: string;
+  event_date: string;
+  business_name: string;
+  invoice_total: number;
+  cc_fee_removed: number;
+  amount_due_after_fee: number;
 }
 
 export interface EventCandidate {
@@ -551,6 +577,9 @@ export interface CheckRematchInput {
   amount: number;
   check_date?: string;
   check_number?: string;
+  /** An invoice number off the cheque or its remittance slip. Sent back on a
+   *  re-match so a corrected one still decides the match. */
+  invoice_number?: string;
   memo?: string;
   /** Set when the reviewer picked an invoice by hand. */
   invoice_id?: string;
@@ -571,6 +600,8 @@ export interface ApplyItem {
   kind: "check" | "cash";
   amount: number;
   invoice_id?: string;
+  /** Checks paying several invoices at once. Each is settled in full. */
+  invoice_ids?: string[];
   payer_name?: string;
   crm_event_id?: string;
 }

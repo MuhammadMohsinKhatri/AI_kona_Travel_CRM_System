@@ -878,3 +878,111 @@ def test_a_cheque_for_an_already_paid_invoice_says_so_with_the_fee_free_figure()
         assert not svc.auto_applicable_check(review)[0]
     finally:
         db.close()
+
+
+# ── one cheque, several invoices ─────────────────────────────────────────────
+
+def test_a_cheque_covering_two_events_is_split_across_both_invoices():
+    """Brett's Leaps Ahead cheque: $530, memo "Kona Ice on 7/9 and 7/21".
+
+    Scoring invoices one at a time can never answer this — both halves match
+    equally, so it ties and asks, and the true answer is "both". $300 + $230 is
+    arithmetic, not inference, which makes it the strongest signal available
+    after a printed invoice number.
+    """
+    db = _fresh_db()
+    try:
+        _, a = _seed(db, crm_event_id="ev-a", crm_invoice_id="inv-a",
+                     name="Leaps Ahead Learning", event_date="2026-07-09")
+        _, b = _seed(db, crm_event_id="ev-b", crm_invoice_id="inv-b",
+                     name="Leaps Ahead Learning", event_date="2026-07-21")
+        # Both invoices are $136.40 with the fee, $131.44 without → $262.88.
+        review = svc.review_check(
+            db, FakeCRM([a, b]),
+            CheckRead(payer_name="Leaps Ahead Learning LLC",
+                      amount=WITHOUT_FEE * 2, check_date="2026-07-24",
+                      memo="Kona Ice on 7/9 and 7/21"))
+
+        assert review.plan is None                  # not one invoice
+        assert len(review.split) == 2               # but two, together
+        assert {p.invoice_id for p in review.split} == {"inv-a", "inv-b"}
+        assert all(p.status == "exact" for p in review.split)
+        assert all(p.cc_fee_removed == 4.96 for p in review.split)
+
+        payload = svc.check_review_json(review)
+        assert payload["split_total"] == WITHOUT_FEE * 2
+        assert {p["event_date"] for p in payload["split"]} == {
+            "2026-07-09", "2026-07-21"}
+    finally:
+        db.close()
+
+
+def test_an_invoice_number_on_the_cheque_settles_the_match_outright():
+    """The remittance slip on a real cheque printed INVOICE NUMBER 00084. That
+    is a key, not a signal: an exact hit ends the argument."""
+    db = _fresh_db()
+    try:
+        _, a = _seed(db, crm_event_id="ev-a", crm_invoice_id="inv-a", name="Acme")
+        _, b = _seed(db, crm_event_id="ev-b", crm_invoice_id="inv-b", name="Acme")
+        a["invoiceNumber"] = "00084"
+        b["invoiceNumber"] = "00085"
+
+        # Identical names and totals — hopeless without the number, decided with it.
+        review = svc.review_check(
+            db, FakeCRM([a, b]),
+            CheckRead(payer_name="Acme", amount=WITHOUT_FEE, invoice_number="00084"))
+
+        assert review.plan is not None
+        assert review.plan.invoice_id == "inv-a"
+        assert any("invoice#" in f for f in review.match.candidates[0].flags)
+    finally:
+        db.close()
+
+
+def test_applying_a_split_cheque_settles_every_invoice_in_it():
+    """Each part is settled for what THAT invoice is worth after its own 4% —
+    not for a share of the cheque divided by hand. That is what makes the parts
+    add up to the cheque instead of merely near it."""
+    from fastapi.testclient import TestClient
+
+    from app.api.deps import get_current_user
+    from app.api.routes import intake
+    from app.db.base import get_db
+    from app.integrations.factory import get_crm
+    from app.main import app
+    from app.models import User
+
+    db = _fresh_db()
+    try:
+        _, a = _seed(db, crm_event_id="ev-a", crm_invoice_id="inv-a",
+                     name="Leaps Ahead Learning", event_date="2026-07-09")
+        _, b = _seed(db, crm_event_id="ev-b", crm_invoice_id="inv-b",
+                     name="Leaps Ahead Learning", event_date="2026-07-21")
+        crm = FakeCRM([a, b])
+
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: User(
+            id=1, email="office@example.com", hashed_password="x", is_active=True)
+        real_crm = intake.get_crm
+        intake.get_crm = lambda: crm
+        try:
+            body = TestClient(app).post("/api/intake/apply", json={"items": [{
+                "kind": "check", "amount": WITHOUT_FEE * 2,
+                "invoice_ids": ["inv-a", "inv-b"],
+                "payer_name": "Leaps Ahead Learning LLC",
+            }]}).json()
+        finally:
+            intake.get_crm = real_crm
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_current_user, None)
+            get_crm.cache_clear()
+
+        assert body["applied"] == 1, body
+        assert "split across 2 of 2" in body["results"][0]["summary"]
+        # Both invoices paid, each for its own fee-free total.
+        assert {p["invoice_id"] for p in crm.paid} == {"inv-a", "inv-b"}
+        assert all(p["paid_amount"] == WITHOUT_FEE for p in crm.paid)
+        assert all(p["partial"] is False for p in crm.paid)
+        assert {i.status for i in db.query(Invoice).all()} == {"paid"}
+    finally:
+        db.close()

@@ -41,6 +41,25 @@ interface BatchLine {
   warnings: string[];
 }
 
+/** Where a field's value came from, shown only when that is worth knowing.
+ *
+ *  Agreement is silent — annotating every row with "both agree" is noise that
+ *  trains people to stop reading. What earns a line is KonaOS missing something
+ *  we hold, or the two having drifted apart since we took our snapshot. */
+function SourceNote({ source, other }: { source: string; other: string }) {
+  if (!source || source === "both agree") return null;
+  const drifted = source.startsWith("differs");
+  return (
+    <div
+      className="muted"
+      style={{ fontSize: 11, color: drifted ? "var(--warn)" : undefined }}
+      title={other ? `KonaOS has: ${other}` : undefined}
+    >
+      {drifted ? `⚠ ${source}: ${other}` : source}
+    </div>
+  );
+}
+
 function Score({ flags }: { flags: string[] }) {
   return (
     <span className="muted" style={{ fontSize: 11 }}>
@@ -334,6 +353,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         amount: Number(amount) || 0,
         check_date: review?.check.check_date,
         check_number: review?.check.check_number,
+        invoice_number: review?.check.invoice_number,
         memo: review?.check.memo,
         invoice_id: invoiceId,
       });
@@ -422,6 +442,14 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
             <dt>Check number</dt>
             <dd>{review.check.check_number || <span className="muted">not read</span>}</dd>
           </div>
+          {/* When present this decides the match outright, so it earns a place
+              beside the fields that merely contribute to it. */}
+          {review.check.invoice_number && (
+            <div>
+              <dt>Invoice number on the cheque</dt>
+              <dd>{review.check.invoice_number}</dd>
+            </div>
+          )}
           {review.check.memo && (
             <div>
               <dt>Memo</dt>
@@ -506,6 +534,71 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                 after the 4% card fee came off</>
             )}
           </p>
+        </div>
+      )}
+
+      {/* One cheque, several invoices. Shown ahead of the candidate list
+          because when this appears the candidate list is asking the wrong
+          question: not "which of these does it pay" but "these, together". */}
+      {review && !applied && review.split?.length > 0 && (
+        <div className="card" style={{ background: "var(--surface-2)", marginTop: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            This cheque covers {review.split.length} invoices
+          </div>
+          <table style={{ fontSize: 13, width: "100%" }}>
+            <tbody>
+              {review.split.map((p) => (
+                <tr key={p.invoice_id}>
+                  <td>
+                    {p.event_name || p.business_name}
+                    {p.event_date && <span className="muted"> · {p.event_date}</span>}
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      invoice {p.invoice_number || p.invoice_id}
+                      {p.cc_fee_removed > 0 &&
+                        ` · less ${money(p.cc_fee_removed)} card fee`}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: "right", verticalAlign: "top" }}>
+                    {money(p.amount_due_after_fee)}
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ fontWeight: 700 }}>
+                <td>Total</td>
+                <td style={{ textAlign: "right" }}>{money(review.split_total)}</td>
+              </tr>
+              <tr>
+                <td className="muted">Cheque is for</td>
+                <td className="muted" style={{ textAlign: "right" }}>
+                  {money(review.check.amount)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <button
+            className="btn primary"
+            style={{ marginTop: 12 }}
+            onClick={() =>
+              onApprove({
+                key: `split:${review.split.map((p) => p.invoice_id).join(",")}`,
+                item: {
+                  kind: "check",
+                  amount: review.check.amount,
+                  invoice_ids: review.split.map((p) => p.invoice_id),
+                  payer_name: payer,
+                },
+                title: `Check · ${review.check.payer_name}`,
+                detail:
+                  `${money(review.check.amount)} across ${review.split.length} ` +
+                  `invoices: ${review.split
+                    .map((p) => p.event_name || p.invoice_number)
+                    .join(", ")}`,
+                warnings: [],
+              })
+            }
+          >
+            Approve — settle all {review.split.length} →
+          </button>
         </div>
       )}
 
@@ -622,10 +715,20 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                   {review.candidates.map((c) => (
                     <tr key={c.id}>
                       <td className="keep">{c.invoice_number || c.id}</td>
-                      <td>{c.event_name || <span className="muted">—</span>}</td>
+                      <td>
+                        {c.event_name || <span className="muted">—</span>}
+                        <SourceNote
+                          source={c.event_name_source}
+                          other={c.event_name_konaos}
+                        />
+                      </td>
                       <td>{c.business_name}</td>
                       <td className="keep">
                         {c.event_date || <span className="muted">—</span>}
+                        <SourceNote
+                          source={c.event_date_source}
+                          other={c.event_date_konaos}
+                        />
                       </td>
                       <td className="keep">{money(c.grand_total)}</td>
                       <td className="keep">

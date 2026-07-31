@@ -136,6 +136,10 @@ class CheckDetails(BaseModel):
     amount: float = Field(default=0.0, ge=0)
     check_date: str = Field(default="", max_length=32)
     check_number: str = Field(default="", max_length=64)
+    invoice_number: str = Field(
+        default="", max_length=64,
+        description="An invoice number printed on the cheque or its remittance "
+                    "slip. An exact hit settles the match outright.")
     memo: str = Field(default="", max_length=512)
     invoice_id: str = Field(
         default="",
@@ -160,6 +164,7 @@ def rematch_check(
         amount=body.amount,
         check_date=body.check_date,
         check_number=body.check_number,
+        invoice_number=body.invoice_number,
         memo=body.memo,
         confidence="manual",
     )
@@ -311,6 +316,10 @@ class ApplyItem(BaseModel):
     kind: Literal["check", "cash"]
     amount: float = Field(..., ge=0)
     invoice_id: str = Field(default="", description="Checks: the invoice being paid")
+    invoice_ids: list[str] = Field(
+        default_factory=list, max_length=8,
+        description="Checks paying SEVERAL invoices at once. Each is settled in "
+                    "full on its own; the server recomputes every figure.")
     payer_name: str = Field(default="", max_length=255)
     crm_event_id: str = Field(default="", description="Cash: the event that took it")
 
@@ -325,7 +334,46 @@ class ApplyRequest(BaseModel):
     items: list[ApplyItem] = Field(..., min_length=1, max_length=50)
 
 
+def _apply_split(db: Session, crm, item: ApplyItem, by: str) -> dict[str, Any]:
+    """One cheque settling several invoices, each in full.
+
+    Every part is re-planned server-side from its own invoice, so each gets its
+    own 4% removed by the billing engine. Nothing is divided by hand — a cheque
+    covering two events pays each of them what that event was worth, and the
+    only thing the browser chose was WHICH invoices.
+    """
+    results, ok_count = [], 0
+    for invoice_id in item.invoice_ids:
+        review = svc.review_check(
+            db, crm, CheckRead(payer_name=item.payer_name, amount=0.0,
+                               confidence="approved"),
+            invoice_id=invoice_id,
+        )
+        if review.plan is None:
+            results.append(f"{invoice_id}: {review.match.reason}")
+            continue
+        # Each invoice is settled for what IT is worth after the fee, not for a
+        # share of the cheque — that is what makes the parts add up.
+        review.plan.check_amount = review.plan.amount_due_after_fee
+        review.plan.variance = 0.0
+        review.plan.status, review.plan.fully_paid = "exact", True
+        outcome = svc.apply_check(db, crm, review.plan, by=by,
+                                  dry_run=settings.pipeline_dry_run)
+        results.append(outcome.summary)
+        ok_count += 1 if outcome.ok else 0
+
+    return {
+        "ok": ok_count == len(item.invoice_ids) and ok_count > 0,
+        "kind": "check",
+        "summary": f"Cheque split across {ok_count} of "
+                   f"{len(item.invoice_ids)} invoices. " + " ".join(results),
+        "dry_run": settings.pipeline_dry_run,
+    }
+
+
 def _apply_check(db: Session, crm, item: ApplyItem, by: str) -> dict[str, Any]:
+    if item.invoice_ids:
+        return _apply_split(db, crm, item, by)
     if not item.invoice_id:
         return {"ok": False, "kind": "check",
                 "summary": "No invoice was chosen for this check."}

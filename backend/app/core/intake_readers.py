@@ -42,7 +42,9 @@ Return exactly:
   "payer_address": "the address printed under that name, one line, or \\"\\"",
   "amount": 408.10,
   "check_date": "YYYY-MM-DD or \\"\\" if unreadable",
-  "check_number": "the number top-right, or \\"\\"",
+  "check_number": "the cheque's own number, top-right, or \\"\\"",
+  "invoice_number": "an INVOICE number printed on the cheque or its remittance
+     slip — NOT the cheque number — or \\"\\"",
   "memo": "the memo line, or \\"\\"",
   "confidence": "high | medium | low",
   "notes": "anything ambiguous, smudged or contradictory — one short sentence"
@@ -61,6 +63,12 @@ Rules that matter:
 - amount: prefer the numeric box; if the written words disagree with the box,
   report the WRITTEN words as the amount and say so in notes — the written
   amount is legally controlling.
+- invoice_number is the single most useful thing on the page when it is there.
+  Business cheques often arrive stapled to a remittance slip listing DESCRIPTION
+  / PURCHASE ORDER NUMBER / INVOICE NUMBER / AMOUNT — read the INVOICE NUMBER
+  cell from it. Do not confuse it with the cheque number, the account number or
+  a purchase-order number. If the slip lists several invoices, return the first
+  and say so in notes.
 - Report every field you CAN read even when others defeat you. A check with a
   clear amount and an unreadable payer is far more useful than an empty answer:
   the amount alone often identifies the invoice.
@@ -119,6 +127,10 @@ class CheckRead:
     amount: float = 0.0
     check_date: str = ""
     check_number: str = ""
+    # An INVOICE number printed on the cheque or its remittance slip. Not a
+    # score but a key: an exact hit identifies the invoice outright and makes
+    # every other signal irrelevant.
+    invoice_number: str = ""
     memo: str = ""
     confidence: str = "low"
     notes: str = ""
@@ -204,6 +216,7 @@ def read_check(image_bytes: bytes, content_type: str = "image/jpeg") -> CheckRea
         amount=_num(data.get("amount")),
         check_date=str(data.get("check_date") or "").strip(),
         check_number=str(data.get("check_number") or "").strip(),
+        invoice_number=str(data.get("invoice_number") or "").strip(),
         memo=str(data.get("memo") or "").strip(),
         confidence=str(data.get("confidence") or "low").strip().lower(),
         notes=str(data.get("notes") or "").strip(),

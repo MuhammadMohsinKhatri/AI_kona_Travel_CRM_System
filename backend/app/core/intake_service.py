@@ -147,6 +147,10 @@ class CheckReview:
     # same reason as without_fee: so the candidate rows show the SAME event the
     # plan card does, rather than whatever the KonaOS grid happens to carry.
     event_meta: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Several invoices this one cheque settles together, when their totals sum
+    # to it exactly. Mutually exclusive with `plan`: either one invoice is being
+    # paid or a set is.
+    split: list[SettlePlan] = field(default_factory=list)
 
     @property
     def ready(self) -> bool:
@@ -208,11 +212,19 @@ def review_check(
             check_date=check.check_date,
             event_meta=event_meta,
             memo=check.memo,
+            invoice_number=check.invoice_number,
         )
 
     if match.invoice is None:
+        # A cheque covering several invoices — arithmetic, not inference. Each
+        # part is planned on its own so the fee comes off each one properly and
+        # every invoice ends up settled by the engine, not by division here.
+        split = [
+            _planned(db, c.invoice, without_fee.get(c.id), c.total)
+            for c in match.combination
+        ]
         return CheckReview(check=check, match=match, without_fee=without_fee,
-                           event_meta=event_meta)
+                           event_meta=event_meta, split=split)
 
     plan = build_settle_plan(
         match.invoice,
@@ -223,6 +235,20 @@ def review_check(
     _name_the_event(db, plan, match.invoice)
     return CheckReview(check=check, match=match, plan=plan,
                        without_fee=without_fee, event_meta=event_meta)
+
+
+def _planned(
+    db: Session, invoice: dict[str, Any], fee_free: Optional[float],
+    fallback: float,
+) -> SettlePlan:
+    """One part of a split cheque: this invoice, paid in full by cheque."""
+    plan = build_settle_plan(
+        invoice, fee_free if fee_free is not None else fallback,
+        fee_free_total=fee_free,
+    )
+    plan.payment_method = "CHECK"
+    _name_the_event(db, plan, invoice)
+    return plan
 
 
 def _name_the_event(
@@ -672,6 +698,29 @@ def _first(source: dict[str, Any], *keys: str) -> Any:
     return ""
 
 
+def _reconcile(ours: str, konaos: str) -> tuple[str, str, str]:
+    """One field held in two places. Returns (value, source, the other value).
+
+    Both sources are consulted and the disagreement is reported rather than
+    resolved silently. Which one wins matters less than the fact that they
+    differ: our copy is a snapshot taken when the event was processed, and
+    KonaOS is edited afterwards — a name or date that has since changed there
+    is exactly the kind of drift nobody notices until an invoice goes out wrong.
+
+    "ours only" is worth seeing too. It means KonaOS's grid is missing a field
+    we hold, which is a gap in the CRM rather than in this system.
+    """
+    ours, konaos = (ours or "").strip(), (konaos or "").strip()
+    if ours and konaos:
+        same = ours.casefold() == konaos.casefold()
+        return ours, ("both agree" if same else "differs from KonaOS"), konaos
+    if ours:
+        return ours, "ours only — not in KonaOS", ""
+    if konaos:
+        return konaos, "KonaOS only", ""
+    return "", "", ""
+
+
 def _invoice_candidate_json(
     c: InvoiceCandidate,
     without_fee: Optional[float] = None,
@@ -687,16 +736,28 @@ def _invoice_candidate_json(
     """
     inv = c.invoice
     meta = meta or {}
+    # Both sources, reconciled and reported — see _reconcile. Ours is preferred
+    # for display because it is what the matcher scored and what the rest of the
+    # dashboard shows, but where KonaOS disagrees or is missing it, the screen
+    # says so instead of quietly picking one.
+    name, name_source, name_konaos = _reconcile(
+        meta.get("event_name", ""),
+        str(_first(inv, "eventName", "eventTitle", "title", "name")),
+    )
+    edate, date_source, date_konaos = _reconcile(
+        meta.get("event_date", ""),
+        _konaos_date(_first(inv, "eventDate", "eventStartDate")),
+    )
     return {
         "id": c.id,
         "invoice_number": c.number,
         "business_name": c.business,
-        # Ours first — the same event the plan card and the matcher used. The
-        # KonaOS payload is the fallback for an invoice we didn't draft.
-        "event_name": meta.get("event_name")
-        or str(_first(inv, "eventName", "eventTitle", "title", "name")),
-        "event_date": meta.get("event_date")
-        or _konaos_date(_first(inv, "eventDate", "eventStartDate")),
+        "event_name": name,
+        "event_name_source": name_source,
+        "event_name_konaos": name_konaos,
+        "event_date": edate,
+        "event_date_source": date_source,
+        "event_date_konaos": date_konaos,
         "invoice_date": _konaos_date(_first(inv, "invoiceDate", "createdDate")),
         "status": str(_first(inv, "invoiceStatus", "status")),
         "grand_total": c.total,
@@ -743,6 +804,7 @@ def check_review_json(
             "amount": check.amount,
             "check_date": check.check_date,
             "check_number": check.check_number,
+            "invoice_number": check.invoice_number,
             "memo": check.memo,
             "confidence": check.confidence,
             "notes": check.notes,
@@ -766,6 +828,21 @@ def check_review_json(
                                     review.event_meta.get(c.id))
             for c in match.candidates
         ],
+        # Each invoice a split cheque settles, planned in full.
+        "split": [
+            {
+                "invoice_id": p.invoice_id,
+                "invoice_number": p.invoice_number,
+                "event_name": p.event_name,
+                "event_date": p.event_date,
+                "business_name": p.business_name,
+                "invoice_total": p.invoice_total,
+                "cc_fee_removed": p.cc_fee_removed,
+                "amount_due_after_fee": p.amount_due_after_fee,
+            }
+            for p in review.split
+        ],
+        "split_total": _r2(sum(p.amount_due_after_fee for p in review.split)),
         "plan": None if plan is None else {
             "invoice_id": plan.invoice_id,
             "invoice_number": plan.invoice_number,

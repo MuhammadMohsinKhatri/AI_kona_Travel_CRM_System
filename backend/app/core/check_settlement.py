@@ -78,6 +78,12 @@ _DATE_WIDE_POINTS = 10
 # ambiguous with one that merely happens to fall nearby.
 _MEMO_DATE_POINTS = 40
 
+# An invoice number printed on the cheque or its remittance slip is not a
+# signal, it is a KEY. It clears the floor on its own and outruns the ambiguity
+# margin against anything scored, so an exact hit ends the argument — which is
+# the whole point of asking for it.
+_INVOICE_NUMBER_POINTS = 100
+
 # Below this, we are guessing. A wrong match marks another customer's invoice
 # paid, so the floor is deliberately high.
 MIN_CONFIDENT_SCORE = 50
@@ -204,6 +210,30 @@ def memo_dates(memo: str, check_date: str = "") -> list[str]:
     return found
 
 
+def _normalise_invoice_number(value: str) -> str:
+    """Comparable form of an invoice number.
+
+    Case and punctuation vary between what is printed on a remittance slip and
+    what KonaOS holds ("00084" / "#00084" / "K530X-9179333"), and leading zeros
+    are dropped by anything that has been near a spreadsheet — so compare on the
+    digits and letters alone, with a leading-zero-stripped variant as well.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+
+
+def _same_invoice_number(printed: str, invoice: dict[str, Any]) -> bool:
+    want = _normalise_invoice_number(printed)
+    if not want:
+        return False
+    for key in ("invoiceNumber", "invoiceNo", "number"):
+        have = _normalise_invoice_number(str(invoice.get(key) or ""))
+        if not have:
+            continue
+        if have == want or have.lstrip("0") == want.lstrip("0"):
+            return True
+    return False
+
+
 def _date_points(
     check_date: str, event_date: str, named: Optional[list[str]] = None
 ) -> tuple[int, str]:
@@ -280,6 +310,10 @@ class InvoiceMatch:
     # unpaid invoice matches" — which is true, and useless: the answer the
     # person needs is "you have already recorded this", not "no idea".
     settled: Optional[InvoiceCandidate] = None
+    # Several invoices whose totals sum to this cheque. One cheque covering two
+    # events cannot be resolved by scoring invoices one at a time — both halves
+    # match equally well, so it ties and asks, and the true answer is "both".
+    combination: list[InvoiceCandidate] = field(default_factory=list)
 
     @property
     def invoice_id(self) -> str:
@@ -295,6 +329,7 @@ def match_invoice(
     check_date: str = "",
     event_meta: Optional[dict[str, dict[str, str]]] = None,
     memo: str = "",
+    invoice_number: str = "",
 ) -> InvoiceMatch:
     """Which open invoice this check pays.
 
@@ -322,6 +357,12 @@ def match_invoice(
         inv_meta = meta.get(inv_id, {})
         flags: list[str] = []
         score = 0
+
+        # THE KEY, when the cheque carries one. Everything below is inference;
+        # this is the payer telling us the answer.
+        if invoice_number and _same_invoice_number(invoice_number, inv):
+            score += _INVOICE_NUMBER_POINTS
+            flags.append(f"invoice#+{_INVOICE_NUMBER_POINTS} printed on the cheque")
 
         # WHO. Business name or event name, whichever the cheque was written to.
         name_pts, name_flag = _name_points(
@@ -368,6 +409,12 @@ def match_invoice(
                 if settled_ones and settled_ones[0].score >= MIN_CONFIDENT_SCORE
                 else None)
 
+    # Only invoices that already look like this payer's are eligible to be
+    # summed. Without that the search would assemble a total out of unrelated
+    # customers who happen to add up, which is arithmetic in service of nonsense.
+    plausible = [c for c in open_ones if "name+0" not in c.flags]
+    combo = find_combination(plausible, amount, without_fee) or []
+
     def _already_paid_note(c: InvoiceCandidate) -> str:
         return (f"Invoice {c.number or c.id} for {c.business} is already marked "
                 f"PAID in KonaOS (${c.total:,.2f}). This cheque looks like one "
@@ -381,6 +428,7 @@ def match_invoice(
             candidates[:5],
             needs_choice=bool(paid_hit),
             settled=paid_hit,
+            combination=combo,
         )
 
     best = open_ones[0]
@@ -393,6 +441,7 @@ def match_invoice(
             candidates[:5],
             needs_choice=True,
             settled=paid_hit,
+            combination=combo,
         )
 
     runner_up = open_ones[1] if len(open_ones) > 1 else None
@@ -405,6 +454,7 @@ def match_invoice(
             candidates[:5],
             needs_choice=True,
             settled=paid_hit,
+            combination=combo,
         )
 
     return InvoiceMatch(
@@ -413,7 +463,73 @@ def match_invoice(
         f"({', '.join(best.flags)}).",
         candidates[:5],
         settled=paid_hit,
+        combination=combo,
     )
+
+
+# One cheque, several invoices. Bounded deliberately: subset-sum is exponential,
+# and beyond a handful of invoices a "unique combination" stops being evidence
+# and becomes numerology — with enough figures, something always adds up.
+_COMBO_MAX_INVOICES = 12
+_COMBO_MAX_PARTS = 4
+
+
+def find_combination(
+    candidates: list[InvoiceCandidate],
+    amount: float,
+    without_fee_amounts: Optional[dict[str, float]] = None,
+) -> Optional[list[InvoiceCandidate]]:
+    """The set of invoices that sums to this cheque, when exactly one does.
+
+    A cheque covering several events is normal here — "Kona Ice on 7/9 and
+    7/21", $300 + $230 = $530 — and scoring one invoice at a time can never
+    resolve it: both halves match equally, so it ties and asks, and the answer
+    to "which one does it pay" is "both".
+
+    This is arithmetic rather than inference, which makes it the strongest
+    signal available after a printed invoice number. Two guards keep it honest:
+
+      * every invoice in the set must already look plausible on its own (the
+        caller passes only name-matched candidates), so the sum is not assembled
+        out of unrelated customers that happen to add up; and
+      * the combination must be UNIQUE. If two different sets both reach the
+        total, nothing is returned — a coincidence is not a discovery.
+
+    Fee-free totals are tried alongside grand totals for each invoice, because a
+    cheque covering three events has had the 4% taken off all three.
+    """
+    without_fee = without_fee_amounts or {}
+    pool = candidates[:_COMBO_MAX_INVOICES]
+    if not pool or amount <= 0:
+        return None
+
+    hits: list[list[InvoiceCandidate]] = []
+
+    def walk(index: int, chosen: list[InvoiceCandidate], running: float) -> None:
+        if len(hits) > 1:
+            return                                   # already ambiguous
+        if chosen and abs(running - amount) <= _TOL:
+            hits.append(list(chosen))
+            return
+        if (index >= len(pool) or len(chosen) >= _COMBO_MAX_PARTS
+                or running > amount + _TOL):
+            return
+        for i in range(index, len(pool)):
+            c = pool[i]
+            for value in {c.total, without_fee.get(c.id, c.total)}:
+                if value <= 0:
+                    continue
+                chosen.append(c)
+                walk(i + 1, chosen, _r2(running + value))
+                chosen.pop()
+
+    walk(0, [], 0.0)
+    # A single invoice matching on its own is not a "combination" — that is the
+    # ordinary path, and routing it through here would bypass the fee handling
+    # and the variance reporting that the single-invoice plan does properly.
+    if len(hits) == 1 and len(hits[0]) > 1:
+        return hits[0]
+    return None
 
 
 @dataclass
