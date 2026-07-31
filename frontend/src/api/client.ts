@@ -499,6 +499,9 @@ export interface CheckReview {
   check: CheckDetails;
   reason: string;
   needs_choice: boolean;
+  /** An invoice that fits this cheque but is ALREADY marked paid. Present means
+   *  "you have recorded this before" — the cheque needs no action. */
+  already_paid: InvoiceCandidate | null;
   candidates: InvoiceCandidate[];
   plan: SettlePlan | null;
 }

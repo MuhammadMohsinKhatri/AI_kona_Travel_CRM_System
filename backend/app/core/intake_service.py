@@ -99,8 +99,8 @@ def fee_free_totals(db: Session, invoices: list[dict[str, Any]]) -> dict[str, fl
     """
     out: dict[str, float] = {}
     for inv in invoices:
-        if is_settled(inv):
-            continue
+        # Settled invoices included: the matcher scores them so it can say
+        # "already paid", and that message quotes the check-payable figure.
         inv_id = str(inv.get("id") or "")
         total = fee_free_total(db, inv_id)
         if total is not None:
@@ -119,8 +119,6 @@ def event_metadata(
     """
     out: dict[str, dict[str, str]] = {}
     for inv in invoices:
-        if is_settled(inv):
-            continue
         inv_id = str(inv.get("id") or "")
         local = _local_invoice(db, inv_id)
         event = db.get(Event, local.event_id) if local is not None else None
@@ -145,6 +143,10 @@ class CheckReview:
     # check — routinely the figure written on the cheque, and therefore the
     # column that explains why something did or didn't match.
     without_fee: dict[str, float] = field(default_factory=dict)
+    # Event name and date per invoice id, from our own records. Carried for the
+    # same reason as without_fee: so the candidate rows show the SAME event the
+    # plan card does, rather than whatever the KonaOS grid happens to carry.
+    event_meta: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def ready(self) -> bool:
@@ -209,7 +211,8 @@ def review_check(
         )
 
     if match.invoice is None:
-        return CheckReview(check=check, match=match, without_fee=without_fee)
+        return CheckReview(check=check, match=match, without_fee=without_fee,
+                           event_meta=event_meta)
 
     plan = build_settle_plan(
         match.invoice,
@@ -219,7 +222,7 @@ def review_check(
     plan.payment_method = "CHECK"
     _name_the_event(db, plan, match.invoice)
     return CheckReview(check=check, match=match, plan=plan,
-                       without_fee=without_fee)
+                       without_fee=without_fee, event_meta=event_meta)
 
 
 def _name_the_event(
@@ -670,7 +673,9 @@ def _first(source: dict[str, Any], *keys: str) -> Any:
 
 
 def _invoice_candidate_json(
-    c: InvoiceCandidate, without_fee: Optional[float] = None
+    c: InvoiceCandidate,
+    without_fee: Optional[float] = None,
+    meta: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """One invoice the check might be paying, with everything needed to choose.
 
@@ -681,12 +686,17 @@ def _invoice_candidate_json(
     is normally written for, so it is often the column that matches.
     """
     inv = c.invoice
+    meta = meta or {}
     return {
         "id": c.id,
         "invoice_number": c.number,
         "business_name": c.business,
-        "event_name": str(_first(inv, "eventName", "eventTitle", "title", "name")),
-        "event_date": _konaos_date(_first(inv, "eventDate", "eventStartDate")),
+        # Ours first — the same event the plan card and the matcher used. The
+        # KonaOS payload is the fallback for an invoice we didn't draft.
+        "event_name": meta.get("event_name")
+        or str(_first(inv, "eventName", "eventTitle", "title", "name")),
+        "event_date": meta.get("event_date")
+        or _konaos_date(_first(inv, "eventDate", "eventStartDate")),
         "invoice_date": _konaos_date(_first(inv, "invoiceDate", "createdDate")),
         "status": str(_first(inv, "invoiceStatus", "status")),
         "grand_total": c.total,
@@ -744,8 +754,16 @@ def check_review_json(
         },
         "reason": match.reason,
         "needs_choice": match.needs_choice,
+        # An invoice that fits but is already marked paid — shown so somebody
+        # holding the cheque can see it has been dealt with, rather than being
+        # told nothing matches and going looking for it by hand.
+        "already_paid": None if match.settled is None else _invoice_candidate_json(
+            match.settled, review.without_fee.get(match.settled.id),
+            review.event_meta.get(match.settled.id),
+        ),
         "candidates": [
-            _invoice_candidate_json(c, review.without_fee.get(c.id))
+            _invoice_candidate_json(c, review.without_fee.get(c.id),
+                                    review.event_meta.get(c.id))
             for c in match.candidates
         ],
         "plan": None if plan is None else {

@@ -847,3 +847,34 @@ def test_cash_candidates_carry_the_event_date_not_the_town():
             assert row["event_date"] != row["city"]
     finally:
         db.close()
+
+
+def test_a_cheque_for_an_already_paid_invoice_says_so_with_the_fee_free_figure():
+    """Brett, holding a cheque: "this one is paid, it should show that it's
+    already paid — and minus the card fee for data entry."
+
+    Settled invoices used to be dropped before scoring, so this reported "no
+    unpaid invoice matches" — true, and useless. It now names the invoice, its
+    event, and what was actually payable by cheque once the 4% came off.
+    """
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        inv["invoiceStatus"] = "paid"          # settled in KonaOS
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=WITHOUT_FEE))
+
+        assert review.plan is None                       # never re-settled
+        assert review.match.settled is not None
+        assert "already marked paid" in review.match.reason.lower()
+
+        payload = svc.check_review_json(review)
+        paid = payload["already_paid"]
+        assert paid["event_name"] == "ThriftBooks"
+        assert paid["event_date"] == "2026-07-25"
+        assert paid["grand_total"] == WITH_FEE
+        assert paid["total_without_fee"] == WITHOUT_FEE   # the fee-free figure
+
+        assert not svc.auto_applicable_check(review)[0]
+    finally:
+        db.close()

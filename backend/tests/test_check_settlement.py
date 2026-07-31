@@ -52,10 +52,16 @@ def test_a_check_written_without_the_4_percent_fee_still_matches():
     assert any("less the 4% fee" in f for f in r.candidates[0].flags)
 
 
-def test_already_paid_invoices_are_never_re_settled():
+def test_already_paid_invoices_are_never_re_settled_and_say_so():
+    """Still never re-settled — but it now NAMES the paid invoice instead of
+    reporting that nothing matches. Brett, holding the cheque: "this one is
+    paid, it should show that it's already paid." Being told nothing matches
+    sends somebody hunting for an invoice that was dealt with weeks ago."""
     r = match_invoice([PAID], "ThriftBooks", 136.40)
-    assert r.invoice is None
-    assert "no unpaid invoice" in r.reason.lower()
+    assert r.invoice is None                     # never re-settled
+    assert r.settled is not None                 # but identified
+    assert r.settled.number == "00700"
+    assert "already marked paid" in r.reason.lower()
 
 
 def test_is_settled_recognises_the_terminal_states():
@@ -93,7 +99,7 @@ def test_the_check_date_separates_two_invoices_to_the_same_customer():
         },
     )
     assert r.invoice_id == "inv-jones"
-    assert any("date+20" in f for f in r.candidates[0].flags)
+    assert any("date+25" in f for f in r.candidates[0].flags)
 
 
 def test_a_cheque_written_to_the_event_rather_than_the_business_still_matches():

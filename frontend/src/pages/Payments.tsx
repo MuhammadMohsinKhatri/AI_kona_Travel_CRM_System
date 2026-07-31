@@ -478,6 +478,37 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
       {applied && <Done result={applied} />}
 
+      {/* Already recorded. Shown before anything else and in its own right,
+          because the action here is "put the cheque down" — and a person told
+          only that nothing matched goes looking for an invoice that was dealt
+          with weeks ago, or worse, records the payment a second time. */}
+      {review?.already_paid && (
+        <div
+          className="card"
+          style={{
+            background: "var(--surface-2)",
+            marginTop: 12,
+            borderLeft: "3px solid var(--ok)",
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>✅ Already paid — nothing to do</div>
+          <p style={{ marginBottom: 4 }}>
+            {review.already_paid.event_name || review.already_paid.business_name}
+            {review.already_paid.event_date && (
+              <span className="muted"> · {review.already_paid.event_date}</span>
+            )}
+          </p>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
+            Invoice {review.already_paid.invoice_number || review.already_paid.id} ·{" "}
+            {money(review.already_paid.grand_total)}
+            {review.already_paid.total_without_fee != null && (
+              <> · {money(review.already_paid.total_without_fee)} paid by check,
+                after the 4% card fee came off</>
+            )}
+          </p>
+        </div>
+      )}
+
       {review && !applied && (
         <>
           <p style={{ marginTop: 14, marginBottom: 6 }}>{review.reason}</p>

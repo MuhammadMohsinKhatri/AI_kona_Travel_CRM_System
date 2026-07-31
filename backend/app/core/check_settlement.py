@@ -64,14 +64,19 @@ _NAME_SOME_TOKENS = 10
 # The check's own date against the event's. Checks are written around the event
 # — usually after it, sometimes before as a deposit — so proximity is real
 # evidence, and it is what separates two invoices to the same customer.
+_DATE_CLOSE_DAYS = 15
 _DATE_NEAR_DAYS = 45
 _DATE_WIDE_DAYS = 120
+_DATE_CLOSE_POINTS = 25
 _DATE_NEAR_POINTS = 20
 _DATE_WIDE_POINTS = 10
 # A date written in the MEMO — "Kona Ice on 7/9 and 7/21" — says which event is
 # being paid for, where the cheque's own date only says when somebody sat down
-# with the chequebook. Worth more, but still short of the floor on its own.
-_MEMO_DATE_POINTS = 35
+# with the chequebook. Still short of the floor on its own, so it needs the name
+# or the amount to corroborate; but it must beat mere proximity by MORE than
+# AMBIGUITY_MARGIN, or a cheque that STATES which event it pays comes back as
+# ambiguous with one that merely happens to fall nearby.
+_MEMO_DATE_POINTS = 40
 
 # Below this, we are guessing. A wrong match marks another customer's invoice
 # paid, so the floor is deliberately high.
@@ -223,6 +228,10 @@ def _date_points(
                    - _date.fromisoformat(event_date[:10])).days)
     except ValueError:
         return 0, "date+0"
+    # A fortnight either side is the ordinary rhythm: the event happens, the
+    # invoice goes out, the cheque is written. Brett's own framing.
+    if gap <= _DATE_CLOSE_DAYS:
+        return _DATE_CLOSE_POINTS, f"date+{_DATE_CLOSE_POINTS} within {gap}d"
     if gap <= _DATE_NEAR_DAYS:
         return _DATE_NEAR_POINTS, f"date+{_DATE_NEAR_POINTS} within {gap}d"
     if gap <= _DATE_WIDE_DAYS:
@@ -266,6 +275,11 @@ class InvoiceMatch:
     reason: str
     candidates: list[InvoiceCandidate] = field(default_factory=list)
     needs_choice: bool = False
+    # An invoice that matches well but is ALREADY marked paid. Settled invoices
+    # used to be filtered out before scoring, so a cheque for one reported "no
+    # unpaid invoice matches" — which is true, and useless: the answer the
+    # person needs is "you have already recorded this", not "no idea".
+    settled: Optional[InvoiceCandidate] = None
 
     @property
     def invoice_id(self) -> str:
@@ -301,8 +315,9 @@ def match_invoice(
     candidates: list[InvoiceCandidate] = []
 
     for inv in invoices:
-        if is_settled(inv):
-            continue
+        # Settled invoices are scored too, not skipped. See InvoiceMatch.settled:
+        # "you have already recorded this" is the answer a person needs, and it
+        # is unreachable if the only matching invoice was filtered out first.
         inv_id = str(inv.get("id") or "")
         inv_meta = meta.get(inv_id, {})
         flags: list[str] = []
@@ -342,23 +357,45 @@ def match_invoice(
         candidates.append(InvoiceCandidate(invoice=inv, score=score, flags=flags))
 
     candidates.sort(key=lambda c: c.score, reverse=True)
+    open_ones = [c for c in candidates if not is_settled(c.invoice)]
+    settled_ones = [c for c in candidates if is_settled(c.invoice)]
 
-    if not candidates:
+    # The best already-paid invoice, if it matches well enough to be worth
+    # naming. Reported alongside every outcome below: even when an OPEN invoice
+    # matches, knowing a settled one also fits is what stops the same cheque
+    # being recorded twice against two different invoices.
+    paid_hit = (settled_ones[0]
+                if settled_ones and settled_ones[0].score >= MIN_CONFIDENT_SCORE
+                else None)
+
+    def _already_paid_note(c: InvoiceCandidate) -> str:
+        return (f"Invoice {c.number or c.id} for {c.business} is already marked "
+                f"PAID in KonaOS (${c.total:,.2f}). This cheque looks like one "
+                "that has already been recorded.")
+
+    if not open_ones:
         return InvoiceMatch(
-            None, "There are no unpaid invoices to match this check against.", []
+            None,
+            _already_paid_note(paid_hit) if paid_hit
+            else "There are no unpaid invoices to match this check against.",
+            candidates[:5],
+            needs_choice=bool(paid_hit),
+            settled=paid_hit,
         )
 
-    best = candidates[0]
+    best = open_ones[0]
     if best.score < MIN_CONFIDENT_SCORE:
         return InvoiceMatch(
             None,
+            _already_paid_note(paid_hit) if paid_hit else
             f"No unpaid invoice confidently matches \"{payer_name}\" for "
             f"${amount:,.2f}. Pick one below, or check the amount was read right.",
             candidates[:5],
             needs_choice=True,
+            settled=paid_hit,
         )
 
-    runner_up = candidates[1] if len(candidates) > 1 else None
+    runner_up = open_ones[1] if len(open_ones) > 1 else None
     if runner_up and best.score - runner_up.score < AMBIGUITY_MARGIN:
         return InvoiceMatch(
             None,
@@ -367,6 +404,7 @@ def match_invoice(
             "well. Choose which one it pays.",
             candidates[:5],
             needs_choice=True,
+            settled=paid_hit,
         )
 
     return InvoiceMatch(
@@ -374,6 +412,7 @@ def match_invoice(
         f"Matched invoice {best.number or best.id} for {best.business} "
         f"({', '.join(best.flags)}).",
         candidates[:5],
+        settled=paid_hit,
     )
 
 
