@@ -655,3 +655,29 @@ def test_the_speech_prompt_states_todays_date():
     assert "never resolve a date into the future" in filled
     # The JSON shape must survive .format() — doubled braces, not stray ones.
     assert '"entries": [' in filled and '{"query"' in filled
+
+
+def test_the_transcriber_is_asked_to_translate_not_merely_transcribe():
+    """From production: a sentence spoken with an Urdu accent came back as
+    "ارگوٹھ سوڈ ٹرک" — a faithful transcript of "Arbutus Food Truck" and a
+    useless one, because every event name in KonaOS is English and the matcher
+    scored name+0 against all of them.
+
+    Translation always emits English; English in gives English out unchanged, so
+    a native speaker loses nothing.
+    """
+    import inspect
+
+    from app.core import intake_readers
+
+    source = inspect.getsource(intake_readers.transcribe)
+    assert "audio.translations.create" in source
+    assert "audio.transcriptions.create" not in source
+
+
+def test_the_speech_prompt_requires_an_english_query():
+    from app.core.intake_readers import _SPEECH_PROMPT
+
+    filled = _SPEECH_PROMPT.format(today="2026-07-31")
+    assert "query MUST be English" in filled
+    assert "Arbutus Food Truck" in filled       # the transliteration example

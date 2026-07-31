@@ -91,6 +91,12 @@ Rules that matter:
 - query keeps their wording, including any town or zip they said — that is what
   identifies the event downstream. Do not tidy it into something shorter. Leave
   the date out of query if you resolved it into the date field.
+- query MUST be English. The events it is matched against are named in English,
+  so a query in any other script matches nothing at all. If the sentence arrives
+  in another language, translate the event name into English — and where it is a
+  proper noun that was transliterated on the way in, restore the English spelling
+  ("ارگوٹھ سوڈ ٹرک" is "Arbutus Food Truck", not "Argot Sod Truck"). Put the
+  original wording in notes so a person can see what was said.
 - date: resolve what they said against TODAY. "29th July" or "the 29th" means the
   most recent 29th July that is NOT in the future. "yesterday" and "Tuesday" mean
   exactly that, counting back from today. Events are being reported AFTER they
@@ -205,19 +211,33 @@ def read_check(image_bytes: bytes, content_type: str = "image/jpeg") -> CheckRea
 
 
 def transcribe(audio_bytes: bytes, filename: str = "speech.webm") -> tuple[str, str]:
-    """Audio to text. Returns (transcript, error)."""
+    """Audio to ENGLISH text. Returns (transcript, error).
+
+    Deliberately the translations endpoint, not transcriptions. Transcription
+    writes speech down in whatever language it hears, and this office is not
+    monolingual — a sentence spoken with an Urdu accent came back as
+    "ارگوٹھ سوڈ ٹرک" for "Arbutus Food Truck". That is a faithful transcript and
+    a useless one: every event name in KonaOS is English, so the matcher scored
+    name+0 against all of them and the takings went nowhere.
+
+    Translation always emits English regardless of what went in, and English in
+    gives English out unchanged — so this costs a native speaker nothing and
+    makes the feature work for everyone else.
+    """
     if not audio_bytes:
         return "", "No audio was recorded."
     if settings.openai_provider != "live":
         return "", "Voice input needs OPENAI_PROVIDER=live."
     try:
-        resp = _client().audio.transcriptions.create(
+        resp = _client().audio.translations.create(
             model=TRANSCRIBE_MODEL,
             file=(filename, audio_bytes),
             # Business names and dollar amounts are what this has to get right,
-            # and both are exactly what a general model mangles.
+            # and both are exactly what a general model mangles. Naming the
+            # brands also steers the proper nouns through the translation.
             prompt="Event names, towns, zip codes and dollar amounts for a "
-                   "shaved-ice catering business (Kona Ice, Travelin' Tom's).",
+                   "shaved-ice catering business (Kona Ice, Travelin' Tom's). "
+                   "Keep business and place names in English.",
         )
         return str(getattr(resp, "text", "") or "").strip(), ""
     except Exception as e:  # noqa: BLE001
