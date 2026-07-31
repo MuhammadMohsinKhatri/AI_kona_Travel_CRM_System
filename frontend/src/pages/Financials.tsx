@@ -176,10 +176,17 @@ export default function Financials() {
     setImportMsg("");
     try {
       const r = await api.importFinancialsSheet(importSource);
+      // Say how many tabs were read. The workbook keeps a tab per month, so
+      // "1 tab" is the tell-tale of discovery having fallen back — the import
+      // looks successful either way, and the difference is months of data.
+      const tabs = r.tabs_read ?? 1;
+      const failed = (r.tabs ?? []).filter((t) => t.error);
       setImportMsg(
-        `Imported ${r.label} — ${r.created} new, ${r.updated} refreshed, ` +
+        `Imported ${r.label} from ${tabs} tab${tabs === 1 ? "" : "s"} — ` +
+        `${r.created} new, ${r.updated} refreshed, ` +
         `${r.skipped_protected} left untouched (produced by the automation), ` +
-        `${r.placeholders_created} placeholder event(s) created.`
+        `${r.placeholders_created} placeholder event(s) created.` +
+        (failed.length ? ` ${failed.length} tab(s) couldn't be read.` : "")
       );
       // New months / rows may have appeared — refresh both.
       api.financialMonths().then(setMonths).catch(() => {});

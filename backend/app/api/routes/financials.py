@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from typing import Any, Optional
 
 import httpx
@@ -783,24 +784,109 @@ def import_sheet(
             detail=f"Unknown sheet '{sheet}'. Valid: {', '.join(IMPORT_SHEETS)}",
         )
     brand = cfg["brand"]
-    sheet_url = url or getattr(settings, cfg["url_attr"])
-    try:
-        resp = httpx.get(sheet_url, follow_redirects=True, timeout=30.0)
-        resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Couldn't fetch the Google Sheet: {exc}"
-        )
+    configured_url = url or getattr(settings, cfg["url_attr"])
+    # One CSV per TAB. The workbook keeps a tab per month, and a CSV export URL
+    # addresses exactly one of them — so importing "the sheet" only ever brought
+    # in whichever month happened to be configured, and every other month looked
+    # to the user like an import that silently did nothing. An explicit ?url=
+    # override still means that one tab and nothing else.
+    sheet_urls = [configured_url] if url else _workbook_tab_urls(configured_url)
 
-    reader = csv.DictReader(io.StringIO(resp.text))
     created = updated = skipped_protected = placeholders = skipped_blank = 0
+    per_tab: list[dict[str, Any]] = []
+    for sheet_url in sheet_urls:
+        try:
+            resp = httpx.get(sheet_url, follow_redirects=True, timeout=30.0)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            # One unreadable tab must not lose the tabs that did import.
+            per_tab.append({"url": sheet_url, "error": str(exc), "rows": 0})
+            continue
+
+        before = created + updated
+        _import_tab_rows(
+            db, csv.DictReader(io.StringIO(resp.text)), brand, cfg["label"],
+            counters := {"created": 0, "updated": 0, "skipped_protected": 0,
+                         "placeholders": 0, "skipped_blank": 0},
+        )
+        created += counters["created"]
+        updated += counters["updated"]
+        skipped_protected += counters["skipped_protected"]
+        placeholders += counters["placeholders"]
+        skipped_blank += counters["skipped_blank"]
+        per_tab.append({
+            "url": sheet_url,
+            "rows": created + updated - before,
+            **counters,
+        })
+
+    db.commit()
+    return {
+        "sheet": sheet,
+        "label": cfg["label"],
+        "brand": brand,
+        "created": created,
+        "updated": updated,
+        "skipped_protected": skipped_protected,
+        "placeholders_created": placeholders,
+        "skipped_blank": skipped_blank,
+        "source_url": configured_url,
+        "tabs_read": len(sheet_urls),
+        "tabs": per_tab,
+    }
+
+
+_GID_RE = re.compile(r"gid=(\d{1,20})")
+
+
+def _workbook_tab_urls(csv_url: str) -> list[str]:
+    """Every tab of the workbook this CSV URL points into, as CSV export URLs.
+
+    Discovered rather than configured, because the workbook grows a tab every
+    month and a configured list goes stale the moment it does — silently, which
+    is the worst way for an importer to be wrong.
+
+    Falls back to the URL as given if the workbook can't be read or exposes no
+    tabs; importing one month beats importing nothing, and the caller reports
+    how many tabs were actually read.
+    """
+    match = re.search(r"/spreadsheets/d/([A-Za-z0-9_-]+)", csv_url)
+    if not match:
+        return [csv_url]
+    doc_id = match.group(1)
+    try:
+        resp = httpx.get(
+            f"https://docs.google.com/spreadsheets/d/{doc_id}/htmlview",
+            follow_redirects=True, timeout=30.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        return [csv_url]
+
+    gids = sorted(set(_GID_RE.findall(resp.text)))
+    if not gids:
+        return [csv_url]
+    base = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid="
+    return [base + gid for gid in gids]
+
+
+def _import_tab_rows(
+    db: Session, reader, brand: str, label: str, counters: dict[str, int]
+) -> None:
+    """Import one tab's rows. Counts land in ``counters``; the caller commits.
+
+    A tab that isn't a ledger — a summary, a scratch sheet, the empty one this
+    workbook carries — has no EVENT ID column, so every row falls through to
+    skipped_blank and nothing is written. That is the guard against importing
+    tabs indiscriminately, and it needs no list of which tabs are real.
+    """
     for raw_row in reader:
         # Sheet headers carry embedded newlines ("Sales $\n") — normalise the
         # keys so they line up with SHEET_COLUMNS' clean labels.
         row = {(k or "").strip(): v for k, v in raw_row.items()}
         crm_id = (row.get(_H_EVENT_ID) or "").strip()
         if not crm_id:
-            skipped_blank += 1
+            counters["skipped_blank"] += 1
             continue
 
         event = db.query(Event).filter(Event.crm_event_id == crm_id).first()
@@ -812,11 +898,11 @@ def import_sheet(
                 event_type=(row.get(_H_TYPE) or "").strip(),
                 brand=brand,
                 status="imported",
-                status_reason=f"Placeholder created from {cfg['label']} Google Sheet import",
+                status_reason=f"Placeholder created from {label} Google Sheet import",
             )
             db.add(event)
             db.flush()  # assign event.id for the FK below
-            placeholders += 1
+            counters["placeholders"] += 1
 
         entry = (
             db.query(FinancialEntry)
@@ -824,14 +910,14 @@ def import_sheet(
             .one_or_none()
         )
         if entry is not None and entry.source != "sheet":
-            skipped_protected += 1  # pipeline owns this row — leave it alone
+            counters["skipped_protected"] += 1  # pipeline owns this row
             continue
         if entry is None:
             entry = FinancialEntry(event_id=event.id, source="sheet")
             db.add(entry)
-            created += 1
+            counters["created"] += 1
         else:
-            updated += 1
+            counters["updated"] += 1
 
         for header, attr in SHEET_COLUMNS:
             if header in row:  # AI_* headers aren't in the sheet — skip them
@@ -855,16 +941,3 @@ def import_sheet(
         entry.source = "sheet"
         entry.run_id = None
         entry.month = ((row.get(_H_DATE) or "").strip()[:7]) or None
-
-    db.commit()
-    return {
-        "sheet": sheet,
-        "label": cfg["label"],
-        "brand": brand,
-        "created": created,
-        "updated": updated,
-        "skipped_protected": skipped_protected,
-        "placeholders_created": placeholders,
-        "skipped_blank": skipped_blank,
-        "source_url": sheet_url,
-    }

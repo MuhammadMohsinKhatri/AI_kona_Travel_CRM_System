@@ -399,6 +399,11 @@ export interface SheetImportResult {
   placeholders_created: number;
   skipped_blank: number;
   source_url: string;
+  /** How many tabs of the workbook were read — the workbook keeps one per
+   *  month, so 1 here means tab discovery fell back and only the configured
+   *  month came in. */
+  tabs_read?: number;
+  tabs?: { url: string; rows?: number; error?: string }[];
 }
 export interface FinancialsResponse {
   items: FinancialRow[];

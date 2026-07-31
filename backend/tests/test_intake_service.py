@@ -744,3 +744,40 @@ def test_uploading_a_check_does_not_call_the_crm_from_the_event_loop():
         assert response.json()["applied"]["ok"] is True
     finally:
         db.close()
+
+
+# ── the sheet importer reads the whole workbook, not one tab ─────────────────
+
+def test_workbook_tab_discovery_falls_back_to_the_url_it_was_given():
+    """Discovery is a scrape of Google's HTML, so it will break one day. When it
+    does, importing the configured month beats importing nothing — and the
+    response reports tabs_read so a silent fallback is still visible."""
+    from unittest.mock import patch
+
+    import httpx as _httpx
+
+    from app.api.routes.financials import _workbook_tab_urls
+
+    url = ("https://docs.google.com/spreadsheets/d/SHEETID/export"
+           "?format=csv&gid=123")
+
+    with patch.object(_httpx, "get", side_effect=_httpx.HTTPError("no network")):
+        assert _workbook_tab_urls(url) == [url]
+
+    class _Resp:
+        text = 'href="…gid=111" … href="…gid=222" … href="…gid=111"'
+
+        def raise_for_status(self):
+            return None
+
+    with patch.object(_httpx, "get", return_value=_Resp()):
+        found = _workbook_tab_urls(url)
+    assert [u.rsplit("gid=", 1)[-1] for u in found] == ["111", "222"]
+    assert all("/spreadsheets/d/SHEETID/export?format=csv&gid=" in u for u in found)
+
+
+def test_a_url_that_is_not_a_workbook_is_left_alone():
+    from app.api.routes.financials import _workbook_tab_urls
+
+    assert _workbook_tab_urls("https://example.com/data.csv") == [
+        "https://example.com/data.csv"]
