@@ -665,11 +665,16 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
             e.target.value = "";
           }}
         />
+        {/* `capture` on an audio input opens the phone's own voice recorder
+            rather than a file browser, so on a phone this button IS "record a
+            voice note" — two taps, no files, and it works on http where the
+            in-page recorder cannot exist. Worth naming honestly: "Upload a
+            voice memo" describes the desktop half and hides the good half. */}
         <button
           className={"btn" + (canRecord ? "" : " primary")}
           onClick={() => audioRef.current?.click()}
         >
-          🎤 Upload a voice memo
+          🎤 {canRecord ? "Send a voice memo" : "Record on your phone"}
         </button>
 
         <label className="muted" style={{ fontSize: 12 }}>
@@ -690,11 +695,12 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
 
       {!canRecord && (
         <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
-          Recording straight into the page needs the dashboard on <code>https</code>
-          — browsers won't hand a microphone to an unencrypted page, so there is
-          no permission to grant here. Until then: record a voice memo on your
-          phone and upload it, or type the takings below. Both do exactly the
-          same thing once the audio arrives.
+          <strong>On a phone, that button opens your voice recorder — talk, tap
+          done, and it posts.</strong> On a computer it asks for an audio file
+          instead: recording inside the page needs the dashboard on{" "}
+          <code>https</code>, and browsers won't hand a microphone to an
+          unencrypted page, so there is no permission to grant here. Typing the
+          takings below does exactly the same thing once it is read.
         </p>
       )}
 
