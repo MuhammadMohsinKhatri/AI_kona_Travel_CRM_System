@@ -466,6 +466,12 @@ def _match_row(event: Event) -> dict[str, Any]:
     if not raw.get("name"):
         raw["name"] = event.event_name
     raw.setdefault("brandName", event.brand)
+    # Stamp OUR date on, unconditionally. KonaOS dates an event with
+    # `startDateTime` in epoch milliseconds; nothing in the payload is called
+    # `eventDate`, so reading that key returned "" for every candidate and the
+    # screen fell back to printing the town under a heading that said DATE. Our
+    # own column is already the ISO date the rest of the dashboard displays.
+    raw["eventDate"] = event.event_date or ""
     return raw
 
 
@@ -669,7 +675,12 @@ def _candidate_json(c: Candidate) -> dict[str, Any]:
         "name": c.name,
         "score": c.score,
         "flags": c.flags,
-        "event_date": str(c.event.get("eventDate") or c.event.get("date") or ""),
+        # startDateTime is KonaOS's own field and is epoch ms; _konaos_date
+        # handles that, and returns "" for anything not shaped like a date
+        # rather than passing a raw number through to a date column.
+        "event_date": _konaos_date(
+            _first(c.event, "eventDate", "date", "startDateTime")
+        ),
         "city": str(c.event.get("city") or ""),
     }
 

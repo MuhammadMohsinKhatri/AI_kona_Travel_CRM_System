@@ -1069,7 +1069,8 @@ function CashLineCard({
             <thead>
               <tr>
                 <th>Event</th>
-                <th>Date</th>
+                <th>Event date</th>
+                <th>Where</th>
                 <th>Why it's here</th>
                 <th />
               </tr>
@@ -1078,7 +1079,13 @@ function CashLineCard({
               {state.candidates.map((c) => (
                 <tr key={c.id}>
                   <td>{c.name}</td>
-                  <td>{c.event_date || c.city}</td>
+                  {/* Its own column. Falling back to the town when the date was
+                      missing printed "Baltimore" under a heading that said
+                      DATE — which reads as data and is simply false. */}
+                  <td className="keep">
+                    {c.event_date || <span className="muted">—</span>}
+                  </td>
+                  <td>{c.city || <span className="muted">—</span>}</td>
                   <td><Score flags={c.flags} /></td>
                   <td>
                     <button className="btn" onClick={() => rematch(c.id)} disabled={busy}>

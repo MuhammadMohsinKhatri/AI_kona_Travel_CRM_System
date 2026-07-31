@@ -805,3 +805,35 @@ def test_a_settled_check_names_the_event_not_just_the_invoice():
         assert "ThriftBooks" in result.summary and "2026-07-25" in result.summary
     finally:
         db.close()
+
+
+def test_cash_candidates_carry_the_event_date_not_the_town():
+    """Reported from production: the cash candidate table printed "Milford Mill"
+    and "Baltimore" under a heading that said DATE.
+
+    KonaOS dates an event with `startDateTime` in epoch ms — nothing in the
+    payload is called `eventDate` — so the date read as "" for every candidate
+    and the screen fell back to the town. A town under a DATE heading reads as
+    data and is simply false.
+    """
+    db = _fresh_db()
+    try:
+        # Two same-named events so the matcher refuses and returns candidates.
+        for code in ("a", "b"):
+            _seed(db, crm_event_id=f"ev-{code}", crm_invoice_id=f"inv-{code}",
+                  name="Milford Mill Elementary", event_date="2026-07-25",
+                  raw={"id": f"ev-{code}", "name": "Milford Mill Elementary",
+                       "city": "Milford Mill",
+                       # KonaOS's real shape: epoch ms, and no eventDate key.
+                       "startDateTime": 1785024000000})
+        [review] = svc.review_cash(
+            db, [CashEntry(query="Milford Mill", amount=25.0, date="2026-07-25")])
+
+        assert review.match.candidates, "expected candidates to choose between"
+        rows = [svc._candidate_json(c) for c in review.match.candidates]
+        for row in rows:
+            assert row["event_date"] == "2026-07-25", row
+            assert row["city"] == "Milford Mill"
+            assert row["event_date"] != row["city"]
+    finally:
+        db.close()
