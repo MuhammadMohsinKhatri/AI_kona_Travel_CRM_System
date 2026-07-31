@@ -108,6 +108,31 @@ def fee_free_totals(db: Session, invoices: list[dict[str, Any]]) -> dict[str, fl
     return out
 
 
+def event_metadata(
+    db: Session, invoices: list[dict[str, Any]]
+) -> dict[str, dict[str, str]]:
+    """Event name and date for every open invoice, keyed by CRM invoice id.
+
+    Ours, not KonaOS's: the invoice grid carries neither reliably, and these are
+    what the matcher scores on. An invoice we didn't draft contributes nothing
+    and simply matches on its business name and amount as before.
+    """
+    out: dict[str, dict[str, str]] = {}
+    for inv in invoices:
+        if is_settled(inv):
+            continue
+        inv_id = str(inv.get("id") or "")
+        local = _local_invoice(db, inv_id)
+        event = db.get(Event, local.event_id) if local is not None else None
+        if event is None:
+            continue
+        out[inv_id] = {
+            "event_name": event.event_name or "",
+            "event_date": event.event_date or "",
+        }
+    return out
+
+
 @dataclass
 class CheckReview:
     """One check, read and matched, with nothing written yet."""
@@ -159,6 +184,7 @@ def review_check(
 
     invoices = crm.list_invoices() or []
     without_fee = fee_free_totals(db, invoices)
+    event_meta = event_metadata(db, invoices)
 
     if invoice_id:
         chosen = next((i for i in invoices if str(i.get("id") or "") == invoice_id), None)
@@ -177,6 +203,8 @@ def review_check(
         match = match_invoice(
             invoices, check.payer_name, check.amount,
             without_fee_amounts=without_fee,
+            check_date=check.check_date,
+            event_meta=event_meta,
         )
 
     if match.invoice is None:

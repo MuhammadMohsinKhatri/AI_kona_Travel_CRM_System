@@ -33,13 +33,32 @@ from app.core.event_matcher import _significant, _tokens
 # hair off through rounding.
 _TOL = 0.02
 
-# An amount matching the invoice to the cent is the strongest signal a check
-# carries — stronger than the name, which arrives via OCR of handwriting.
-_EXACT_AMOUNT_POINTS = 60
-_NEAR_AMOUNT_POINTS = 25
-_NAME_ALL_TOKENS = 40
-_NAME_MOST_TOKENS = 25
+# WHO and WHEN identify the invoice; the amount corroborates it.
+#
+# The amount used to be the only route to a confident match, and in practice it
+# is the field least often in agreement: a check pays several invoices at once,
+# or arrives before the invoice is drafted, or the client rounds. Meanwhile the
+# name on the check and the name on the invoice usually agree exactly, and the
+# date the check was written sits close to the event it pays for.
+#
+# So a full name match now reaches the floor on its own, and so does an exact
+# amount — either is sufficient, together they are decisive. What the amount
+# still governs is whether the match may APPLY ITSELF: see
+# intake_service.auto_applicable_check, which requires the figures to agree to
+# the cent before anything is written without a person looking.
+_EXACT_AMOUNT_POINTS = 50
+_NEAR_AMOUNT_POINTS = 15
+_NAME_ALL_TOKENS = 50
+_NAME_MOST_TOKENS = 30
 _NAME_SOME_TOKENS = 10
+
+# The check's own date against the event's. Checks are written around the event
+# — usually after it, sometimes before as a deposit — so proximity is real
+# evidence, and it is what separates two invoices to the same customer.
+_DATE_NEAR_DAYS = 45
+_DATE_WIDE_DAYS = 120
+_DATE_NEAR_POINTS = 20
+_DATE_WIDE_POINTS = 10
 
 # Below this, we are guessing. A wrong match marks another customer's invoice
 # paid, so the floor is deliberately high.
@@ -64,20 +83,68 @@ def _r2(v: float) -> float:
     return round(v + 0.0, 2)
 
 
-def _name_points(payer: str, business: str) -> tuple[int, str]:
-    """How much the check's payer looks like the invoice's business name."""
+def _one_name_points(payer: str, candidate: str) -> int:
     p_tokens = _significant(_tokens(payer))
-    b_tokens = _tokens(business)
-    if not p_tokens or not b_tokens:
-        return 0, "name+0"
-    hits = sum(1 for t in p_tokens if any(t == bt or t in bt for bt in b_tokens))
+    c_tokens = _tokens(candidate)
+    if not p_tokens or not c_tokens:
+        return 0
+    hits = sum(1 for t in p_tokens if any(t == ct or t in ct for ct in c_tokens))
     if hits == len(p_tokens):
-        return _NAME_ALL_TOKENS, "name+40 all tokens"
+        return _NAME_ALL_TOKENS
     if hits / len(p_tokens) > 0.5:
-        return _NAME_MOST_TOKENS, "name+25 most tokens"
+        return _NAME_MOST_TOKENS
     if hits:
-        return _NAME_SOME_TOKENS, "name+10 some tokens"
-    return 0, "name+0"
+        return _NAME_SOME_TOKENS
+    return 0
+
+
+def _name_points(
+    payer: str, business: str, event_name: str = ""
+) -> tuple[int, str]:
+    """How much the check's payer looks like this invoice's names.
+
+    Scored against the business name AND the event name, best of the two. They
+    diverge more often than not — an invoice's business is "Baltimore County
+    Public Schools" while the event is "Featherbed Lane Elementary", and the
+    cheque is printed with whichever the payer thinks of as themselves.
+    Requiring the business name alone threw away the half of the checks that
+    carry the event's name instead.
+    """
+    business_points = _one_name_points(payer, business)
+    event_points = _one_name_points(payer, event_name) if event_name else 0
+    points = max(business_points, event_points)
+    if not points:
+        return 0, "name+0"
+    which = "event name" if event_points > business_points else "business name"
+    detail = {
+        _NAME_ALL_TOKENS: "all tokens",
+        _NAME_MOST_TOKENS: "most tokens",
+        _NAME_SOME_TOKENS: "some tokens",
+    }[points]
+    return points, f"name+{points} {detail} ({which})"
+
+
+def _date_points(check_date: str, event_date: str) -> tuple[int, str]:
+    """How close the check's date sits to the event's.
+
+    Both are ISO YYYY-MM-DD or empty. Absent either, this contributes nothing
+    rather than penalising — plenty of checks are undated, and a missing field
+    is not evidence against a match.
+    """
+    if not check_date or not event_date:
+        return 0, "date+0"
+    try:
+        from datetime import date as _date
+
+        gap = abs((_date.fromisoformat(check_date[:10])
+                   - _date.fromisoformat(event_date[:10])).days)
+    except ValueError:
+        return 0, "date+0"
+    if gap <= _DATE_NEAR_DAYS:
+        return _DATE_NEAR_POINTS, f"date+{_DATE_NEAR_POINTS} within {gap}d"
+    if gap <= _DATE_WIDE_DAYS:
+        return _DATE_WIDE_POINTS, f"date+{_DATE_WIDE_POINTS} within {gap}d"
+    return 0, f"date+0 ({gap}d apart)"
 
 
 def is_settled(invoice: dict[str, Any]) -> bool:
@@ -128,6 +195,8 @@ def match_invoice(
     amount: float,
     *,
     without_fee_amounts: Optional[dict[str, float]] = None,
+    check_date: str = "",
+    event_meta: Optional[dict[str, dict[str, str]]] = None,
 ) -> InvoiceMatch:
     """Which open invoice this check pays.
 
@@ -136,33 +205,53 @@ def match_invoice(
     the NORMAL case — the office quotes it that way — so it has to score as an
     exact amount match, otherwise every correctly-written check looks like an
     underpayment and matches nothing.
+
+    ``event_meta`` maps invoice id to ``{"event_name", "event_date"}`` from our
+    own records. The invoice grid does not reliably carry either, and they are
+    what a person matches on: the name printed on the cheque against the job it
+    paid for, and the date it was written against the date that job ran.
     """
     without_fee = without_fee_amounts or {}
+    meta = event_meta or {}
     candidates: list[InvoiceCandidate] = []
 
     for inv in invoices:
         if is_settled(inv):
             continue
+        inv_id = str(inv.get("id") or "")
+        inv_meta = meta.get(inv_id, {})
         flags: list[str] = []
         score = 0
 
-        total = _num(inv.get("grandTotal"))
-        fee_free = without_fee.get(str(inv.get("id") or ""))
-        if total > 0 and abs(total - amount) <= _TOL:
-            score += _EXACT_AMOUNT_POINTS
-            flags.append("amount+60 exact")
-        elif fee_free is not None and abs(fee_free - amount) <= _TOL:
-            score += _EXACT_AMOUNT_POINTS
-            flags.append("amount+60 exact less the 4% fee")
-        elif total > 0 and abs(total - amount) <= max(1.0, total * 0.05):
-            score += _NEAR_AMOUNT_POINTS
-            flags.append("amount+25 within 5%")
-        else:
-            flags.append("amount+0")
-
-        name_pts, name_flag = _name_points(payer_name, inv.get("businessName", ""))
+        # WHO. Business name or event name, whichever the cheque was written to.
+        name_pts, name_flag = _name_points(
+            payer_name,
+            str(inv.get("businessName") or ""),
+            inv_meta.get("event_name", ""),
+        )
         score += name_pts
         flags.append(name_flag)
+
+        # WHEN. The check's date against the event's.
+        date_pts, date_flag = _date_points(check_date, inv_meta.get("event_date", ""))
+        score += date_pts
+        flags.append(date_flag)
+
+        # HOW MUCH. Corroboration, no longer the only way in — but still the
+        # thing that decides whether this may apply without a person looking.
+        total = _num(inv.get("grandTotal"))
+        fee_free = without_fee.get(inv_id)
+        if total > 0 and abs(total - amount) <= _TOL:
+            score += _EXACT_AMOUNT_POINTS
+            flags.append(f"amount+{_EXACT_AMOUNT_POINTS} exact")
+        elif fee_free is not None and abs(fee_free - amount) <= _TOL:
+            score += _EXACT_AMOUNT_POINTS
+            flags.append(f"amount+{_EXACT_AMOUNT_POINTS} exact less the 4% fee")
+        elif total > 0 and abs(total - amount) <= max(1.0, total * 0.05):
+            score += _NEAR_AMOUNT_POINTS
+            flags.append(f"amount+{_NEAR_AMOUNT_POINTS} within 5%")
+        else:
+            flags.append("amount+0")
 
         candidates.append(InvoiceCandidate(invoice=inv, score=score, flags=flags))
 

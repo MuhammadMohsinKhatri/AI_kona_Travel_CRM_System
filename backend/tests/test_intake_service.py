@@ -291,19 +291,29 @@ def test_a_check_already_recorded_in_konaos_is_not_recorded_again():
         db.close()
 
 
-def test_a_check_that_matches_no_amount_is_not_matched_on_the_name_alone():
-    """$100 against a $136.40 invoice: the payer name fits and nothing else
-    does. A name is OCR of handwriting — on its own it is not enough to mark
-    somebody's invoice paid, so this asks instead of deciding."""
+def test_a_name_match_on_a_disagreeing_amount_is_found_but_never_applied_alone():
+    """$100 against a $131.44 balance: the name fits, the money does not.
+
+    This is the trade at the heart of matching on who-and-when. The invoice IS
+    identified — refusing to would leave the office hunting for it by hand — but
+    it does not settle itself, because a figure that disagrees is either a part
+    payment or a misread digit, and those are indistinguishable from here.
+    A person sees it, with the discrepancy spelled out.
+    """
     db = _fresh_db()
     try:
         _, inv = _seed(db)
         review = svc.review_check(
             db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=100.00))
 
-        assert review.plan is None
-        assert review.match.needs_choice
-        assert review.match.candidates[0].id == "inv-thrift"   # shown, not chosen
+        assert review.plan is not None                 # found
+        assert review.plan.invoice_id == "inv-thrift"
+        assert review.plan.status == "underpaid"
+        assert "31.44 short" in " ".join(review.plan.warnings)
+
+        ok, why = svc.auto_applicable_check(review)    # but not written
+        assert not ok
+        assert "short" in why.lower()
     finally:
         db.close()
 

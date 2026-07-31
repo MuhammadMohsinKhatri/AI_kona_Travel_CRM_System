@@ -65,12 +65,48 @@ def test_is_settled_recognises_the_terminal_states():
     assert not is_settled({"invoiceStatus": "draft"})
 
 
-def test_a_name_alone_is_not_enough_to_settle_a_payment():
-    """Name-only, on an amount matching nothing: a wrong match here marks another
-    customer's invoice paid, so the floor is deliberately high."""
+def test_a_full_name_match_identifies_the_invoice_on_its_own():
+    """Brett's rule: match on who and when, not on how much.
+
+    The amount is the field least often in agreement — a cheque covers several
+    invoices, or arrives before one is drafted, or the client rounds — while the
+    name on the cheque and the name on the invoice usually agree exactly. What
+    stops a name-only match from being dangerous is not refusing to make it, but
+    refusing to APPLY it unattended: see the auto-apply tests in
+    test_intake_service.
+    """
     r = match_invoice([JONES], "JONES ELEMENTARY SCHOOL PTA", 9999.00)
-    assert r.invoice is None
-    assert r.needs_choice
+    assert r.invoice_id == "inv-jones"
+    assert any("name+50" in f for f in r.candidates[0].flags)
+
+
+def test_the_check_date_separates_two_invoices_to_the_same_customer():
+    """Where the name ties, the date is what a person would use — and it is on
+    the cheque, printed or handwritten, on nearly every one."""
+    june = {**JONES, "id": "inv-june", "invoiceNumber": "00860"}
+    r = match_invoice(
+        [JONES, june], "JONES ELEMENTARY SCHOOL PTA", 9999.00,
+        check_date="2026-07-30",
+        event_meta={
+            "inv-jones": {"event_name": "Jones Field Day", "event_date": "2026-07-28"},
+            "inv-june": {"event_name": "Jones Spring Fair", "event_date": "2026-02-01"},
+        },
+    )
+    assert r.invoice_id == "inv-jones"
+    assert any("date+20" in f for f in r.candidates[0].flags)
+
+
+def test_a_cheque_written_to_the_event_rather_than_the_business_still_matches():
+    """"Featherbed Lane Elementary" on the cheque, "Baltimore County Public
+    Schools" on the invoice. Scoring the business name alone threw these away."""
+    inv = {**JONES, "businessName": "Baltimore County Public Schools"}
+    r = match_invoice(
+        [inv], "FEATHERBED LANE ELEMENTARY SCHOOL", 9999.00,
+        event_meta={"inv-jones": {"event_name": "Featherbed Lane Elementary",
+                                  "event_date": ""}},
+    )
+    assert r.invoice_id == "inv-jones"
+    assert any("event name" in f for f in r.candidates[0].flags)
 
 
 def test_two_invoices_that_match_equally_ask_which():
