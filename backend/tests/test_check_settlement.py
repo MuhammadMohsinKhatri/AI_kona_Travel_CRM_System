@@ -193,11 +193,17 @@ def test_the_plan_is_derivable_from_the_calculations_block():
     assert plan.status == "exact"
 
 
-def test_an_invoice_that_never_had_a_fee_says_so():
+def test_an_invoice_that_never_had_a_fee_says_so_without_hesitating():
+    """A NOTE, not a warning. Most check-paid events never carry a fee — the
+    classifier reads "paid by check" in the notes and the engine skips it at
+    drafting time — so treating that as a caveat would stop the cleanest cheques
+    from settling themselves, since auto-apply refuses on any warning."""
     no_fee = {**THRIFTBOOKS, "grandTotal": 131.44}
     plan = build_settle_plan(no_fee, 131.44, fee_free_total=131.44)
     assert plan.cc_fee_removed == 0
-    assert any("no 4% processing fee" in w for w in plan.warnings)
+    assert any("nothing to take off" in n for n in plan.notes)
+    assert plan.warnings == []           # nothing here should give pause
+    assert plan.status == "exact"
 
 
 def test_a_missing_fee_free_figure_is_warned_about_not_guessed():

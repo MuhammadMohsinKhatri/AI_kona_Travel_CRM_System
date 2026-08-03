@@ -494,7 +494,11 @@ export interface SettlePlan {
   variance: number;
   status: "exact" | "underpaid" | "overpaid";
   fully_paid: boolean;
+  /** Reasons to hesitate. Any warning stops the cheque settling itself. */
   warnings: string[];
+  /** Worth saying, but not a reason to hesitate — e.g. "this invoice never
+   *  carried a card fee", which is the ordinary state of a check-paid event. */
+  notes: string[];
 }
 
 export interface CheckReview {

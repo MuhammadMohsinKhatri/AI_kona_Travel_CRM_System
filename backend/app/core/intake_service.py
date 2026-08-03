@@ -43,6 +43,14 @@ def _r2(v: float) -> float:
     return round(float(v or 0) + 0.0, 2)
 
 
+def _money(v: Any) -> float:
+    """A KonaOS money field as a float. They arrive as numbers or as strings."""
+    try:
+        return float(str(v).replace(",", "").replace("$", "").strip() or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # ── checks ───────────────────────────────────────────────────────────────────
 
 
@@ -57,7 +65,9 @@ def _local_invoice(db: Session, crm_invoice_id: str) -> Optional[Invoice]:
     )
 
 
-def fee_free_total(db: Session, crm_invoice_id: str) -> Optional[float]:
+def fee_free_total(
+    db: Session, crm_invoice_id: str, invoice_total: Optional[float] = None
+) -> Optional[float]:
     """What this invoice comes to once the 4% processing fee is taken off.
 
     Computed by re-running the billing engine with ``waive_cc_fee=True``, never
@@ -66,16 +76,25 @@ def fee_free_total(db: Session, crm_invoice_id: str) -> Optional[float]:
     of drift is exactly what turns "paid in full" into "underpaid by $0.01" and
     parks the event on Needs Attention for nothing.
 
-    None when there is no figure we can stand behind, and the caller then says
-    so rather than inventing one. That happens in two ways:
+    Two things must be true before a penny is taken off, and neither was checked
+    before — which is how a $250 invoice carrying NO fee was presented as owing
+    $222.60 "less the 4% card fee" of $27.40, a figure that is not 4% of
+    anything on the document:
 
-      * we hold no local record of the invoice (drafted outside this system, or
-        the event has since been deleted); or
-      * the invoice total came from an amount stated in the notes rather than
-        from the engine. A stated "$136.40" wins over the calculation, so
-        re-running with the fee waived returns the same number — and how much of
-        somebody's typed total was processing fee is not knowable. Reporting
-        "no fee to remove" there would be a guess dressed as arithmetic.
+      1. **A fee has to have been charged.** Most check-paid events never carry
+         one: the classifier sees "paid by check" in the notes and the engine
+         skips it at drafting time. Removing a fee that was never added invents
+         a discount.
+      2. **Our recomputation has to reproduce the invoice KonaOS actually
+         holds.** If re-running the classification does not land on the same
+         grand total, then the invoice was built from something we can no longer
+         reconstruct — an edit in KonaOS, a since-changed note, a stale snapshot
+         — and the difference between the two figures is NOT a processing fee.
+         Presenting it as one is worse than declining: it is a wrong number
+         wearing a confident label.
+
+    None whenever we cannot stand behind the figure; the caller then says so and
+    the check waits for a person.
     """
     invoice = _local_invoice(db, crm_invoice_id)
     if invoice is None:
@@ -83,11 +102,28 @@ def fee_free_total(db: Session, crm_invoice_id: str) -> Optional[float]:
     event = db.get(Event, invoice.event_id)
     if event is None or not event.classification:
         return None
-    calc = billing.calculate_invoice(event.classification, waive_cc_fee=True)
-    if float(calc.get("AI_EXTRACTED_INVOICE_AMOUNT") or 0) > 0:
+
+    # As the invoice was actually billed — the baseline everything else is
+    # checked against.
+    as_billed = billing.calculate_invoice(event.classification)
+    # A total stated in the notes overrides the engine, so waiving the fee
+    # changes nothing and how much of somebody's typed figure was fee is
+    # unknowable.
+    if float(as_billed.get("AI_EXTRACTED_INVOICE_AMOUNT") or 0) > 0:
         return None
-    total = float(calc.get("FINAL_INVOICE_AMOUNT") or 0)
-    return _r2(total) if total > 0 else None
+    billed = _r2(as_billed.get("FINAL_INVOICE_AMOUNT") or 0)
+    if billed <= 0:
+        return None
+
+    if invoice_total is not None and abs(billed - _r2(invoice_total)) > 0.02:
+        return None                                    # guard 2
+
+    if _r2(as_billed.get("CC_FEE") or 0) <= 0:         # guard 1
+        return _r2(invoice_total if invoice_total is not None else billed)
+
+    without = billing.calculate_invoice(event.classification, waive_cc_fee=True)
+    total = _r2(without.get("FINAL_INVOICE_AMOUNT") or 0)
+    return total if total > 0 else None
 
 
 def fee_free_totals(db: Session, invoices: list[dict[str, Any]]) -> dict[str, float]:
@@ -102,7 +138,9 @@ def fee_free_totals(db: Session, invoices: list[dict[str, Any]]) -> dict[str, fl
         # Settled invoices included: the matcher scores them so it can say
         # "already paid", and that message quotes the check-payable figure.
         inv_id = str(inv.get("id") or "")
-        total = fee_free_total(db, inv_id)
+        # The invoice's own total is passed in so the recomputation can be
+        # checked against it rather than trusted blind. See fee_free_total.
+        total = fee_free_total(db, inv_id, _money(inv.get("grandTotal")))
         if total is not None:
             out[inv_id] = total
     return out
@@ -858,6 +896,7 @@ def check_review_json(
             "status": plan.status,
             "fully_paid": plan.fully_paid,
             "warnings": plan.warnings,
+            "notes": plan.notes,
         },
     }
 

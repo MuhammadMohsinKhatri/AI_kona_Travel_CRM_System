@@ -665,6 +665,13 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                   ⚠ {w}
                 </p>
               ))}
+              {/* Notes, not warnings — stated plainly and without an alarm
+                  glyph, because they are not reasons to stop. */}
+              {plan.notes?.map((n) => (
+                <p key={n} className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+                  {n}
+                </p>
+              ))}
               <button
                 className="btn primary"
                 style={{ marginTop: 12 }}

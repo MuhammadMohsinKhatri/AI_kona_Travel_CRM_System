@@ -986,3 +986,63 @@ def test_applying_a_split_cheque_settles_every_invoice_in_it():
         assert {i.status for i in db.query(Invoice).all()} == {"paid"}
     finally:
         db.close()
+
+
+# ── a fee is only removed when one was actually charged ──────────────────────
+
+def test_no_fee_is_removed_from_an_invoice_that_never_carried_one():
+    """From production, on a $250 invoice showing "CC fee waived / CC fee $0.00":
+
+        Invoice in KonaOS now    $250.00
+        Less the 4% card fee     -$27.40
+        Client owes              $222.60
+
+    $27.40 is not 4% of $250 — it is not 4% of anything on that document. The
+    fee-free figure was recomputed and the DIFFERENCE from KonaOS's total was
+    labelled a card fee. Most check-paid events carry no fee at all: the
+    classifier reads "paid by check" in the notes and the engine skips it at
+    drafting time.
+    """
+    db = _fresh_db()
+    try:
+        # PAID_STATUS TRUE + PAYMENT_METHOD CHECK → the engine never adds the fee.
+        _, inv = _seed(db, classification={**CLASSIFICATION, "PAID_STATUS": "TRUE"})
+        billed = inv["grandTotal"]
+
+        assert svc.fee_free_total(db, "inv-thrift", billed) == billed
+
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=billed))
+        assert review.plan.cc_fee_removed == 0
+        assert review.plan.amount_due_after_fee == billed
+        assert review.plan.status == "exact"
+        # A note, not a warning — so it still settles itself.
+        assert review.plan.warnings == []
+        assert svc.auto_applicable_check(review)[0]
+    finally:
+        db.close()
+
+
+def test_no_fee_free_figure_when_our_recompute_disagrees_with_the_invoice():
+    """The guard that would have caught the $27.40 outright.
+
+    If re-running the classification doesn't land on the grand total KonaOS
+    holds, the invoice was built from something we can no longer reconstruct —
+    an edit in KonaOS, a since-changed note — and the gap between the two
+    figures is not a processing fee. Declining beats presenting a wrong number
+    under a confident label.
+    """
+    db = _fresh_db()
+    try:
+        _, inv = _seed(db)
+        # KonaOS holds a different total from anything our classification makes.
+        assert svc.fee_free_total(db, "inv-thrift", 250.00) is None
+
+        inv["grandTotal"] = 250.00
+        review = svc.review_check(
+            db, FakeCRM([inv]), CheckRead(payer_name="ThriftBooks", amount=250.00))
+        assert review.plan.cc_fee_removed == 0
+        assert any("couldn't recompute" in w.lower() for w in review.plan.warnings)
+        assert not svc.auto_applicable_check(review)[0]   # a person looks
+    finally:
+        db.close()

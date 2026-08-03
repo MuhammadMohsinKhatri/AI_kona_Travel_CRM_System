@@ -559,6 +559,12 @@ class SettlePlan:
 
     payment_method: str = "CHECK"
     warnings: list[str] = field(default_factory=list)
+    # Things worth saying that are NOT reasons to hesitate. Kept apart from
+    # warnings because auto-apply refuses on any warning, and "this invoice
+    # never carried a card fee" is the ordinary state of a check-paid event —
+    # treating it as a caveat would stop exactly the cleanest cheques from
+    # settling themselves.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def settles_cleanly(self) -> bool:
@@ -620,8 +626,9 @@ def build_settle_plan(
         )
 
     if plan.cc_fee_removed <= 0:
-        plan.warnings.append(
-            "This invoice carried no 4% processing fee, so nothing was removed."
+        plan.notes.append(
+            "This invoice carried no 4% processing fee, so there was nothing to "
+            "take off — the client owes what the invoice says."
         )
     if not plan.event_id:
         plan.warnings.append(
