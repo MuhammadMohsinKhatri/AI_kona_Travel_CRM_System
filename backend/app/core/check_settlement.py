@@ -432,6 +432,22 @@ def match_invoice(
         )
 
     best = open_ones[0]
+
+    # An already-paid invoice that fits BETTER than anything still open ends it.
+    # Offering the open one anyway is how the Arbutus cheque — paid weeks ago,
+    # its memo naming its own event — came to be offered against a different
+    # customer's invoice that merely shared its total. Recording that would take
+    # one payment and post it to two places, one of them wrong.
+    if paid_hit and paid_hit.score >= best.score:
+        return InvoiceMatch(
+            None,
+            _already_paid_note(paid_hit),
+            candidates[:5],
+            needs_choice=False,      # nothing to choose: there is nothing to do
+            settled=paid_hit,
+            combination=combo,
+        )
+
     if best.score < MIN_CONFIDENT_SCORE:
         return InvoiceMatch(
             None,
@@ -598,6 +614,10 @@ def build_settle_plan(
 
     if fee_free_total is None and calc:
         fee_free_total = _num(calc.get("FINAL_INVOICE_AMOUNT")) - _num(calc.get("CC_FEE"))
+    # Whether the fee position is KNOWN, as against assumed. When it isn't, the
+    # figures below are the invoice as it stands and nothing may be claimed
+    # about a fee either way.
+    fee_is_known = fee_free_total is not None
     if fee_free_total is None:
         fee_free_total = plan.invoice_total
         plan.warnings.append(
@@ -625,7 +645,10 @@ def build_settle_plan(
             f"${plan.amount_due_after_fee:,.2f} due."
         )
 
-    if plan.cc_fee_removed <= 0:
+    # Only claimable when the fee position is known. Saying "this carried no
+    # fee" directly beneath "couldn't work out whether it carried one" is a
+    # contradiction, and the reader has to decide which half to believe.
+    if plan.cc_fee_removed <= 0 and fee_is_known:
         plan.notes.append(
             "This invoice carried no 4% processing fee, so there was nothing to "
             "take off — the client owes what the invoice says."

@@ -1046,3 +1046,57 @@ def test_no_fee_free_figure_when_our_recompute_disagrees_with_the_invoice():
         assert not svc.auto_applicable_check(review)[0]   # a person looks
     finally:
         db.close()
+
+
+def test_a_paid_cheque_is_never_offered_against_a_different_customers_invoice():
+    """From production, and the worst thing this system has done so far.
+
+    The Arbutus cheque — $250, memo naming its own event, already settled as
+    invoice 00809 — was reported "already paid" AND, directly underneath, matched
+    to Sherman Early Childhood Center's open invoice with an "Approve this check"
+    button. Sherman's invoice merely shared the total (name+0, amount+50).
+    Approving would have taken one payment and posted it to two places, the
+    second of them somebody else's.
+
+    An already-paid invoice that fits BETTER than anything still open ends it.
+    """
+    db = _fresh_db()
+    try:
+        _, arbutus = _seed(db, crm_event_id="ev-arb", crm_invoice_id="inv-arb",
+                           name="Arbutus Senior Center", event_date="2026-07-27")
+        _, sherman = _seed(db, crm_event_id="ev-sher", crm_invoice_id="inv-sher",
+                           name="Sherman Early Childhood Center",
+                           event_date="2026-07-29")
+        arbutus["invoiceStatus"] = "paid"          # settled weeks ago
+
+        review = svc.review_check(
+            db, FakeCRM([arbutus, sherman]),
+            CheckRead(payer_name="Arbutus Senior Center Council",
+                      amount=WITHOUT_FEE, check_date="2026-07-23",
+                      memo="Refreshments for Christmas in July, 07/27/2026"))
+
+        assert review.match.settled is not None
+        assert review.match.settled.id == "inv-arb"
+        # Nothing to approve, and nothing offered.
+        assert review.plan is None
+        assert review.match.invoice is None
+        assert not review.match.needs_choice
+        assert not svc.auto_applicable_check(review)[0]
+    finally:
+        db.close()
+
+
+def test_an_unknowable_fee_position_is_not_also_reported_as_no_fee():
+    """The card said "Couldn't recompute the invoice without the 4% fee" and,
+    two lines down, "This invoice carried no 4% processing fee". Both cannot be
+    true, and the reader has to pick which half to believe."""
+    from app.core.check_settlement import build_settle_plan
+
+    inv = {"id": "i", "eventId": "e", "grandTotal": 250.00}
+    unknown = build_settle_plan(inv, 250.00)
+    assert any("couldn't recompute" in w.lower() for w in unknown.warnings)
+    assert unknown.notes == []                     # claims nothing about a fee
+
+    known = build_settle_plan(inv, 250.00, fee_free_total=250.00)
+    assert known.warnings == []
+    assert any("carried no 4% processing fee" in n for n in known.notes)
