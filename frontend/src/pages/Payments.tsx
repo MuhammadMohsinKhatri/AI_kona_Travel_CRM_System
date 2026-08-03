@@ -371,6 +371,13 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   // wrong thing to show: it invites confirming a payment already recorded.
   const applied = review?.applied ?? null;
   const canCapture = captureIsPossible();
+  // "Already paid" is the whole answer only when there is nothing to do with
+  // this cheque — no invoice to settle and no split. When a real match sits
+  // beside it, the same block would be flatly wrong ("nothing to do" beneath a
+  // button that does something), so it becomes a caution instead.
+  const paidHit = review?.already_paid ?? null;
+  const settledIsTheAnswer =
+    !!paidHit && !plan && !(review?.split?.length ?? 0);
 
   return (
     <div className="card" style={{ marginBottom: 18 }}>
@@ -510,7 +517,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
           because the action here is "put the cheque down" — and a person told
           only that nothing matched goes looking for an invoice that was dealt
           with weeks ago, or worse, records the payment a second time. */}
-      {review?.already_paid && (
+      {settledIsTheAnswer && paidHit && (
         <div
           className="card"
           style={{
@@ -521,16 +528,16 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         >
           <div style={{ fontWeight: 700 }}>✅ Already paid — nothing to do</div>
           <p style={{ marginBottom: 4 }}>
-            {review.already_paid.event_name || review.already_paid.business_name}
-            {review.already_paid.event_date && (
-              <span className="muted"> · {review.already_paid.event_date}</span>
+            {paidHit.event_name || paidHit.business_name}
+            {paidHit.event_date && (
+              <span className="muted"> · {paidHit.event_date}</span>
             )}
           </p>
           <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
-            Invoice {review.already_paid.invoice_number || review.already_paid.id} ·{" "}
-            {money(review.already_paid.grand_total)}
-            {review.already_paid.total_without_fee != null && (
-              <> · {money(review.already_paid.total_without_fee)} paid by check,
+            Invoice {paidHit.invoice_number || paidHit.id} ·{" "}
+            {money(paidHit.grand_total)}
+            {paidHit.total_without_fee != null && (
+              <> · {money(paidHit.total_without_fee)} paid by check,
                 after the 4% card fee came off</>
             )}
           </p>
@@ -602,7 +609,18 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         </div>
       )}
 
-      {review && !applied && (
+      {/* An already-paid invoice noted BESIDE a live match — a caution, not a
+          conclusion. Same payer, already settled: worth a second look before
+          recording, in case this is that cheque arriving twice. */}
+      {paidHit && !settledIsTheAnswer && (
+        <p className="muted" style={{ color: "var(--warn)", marginTop: 12 }}>
+          ⚠ Invoice {paidHit.invoice_number || paidHit.id} for{" "}
+          {paidHit.event_name || paidHit.business_name} is already paid. Check
+          this isn't the same cheque before recording it.
+        </p>
+      )}
+
+      {review && !applied && !settledIsTheAnswer && (
         <>
           <p style={{ marginTop: 14, marginBottom: 6 }}>{review.reason}</p>
           {review.held_because && (
