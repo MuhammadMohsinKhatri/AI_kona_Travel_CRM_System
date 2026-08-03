@@ -1,6 +1,11 @@
-# Deploying to Hostinger VPS (KVM 2)
+# Deploying to Hostinger VPS
 
-Step-by-step for a fresh Hostinger KVM 2 (2 vCPU / 8 GB RAM). Total time: ~20 minutes.
+Step-by-step for a fresh Hostinger VPS. Total time: ~20 minutes.
+
+> **Buying the server is a separate document.** [CLIENT-VPS-SETUP.md](CLIENT-VPS-SETUP.md)
+> is written for the client: creating the Hostinger account, choosing the plan and
+> OS, and handing over access without a password crossing a chat window. Send them
+> that one; this file starts once you can SSH in.
 
 ## 0. Create the VPS
 
@@ -142,8 +147,25 @@ need the manual `git pull` + `up -d` on the VPS — Watchtower only swaps images
 | New KonaOS session key | paste in dashboard (API Explorer → KonaOS Session) — no restart needed |
 | Disk usage | `docker system df` · prune old images: `docker image prune -af` |
 
-## Sizing notes (KVM 2: 2 vCPU / 8 GB)
+## Sizing notes
 
-The compose file caps memory per service (total ~2.1 GB) — comfortable headroom.
-Celery worker runs `--concurrency=2` to match the 2 vCPUs. If you ever see OOM,
-check `docker stats` — but at this workload you won't.
+The compose file caps memory per service (total ~2.1 GB) and runs the Celery
+worker at `--concurrency=2`.
+
+**On KVM 2** (2 vCPU / 8 GB) those defaults are right: concurrency matches the
+core count and there is comfortable memory headroom.
+
+**On KVM 4** (4 vCPU / 16 GB) they are conservative — half the cores sit idle
+during a run. Raising the worker to `--concurrency=4` roughly halves the wall
+clock of a large backfill:
+
+```bash
+# in docker-compose.prod.yml, the `worker` service command
+celery -A app.tasks.celery_app.celery worker --loglevel=info --concurrency=4
+```
+
+Left at 2 by default deliberately: the setting is shared with the existing KVM 2
+box, and a nightly run of ordinary size finishes comfortably either way. Change
+it when a backfill is slow enough to notice, not before.
+
+If you ever see OOM, check `docker stats` — but at this workload you won't.
