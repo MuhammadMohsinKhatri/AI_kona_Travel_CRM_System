@@ -1,8 +1,19 @@
-# Production stack for a small VPS (Hostinger KVM 1/2 class).
+# Production stack for a small VPS (Hostinger KVM 1/2/4 class).
+#
 #   cp backend/.env.example backend/.env   # then fill in real values
-#   DOMAIN=ops.example.com docker compose -f docker-compose.prod.yml up -d --build
-# Without a domain yet:
-#   docker compose -f docker-compose.prod.yml up -d --build   (serves on port 80)
+#
+# The root .env selects how the app is exposed (see the `caddy` service):
+#
+#   On a domain, with HTTPS:        On an IP, sharing the box with
+#                                   another ingress on 80/443:
+#     DOMAIN=ops.example.com          (leave all three unset)
+#     WEB_PORT=80                     -> http://<vps-ip>:8081
+#     TLS_PORT=443
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Check what the variables resolved to before launching:
+#   docker compose -f docker-compose.prod.yml config | grep -A3 -E 'DOMAIN|published'
 
 services:
   db:
@@ -150,14 +161,25 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      # Ports 80/443 on this VPS are owned by another ingress (Traefik, fronting
-      # oneclick). To coexist, konaice serves plain HTTP on its own host port.
-      # App is reachable at http://<vps-ip>:${WEB_PORT:-8081}
+      # Two layouts, selected entirely from the root .env:
+      #
+      #  Own the standard ports (a box where nothing else holds them) — set
+      #  WEB_PORT=80, TLS_PORT=443 and DOMAIN=ops.example.com. Caddy then gets a
+      #  Let's Encrypt certificate on its own; both ports must be published for
+      #  the ACME challenge to complete and for http:// to redirect to https://.
+      #
+      #  Share the box with another ingress (the KVM 2, where Traefik owns
+      #  80/443) — leave all three unset. The defaults below keep konaice on its
+      #  own host ports, reachable at http://<vps-ip>:8081, no TLS.
       - "${WEB_PORT:-8081}:80"
+      - "${TLS_PORT:-8443}:443"
     environment:
-      # Caddy listens on container :80 (plain HTTP). TLS/domain is not used here
-      # because we're behind a distinct host port, not the 80/443 ingress.
-      DOMAIN: ":80"
+      # A bare ":80" makes Caddy serve plain HTTP on any hostname and skip ACME
+      # entirely; a hostname turns on automatic HTTPS. Defaulted here rather
+      # than left to the Caddyfile because an empty DOMAIN is not a valid site
+      # address — Caddy exits and the container crash-loops (fixed once in
+      # 8aaa020, kept fixed by this default).
+      DOMAIN: "${DOMAIN:-:80}"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

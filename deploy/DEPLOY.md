@@ -29,17 +29,48 @@ fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ```
 
-## 2. Get the code onto the VPS
+Those rules cover the domain layout (`WEB_PORT=80` / `TLS_PORT=443`). On the
+8081 layout, add it for consistency:
 
-Either push this project to a private Git repo and clone it, or copy it directly
-from your PC (run this **on your Windows machine**, PowerShell):
-
-```powershell
-scp -r "C:\Cursor Projects\Finance Automation KonaIce" root@YOUR_VPS_IP:/opt/konaice
+```bash
+ufw allow 8081/tcp
 ```
 
-(Delete `backend/.venv` and `frontend/node_modules` first or exclude them — they are
-rebuilt inside Docker and only slow down the copy.)
+**But do not rely on ufw to close a Docker port.** Docker publishes ports with
+DNAT rules in the `nat` table that are evaluated before ufw's INPUT chain, so
+anything in `ports:` is reachable from the internet whether ufw lists it or not
+— and conversely, `ufw deny 8081` would not close it. What actually keeps the
+database and Redis private is that this compose file never publishes them: they
+are reachable only on the internal Docker network. Check exposure with
+`docker compose -f docker-compose.prod.yml ps`, which shows the real published
+set, rather than inferring it from `ufw status`.
+
+## 2. Get the code onto the VPS
+
+Clone it. The server only needs the compose file, the Caddyfile and the backup
+scripts — the application itself arrives as prebuilt images from GHCR — but a
+real checkout is what makes `git pull` updates possible later.
+
+```bash
+git clone https://github.com/MuhammadMohsinKhatri/AI_kona_Travel_CRM_System.git /opt/konaice
+```
+
+If the repository has been made private again, that clone will prompt for a
+password and fail (GitHub stopped accepting account passwords over HTTPS in
+2021). Use a read-only deploy key instead — generate it **on the VPS**, so the
+private half never travels:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/konaice_deploy -N ''
+cat ~/.ssh/konaice_deploy.pub     # add this in GitHub: repo -> Settings -> Deploy keys
+printf 'Host github.com\n  IdentityFile ~/.ssh/konaice_deploy\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+git clone git@github.com:MuhammadMohsinKhatri/AI_kona_Travel_CRM_System.git /opt/konaice
+```
+
+Copying the tree from your PC with `scp -r` also works, but leaves a directory
+that is not a git checkout, so every later update becomes another manual copy.
+If you do it, exclude `backend/.venv` and `frontend/node_modules` — they are
+rebuilt inside Docker and only slow the transfer.
 
 ## 3. Configure the environment
 
@@ -70,43 +101,187 @@ echo 'POSTGRES_PASSWORD=<random-strong-password>' > .env
 
 ## 4. Launch
 
-With a domain (point an A record at the VPS IP first — Caddy then gets HTTPS automatically):
+**With a domain** — create the DNS A record *first* and wait for it to resolve.
+Caddy proves it controls the name over ports 80 and 443; if the record does not
+point here yet, the certificate request fails and Caddy retries with a backoff,
+so a premature launch means an unreachable site for several minutes rather than
+an instant error.
 
 ```bash
-echo 'DOMAIN=ops.your-domain.com' >> .env
-docker compose -f docker-compose.prod.yml up -d --build
+cat >> .env <<'EOF'
+DOMAIN=ops.your-domain.com
+WEB_PORT=80
+TLS_PORT=443
+EOF
+docker compose -f docker-compose.prod.yml config | grep -E 'DOMAIN|published'   # confirm before launching
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-Without a domain yet (plain HTTP on the IP):
+Verify the record has propagated before that last command:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+getent hosts ops.your-domain.com     # must print this server's IP
 ```
 
-First build takes ~5 minutes. Then open `https://ops.your-domain.com` (or `http://YOUR_VPS_IP`).
+**Without a domain** — plain HTTP on port 8081, no certificate:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Images come from GHCR (both packages are public, so no `docker login`), which
+takes a couple of minutes. Add `--build` only to compile locally instead — needed
+if you are testing an uncommitted change, and it takes ~5 minutes.
+
+Then open `https://ops.your-domain.com` (or `http://YOUR_VPS_IP:8081`).
 
 ## 5. Verify
 
 ```bash
-docker compose -f docker-compose.prod.yml ps        # all services Up (healthy)
-curl -s localhost/health                            # {"status":"ok",...}
-docker compose -f docker-compose.prod.yml logs -f backend   # watch logs
+docker compose -f docker-compose.prod.yml ps                 # all services Up (healthy)
+curl -s localhost/health                                     # port-80 layout
+curl -s localhost:8081/health                                # 8081 layout
+docker compose -f docker-compose.prod.yml logs -f backend    # watch logs
 ```
+
+`/health` reports a `build` field — the short commit the running backend image
+was built from. That is the only reliable way to tell which code is live, since
+a backend-only change moves no frontend asset and nothing else observable.
 
 Log in, check **API Explorer → KonaOS Session** shows `connected`, run the
 pipeline for a date, confirm drafts appear (dry-run).
 
-## 6. Going fully live
+## 6. Moving an existing server to a new one
 
-When the dry-run drafts look right:
+Skip this section for a first-time install. It applies when a live box already
+exists and this new one replaces it.
+
+**The hazard, first.** Two armed instances pointed at the same KonaOS account
+will both write. It is not only the nightly run: `rerun-changed-events` re-runs
+recently-changed events **every hour**, and `app/tasks/celery_app.py` records an
+invoice-duplication bug that is guarded against, not root-caused. Duplicate
+drafts against real client invoices are painful to unpick by hand. So the new
+box stays disarmed until the old one is switched off — never both at once.
+
+### 6a. Bring the new box up disarmed
+
+In the new box's `backend/.env`, before the first launch:
+
+```
+PIPELINE_DRY_RUN=true
+```
+
+Set it explicitly. `pipeline_dry_run` defaults to **False** in `app/config.py`,
+so a `.env` that simply omits the key comes up *armed* — the safe state is the
+one you have to ask for. Confirm it took effect by reading `pipeline_dry_run`
+back from `/health` rather than assuming.
+
+A dry run computes everything and writes nothing to KonaOS, which is exactly
+what you want while validating. Belt and braces, keep the scheduler down too:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml stop beat
+```
+
+`beat` is the only thing that fires timed work; with it stopped, nothing runs
+unless you click it. The worker stays up so manual runs still work.
+
+### 6b. Copy the database across
+
+On the **old** box, take a fresh dump:
+
+```bash
+/opt/konaice/deploy/backup.sh && ls -lh /opt/konaice/backups | tail -3
+```
+
+On the **new** box, pull that file over and restore it. You will be prompted for
+the old server's root password — type it yourself; it does not need to be shared
+with anyone:
+
+```bash
+mkdir -p /opt/konaice/backups
+scp root@OLD_VPS_IP:/opt/konaice/backups/konaice-<stamp>.sql.gz /opt/konaice/backups/
+chmod +x /opt/konaice/deploy/restore.sh
+/opt/konaice/deploy/restore.sh /opt/konaice/backups/konaice-<stamp>.sql.gz
+```
+
+The restore drops and recreates every table in the dump, which on a
+freshly-created database is harmless — there is nothing to lose yet. It also
+brings the **old admin logins** with it, so log in with the existing
+credentials, not new ones. `seed_admin` in `app/bootstrap.py` looks for a user
+matching `FIRST_ADMIN_EMAIL` specifically: if the restored data already has that
+address it changes nothing (your old password stands, and editing
+`FIRST_ADMIN_PASSWORD` will not reset it), and if you set a different address
+you simply get one extra admin account alongside the restored ones.
+
+### 6c. Carry over the secrets
+
+`backend/.env` is deliberately excluded from backups, so it does not travel with
+the dump. Print it on the old box and paste it into `nano` on the new one:
+
+```bash
+cat /opt/konaice/backend/.env          # on the OLD box
+```
+
+Carry every value over verbatim **except** these, which are per-server:
+
+| Key | New value |
+|---|---|
+| `BACKEND_CORS_ORIGINS` | the new address — `https://ops.your-domain.com` |
+| `PIPELINE_DRY_RUN` | `true` until cutover |
+
+`KONAOS_SESSION_KEY` is worth carrying over even though it will be refreshed
+automatically — it saves a login round trip on first start. The `konaos_cache`
+volume is *not* migrated and does not need to be; it is rebuilt on demand.
+
+Store this file in a password manager the same day. Without it a restore comes
+back with all the data and no way to reach KonaOS.
+
+### 6d. Validate on real data, still disarmed
+
+With the old box still serving live, run a date through the new box in dry-run
+and compare against what the old one produced for that same date. Check event
+counts, invoice totals and the classification of a min-guarantee event. This is
+also the moment to satisfy yourself about the two bugs listed in
+`celery_app.py`, since a dry run writes nothing.
+
+### 6e. Cut over — old box off first
+
+Order matters. Disarm the old box **before** arming the new one:
+
+```bash
+# on the OLD box — stop all writers, leave the data intact
+cd /opt/konaice && docker compose -f docker-compose.prod.yml stop backend worker beat
+```
+
+Then, on the new box:
+
+```bash
+sed -i 's/PIPELINE_DRY_RUN=true/PIPELINE_DRY_RUN=false/' backend/.env
+docker compose -f docker-compose.prod.yml up -d backend worker beat
+curl -s localhost/health        # pipeline_dry_run should now be false
+```
+
+If anything looks wrong, the old box is one `start` away from being live again —
+which is why it is stopped rather than destroyed. Keep it for a week, take a
+final dump before cancelling it, and only then let the plan lapse.
+
+Take a Hostinger snapshot of the new box once it is serving traffic
+correctly — see [BACKUPS.md](BACKUPS.md).
+
+## 7. Going fully live
+
+For a first-time install, when the dry-run drafts look right:
 
 ```bash
 sed -i 's/PIPELINE_DRY_RUN=true/PIPELINE_DRY_RUN=false/' backend/.env
 docker compose -f docker-compose.prod.yml up -d backend worker beat
 ```
 
-The nightly pipeline (2:00 AM New York) and the daily KonaOS session check
-(1:30 AM) run automatically via Celery beat.
+Celery beat then runs, all times America/New_York: the KonaOS session check at
+23:00, the nightly pipeline at 23:30, changed-event re-runs hourly at :15,
+invoice-id backfill hourly at :45, and awaiting-cash flagging at 09:00.
 
 ## Updating the app later
 
@@ -116,15 +291,27 @@ publishes them to GHCR. Watchtower on the VPS polls every 5 minutes and
 auto-pulls + restarts the changed services. **Pushing to main IS the deploy** —
 nothing to run on the server. (db/redis/caddy are unlabeled and never touched.)
 
-One-time setup for private GHCR images (already done on the prod VPS):
+Both GHCR packages are currently **public**, so nothing needs a login: the VPS
+and Watchtower pull anonymously. Verify rather than assume, from any machine:
+
+```bash
+docker manifest inspect ghcr.io/muhammadmohsinkhatri/konaice-backend:latest >/dev/null && echo public
+```
+
+If either package is ever switched back to private, Watchtower stops deploying
+and the failure is quiet — it logs the pull error and keeps the old container
+running, so the app stays up on stale code. Restore it with a read-only token:
 
 ```bash
 # PAT: github.com → Settings → Developer settings → Tokens (classic),
 # scope: read:packages only
 docker login ghcr.io -u muhammadmohsinkhatri     # paste the PAT as password
-cd /opt/konaice && git pull
-docker compose -f docker-compose.prod.yml up -d  # pulls images, adds watchtower
 ```
+
+Then uncomment the `config.json` mount on the `watchtower` service in
+`docker-compose.prod.yml` — without it Watchtower keeps pulling anonymously even
+though the host is logged in. Mount it only *after* the login has created the
+file; mounting a path that does not exist makes Docker create a directory there.
 
 **Manual fallback** (CI down, or emergency local patch on the VPS):
 
