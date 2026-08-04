@@ -169,6 +169,14 @@ key-based access and confirm the password no longer works.
 - confirmation of which **operating system** you chose
 - the **domain name**, if you set one up
 
+### One more thing, once the server exists
+
+SSH gets us *inside* the machine. Snapshots, the emergency console, plan
+upgrades and reboots live in Hostinger's panel instead — see
+**[CLIENT-HPANEL-ACCESS.md](CLIENT-HPANEL-ACCESS.md)** for what that covers, why
+the emergency console is the one that really matters, and how to revoke it.
+Five minutes, and entirely optional.
+
 ---
 
 ## Step 7 — What happens next
@@ -238,3 +246,4 @@ one-time setup.
 - [ ] Domain purchased or chosen (optional but recommended)
 - [ ] Our SSH key added, or credentials sent via secure share
 - [ ] IP address, OS choice and domain sent to us
+- [ ] hPanel access shared (optional — see CLIENT-HPANEL-ACCESS.md)
