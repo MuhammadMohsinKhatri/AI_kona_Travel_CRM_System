@@ -137,13 +137,30 @@ docker compose -f docker-compose.prod.yml up -d --build
 Note: compose-file changes (new service, ports, volumes, env_file edits) still
 need the manual `git pull` + `up -d` on the VPS — Watchtower only swaps images.
 
+## Backups
+
+Not automatic until you install the cron job — see **[BACKUPS.md](BACKUPS.md)**
+for the full picture (three layers, what each protects against, and how to
+restore). The short version, once, on the server:
+
+```bash
+chmod +x /opt/konaice/deploy/backup.sh /opt/konaice/deploy/restore.sh
+( crontab -l 2>/dev/null;   echo '15 3 * * * /opt/konaice/deploy/backup.sh >> /var/log/konaice-backup.log 2>&1' ) | crontab -
+/opt/konaice/deploy/backup.sh     # run once by hand and confirm a file appears
+```
+
+And put `backend/.env` in a password manager the day you go live. It is
+deliberately not in the backups, and without it a restore comes back with all
+the data and no way to reach KonaOS.
+
 ## Operations cheat-sheet
 
 | Task | Command |
 |---|---|
 | Restart everything | `docker compose -f docker-compose.prod.yml restart` |
 | Backend logs | `docker compose -f docker-compose.prod.yml logs -f backend worker` |
-| DB backup | `docker compose -f docker-compose.prod.yml exec db pg_dump -U konaice konaice > backup_$(date +%F).sql` |
+| DB backup, now | `/opt/konaice/deploy/backup.sh` |
+| Restore a backup | `/opt/konaice/deploy/restore.sh <file.sql.gz>` — see [BACKUPS.md](BACKUPS.md) |
 | New KonaOS session key | paste in dashboard (API Explorer → KonaOS Session) — no restart needed |
 | Disk usage | `docker system df` · prune old images: `docker image prune -af` |
 
