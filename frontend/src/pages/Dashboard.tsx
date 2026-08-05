@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, DashboardStats, PipelineRun } from "../api/client";
-import { Loading, RunEventBreakdown, StepList, money } from "../components/ui";
+import { AiBudgetStatus, api, DashboardStats, PipelineRun } from "../api/client";
+import { BudgetNote, Loading, RunEventBreakdown, StepList, money, useAiBudget } from "../components/ui";
 
 type RunPhase = "idle" | "running" | "done";
 
@@ -23,6 +23,7 @@ function todayNY(): string {
 
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const budget = useAiBudget();
   // One date drives both things: which day the tiles below describe, and which
   // day "Run" processes. Empty = all-time view (and running is disabled).
   const [targetDate, setTargetDate] = useState(todayNY());
@@ -410,6 +411,7 @@ export default function Dashboard() {
             <span className="muted" style={{ fontSize: 12, fontWeight: 500 }}>
               {" "}· {(stats.ai_usage.total_tokens / 1000).toFixed(1)}k tok
             </span>
+            <BudgetNote budget={budget} />
           </div>
         </div>
         <div className="card stat">
@@ -453,6 +455,7 @@ export default function Dashboard() {
           phase={phase}
           result={result}
           targetDate={targetDate}
+          budget={budget}
           onClose={() => setPhase("idle")}
           onBackground={sendToBackground}
           onViewRun={() => { dismissed.current = true; navigate("/runs"); }}
@@ -522,6 +525,7 @@ function RunModal({
   phase,
   result,
   targetDate,
+  budget,
   onClose,
   onBackground,
   onViewRun,
@@ -529,6 +533,7 @@ function RunModal({
   phase: RunPhase;
   result: PipelineRun | null;
   targetDate: string;
+  budget: AiBudgetStatus | null;
   onClose: () => void;
   onBackground: () => void;
   onViewRun: () => void;
@@ -578,6 +583,7 @@ function RunModal({
                   <p className="muted" style={{ marginTop: 0 }}>
                     AI usage: {((result!.ai_prompt_tokens + result!.ai_completion_tokens) / 1000).toFixed(1)}k
                     tokens · ${result!.ai_cost_usd.toFixed(3)}
+                    <BudgetNote budget={budget} />
                   </p>
                 )}
               </>

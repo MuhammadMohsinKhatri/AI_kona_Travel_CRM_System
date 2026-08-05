@@ -187,6 +187,7 @@ class CashSpeech(BaseModel):
 def _cash_payload(
     db: Session, transcript: str, entries: list[CashEntry], default_date: str,
     by: str, notes: str = "", error: str = "",
+    ai_prompt_tokens: int = 0, ai_completion_tokens: int = 0, ai_cost_usd: float = 0.0,
 ) -> dict[str, Any]:
     """Match every line the recording contained, and post the ones that are sure.
 
@@ -216,6 +217,9 @@ def _cash_payload(
         "notes": notes,
         "error": error,
         "items": items,
+        "ai_prompt_tokens": ai_prompt_tokens,
+        "ai_completion_tokens": ai_completion_tokens,
+        "ai_cost_usd": ai_cost_usd,
     }
 
 
@@ -253,6 +257,9 @@ def review_cash_voice(
     return _cash_payload(
         db, transcript or speech.transcript, speech.entries, default_date,
         user.email or "dashboard", notes=speech.notes, error=speech.error,
+        ai_prompt_tokens=speech.ai_prompt_tokens,
+        ai_completion_tokens=speech.ai_completion_tokens,
+        ai_cost_usd=speech.ai_cost_usd,
     )
 
 
@@ -268,6 +275,9 @@ def review_cash_text(
     return _cash_payload(
         db, body.transcript, speech.entries, body.default_date,
         user.email or "dashboard", notes=speech.notes, error=speech.error,
+        ai_prompt_tokens=speech.ai_prompt_tokens,
+        ai_completion_tokens=speech.ai_completion_tokens,
+        ai_cost_usd=speech.ai_cost_usd,
     )
 
 

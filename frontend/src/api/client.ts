@@ -175,6 +175,12 @@ export const api = {
     }),
   testTelegram: () =>
     request<TelegramTestResult>("/api/settings/telegram/test", { method: "POST" }),
+  aiBudget: () => request<AiBudgetStatus>("/api/settings/ai-budget"),
+  saveAiBudget: (monthly_usd: number) =>
+    request<AiBudgetStatus>("/api/settings/ai-budget", {
+      method: "PUT",
+      body: JSON.stringify({ monthly_usd }),
+    }),
   // ── Recording payments that arrive off-system ──────────────────────────
   // The intake calls settle what they can on their own and hand back what they
   // won't. `applied` on a result means it is already done in KonaOS; absent,
@@ -443,6 +449,9 @@ export interface CheckDetails {
    *  cheque's own date when matching — the memo says what the payment is FOR,
    *  the date only says when it was written. */
   memo_dates: string[];
+  ai_prompt_tokens: number;
+  ai_completion_tokens: number;
+  ai_cost_usd: number;
 }
 
 /** An invoice the check might be paying, with the scoring that put it here.
@@ -574,6 +583,9 @@ export interface CashReviewResponse {
   notes: string;
   error: string;
   items: CashReview[];
+  ai_prompt_tokens: number;
+  ai_completion_tokens: number;
+  ai_cost_usd: number;
 }
 
 export interface CheckRematchInput {
@@ -792,6 +804,19 @@ export interface TelegramSettings {
   bot_token_set: boolean;
   bot_token: string;
   configured: boolean;
+}
+
+/** This month's AI budget against real spend from OpenAI's own Costs API —
+ *  not this app's internal running total, which only covers what this app
+ *  itself called. spent_usd/remaining_usd are null (with `error` explaining
+ *  why) until an Admin API key is configured server-side. */
+export interface AiBudgetStatus {
+  month: string;
+  monthly_budget_usd: number;
+  spent_usd: number | null;
+  remaining_usd: number | null;
+  admin_key_configured: boolean;
+  error: string;
 }
 
 export interface TelegramSettingsInput {

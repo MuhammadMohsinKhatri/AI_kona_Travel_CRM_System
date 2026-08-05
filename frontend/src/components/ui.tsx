@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, EventSummary, PipelineStep } from "../api/client";
+import { AiBudgetStatus, api, EventSummary, PipelineStep } from "../api/client";
 
 export function Badge({ kind, children }: { kind: string; children: ReactNode }) {
   const map: Record<string, string> = {
@@ -52,6 +52,34 @@ export function InfoTip({ text }: { text: string }) {
 export function money(v: number | null | undefined): string {
   if (v == null) return "—";
   return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** This month's AI budget, fetched once and shared by every screen that shows
+ *  an AI cost figure (Dashboard, Record Payments). A silent null on failure —
+ *  a budget widget that can't load is not worth surfacing as an error next to
+ *  numbers that loaded fine. */
+export function useAiBudget(): AiBudgetStatus | null {
+  const [budget, setBudget] = useState<AiBudgetStatus | null>(null);
+  useEffect(() => {
+    api.aiBudget().then(setBudget).catch(() => setBudget(null));
+  }, []);
+  return budget;
+}
+
+/** "· $12.34 left this month" next to any AI cost figure. Renders nothing
+ *  when there's nothing to say — no Admin API key configured, or the Costs
+ *  API call failed — rather than repeating the same setup error next to
+ *  every cost number on the page; Settings is where that error belongs. */
+export function BudgetNote({ budget }: { budget: AiBudgetStatus | null }) {
+  if (!budget || budget.remaining_usd == null) return null;
+  const over = budget.remaining_usd < 0;
+  return (
+    <span className="muted" style={{ fontSize: 12, fontWeight: 500, color: over ? "var(--crit)" : undefined }}>
+      {" "}· {over
+        ? `$${Math.abs(budget.remaining_usd).toFixed(2)} over budget`
+        : `$${budget.remaining_usd.toFixed(2)} left`} this month
+    </span>
+  );
 }
 
 export function Loading() {

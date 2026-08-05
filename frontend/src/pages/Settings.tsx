@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TelegramSettings, TelegramTestResult, api } from "../api/client";
+import { AiBudgetStatus, TelegramSettings, TelegramTestResult, api } from "../api/client";
 import { Loading } from "../components/ui";
 
 /** Telegram alert delivery, configured at runtime rather than in .env.
@@ -22,7 +22,12 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { load(); }, []);
+  const [budget, setBudget] = useState<AiBudgetStatus | null>(null);
+  const [monthlyBudget, setMonthlyBudget] = useState("");
+  const [savingBudget, setSavingBudget] = useState(false);
+  const [budgetMsg, setBudgetMsg] = useState("");
+
+  useEffect(() => { load(); loadBudget(); }, []);
 
   function apply(c: TelegramSettings) {
     setCfg(c);
@@ -37,6 +42,31 @@ export default function Settings() {
     api.telegramSettings().then(apply).catch((e: any) =>
       setError(e?.message || "Couldn't load settings")
     );
+  }
+
+  function loadBudget() {
+    api.aiBudget().then((b) => {
+      setBudget(b);
+      setMonthlyBudget(b.monthly_budget_usd ? String(b.monthly_budget_usd) : "");
+    }).catch(() => {});
+  }
+
+  async function saveBudget() {
+    const value = parseFloat(monthlyBudget);
+    if (Number.isNaN(value) || value < 0) {
+      setBudgetMsg("Enter a number, 0 or more.");
+      return;
+    }
+    setSavingBudget(true);
+    setBudgetMsg("");
+    try {
+      setBudget(await api.saveAiBudget(value));
+      setBudgetMsg("Saved.");
+    } catch (e: any) {
+      setBudgetMsg(`Couldn't save: ${e?.message || "unknown error"}`);
+    } finally {
+      setSavingBudget(false);
+    }
   }
 
   function addChat() {
@@ -200,6 +230,63 @@ export default function Settings() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, maxWidth: 760 }}>
+        <div className="flex between" style={{ marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>AI budget</h2>
+          <span className={"badge " + (budget?.admin_key_configured ? "green" : "gray")}>
+            {budget?.admin_key_configured ? "Tracking real spend" : "Not set up"}
+          </span>
+        </div>
+        <p className="muted" style={{ fontSize: 13, margin: "0 0 16px", lineHeight: 1.55 }}>
+          A monthly ceiling, shown as "remaining" next to every AI cost figure
+          on the Dashboard and on Record Payments. Spend is the real figure
+          from OpenAI's own billing, not this app's own estimate — it needs a
+          separate Admin API key configured on the server
+          (<code className="inline">OPENAI_ADMIN_API_KEY</code>), which is
+          different from the key used to make requests. Setting a budget here
+          works either way; without that key, only the budget itself shows —
+          spend and remaining stay blank until it's added.
+        </p>
+
+        <div className="field">
+          <label htmlFor="ai-budget">Monthly budget ($)</label>
+          <input
+            id="ai-budget"
+            className="input"
+            type="number"
+            min={0}
+            step="1"
+            style={{ maxWidth: 160 }}
+            value={monthlyBudget}
+            placeholder="e.g. 50"
+            onChange={(e) => setMonthlyBudget(e.target.value)}
+          />
+        </div>
+
+        {budget?.admin_key_configured && (
+          <p className="muted" style={{ fontSize: 13 }}>
+            {budget.error ? (
+              <span style={{ color: "var(--warn)" }}>⚠ {budget.error}</span>
+            ) : (
+              <>
+                Spent so far in {budget.month}: <strong>${(budget.spent_usd ?? 0).toFixed(2)}</strong>
+                {" "}· remaining:{" "}
+                <strong style={{ color: (budget.remaining_usd ?? 0) < 0 ? "var(--crit)" : undefined }}>
+                  ${(budget.remaining_usd ?? 0).toFixed(2)}
+                </strong>
+              </>
+            )}
+          </p>
+        )}
+
+        <div className="flex" style={{ gap: 10, marginTop: 10 }}>
+          <button className="btn primary" onClick={saveBudget} disabled={savingBudget}>
+            {savingBudget ? "Saving…" : "Save budget"}
+          </button>
+          {budgetMsg && <span className="muted" style={{ fontSize: 13 }}>{budgetMsg}</span>}
+        </div>
       </div>
 
       <div className="card" style={{ maxWidth: 760 }}>

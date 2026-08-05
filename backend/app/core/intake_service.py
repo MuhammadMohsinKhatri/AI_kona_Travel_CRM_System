@@ -851,6 +851,9 @@ def check_review_json(
             # a reviewer can see the system read them — they outrank the
             # cheque's own date when scoring, and that is worth being visible.
             "memo_dates": memo_dates(check.memo, check.check_date),
+            "ai_prompt_tokens": check.ai_prompt_tokens,
+            "ai_completion_tokens": check.ai_completion_tokens,
+            "ai_cost_usd": check.ai_cost_usd,
         },
         "reason": match.reason,
         "needs_choice": match.needs_choice,

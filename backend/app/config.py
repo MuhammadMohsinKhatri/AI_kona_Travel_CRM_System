@@ -64,6 +64,22 @@ class Settings(BaseSettings):
     openai_input_cost_per_mtok: float = 0.25
     openai_output_cost_per_mtok: float = 2.0
 
+    # Vision/speech intake (app/core/intake_readers.py: read_check, transcribe,
+    # parse_cash_speech) always calls VISION_MODEL ("gpt-4o"), never OPENAI_MODEL
+    # — a different, pricier model, so it needs its own $/Mtok to cost correctly
+    # rather than borrowing the classifier's rate. Update if OpenAI's pricing or
+    # VISION_MODEL changes.
+    openai_vision_input_cost_per_mtok: float = 2.5
+    openai_vision_output_cost_per_mtok: float = 10.0
+
+    # Organization-level Admin API key (platform.openai.com -> Organization ->
+    # Admin keys) — NOT the same credential as openai_api_key above, which is a
+    # project key scoped to making completions. Only this key can read
+    # /v1/organization/costs, which is what "remaining AI budget" is computed
+    # against (see app/core/ai_budget.py). Leave blank to disable that feature
+    # without affecting anything else.
+    openai_admin_api_key: str = ""
+
     # Pre-invoice consistency gate (app/core/invariants.py). When a check fails
     # the event is held in needs_review and NO invoice is drafted, so a
     # misclassification cannot reach a client. Set false to fall back to

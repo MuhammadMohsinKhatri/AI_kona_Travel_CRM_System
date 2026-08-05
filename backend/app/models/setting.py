@@ -32,3 +32,4 @@ class AppSetting(Base):
 
 # Setting keys
 TELEGRAM_KEY = "telegram"
+AI_BUDGET_KEY = "ai_budget"

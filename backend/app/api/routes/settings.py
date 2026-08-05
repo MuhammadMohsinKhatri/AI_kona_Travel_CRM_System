@@ -1,4 +1,5 @@
-"""User-editable runtime settings (currently Telegram alert delivery)."""
+"""User-editable runtime settings — Telegram alert delivery and the monthly AI
+budget shown alongside AI cost figures."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.core import notify
+from app.core import ai_budget, notify
 from app.db.base import get_db
 from app.models import User
 
@@ -96,6 +97,31 @@ def test_telegram(
             **result,
         }
     return {"ok": False, "detail": "Couldn't send to any chat.", **result}
+
+
+class AiBudgetInput(BaseModel):
+    monthly_usd: float = Field(..., ge=0)
+
+
+@router.get("/ai-budget")
+def get_ai_budget(
+    db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> dict:
+    """This month's AI budget, real spend from OpenAI's Costs API, and what's
+    left. ``spent_usd``/``remaining_usd`` are null (with ``error`` explaining
+    why) when no Admin API key is configured or the call fails — the budget
+    figure itself is still returned either way."""
+    return ai_budget.status(db)
+
+
+@router.put("/ai-budget")
+def update_ai_budget(
+    body: AiBudgetInput,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    ai_budget.set_budget(db, body.monthly_usd)
+    return ai_budget.status(db)
 
 
 def _clean_token(raw: str) -> str:

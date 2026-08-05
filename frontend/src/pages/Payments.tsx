@@ -8,7 +8,7 @@ import {
   CheckReview,
   api,
 } from "../api/client";
-import { Empty, money } from "../components/ui";
+import { BudgetNote, Empty, money, useAiBudget } from "../components/ui";
 
 /** Recording payments that arrive off-system: a check in the post, cash counted
  *  in a truck.
@@ -316,6 +316,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [review, setReview] = useState<CheckReview | null>(null);
+  const budget = useAiBudget();
   // The corrected details, which are what gets re-matched — never the model's
   // reading once a person has touched it.
   const [payer, setPayer] = useState("");
@@ -423,6 +424,13 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
       {review?.check.notes && (
         <p className="muted" style={{ fontSize: 12 }}>
           Read with {review.check.confidence} confidence — {review.check.notes}
+        </p>
+      )}
+      {review && review.check.ai_cost_usd > 0 && (
+        <p className="muted" style={{ fontSize: 12 }}>
+          AI usage: {((review.check.ai_prompt_tokens + review.check.ai_completion_tokens) / 1000).toFixed(1)}k
+          tokens · ${review.check.ai_cost_usd.toFixed(3)}
+          <BudgetNote budget={budget} />
         </p>
       )}
 
@@ -980,6 +988,7 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   const [typed, setTyped] = useState("");
   const [onDate, setOnDate] = useState("");
   const [result, setResult] = useState<CashReviewResponse | null>(null);
+  const budget = useAiBudget();
   const audioRef = useRef<HTMLInputElement>(null);
   const canRecord = captureIsPossible();
 
@@ -1091,6 +1100,13 @@ function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
       {result?.error && <p className="muted" style={{ color: "var(--warn)" }}>{result.error}</p>}
       {result?.notes && (
         <p className="muted" style={{ fontSize: 12 }}>Heard, with a caveat: {result.notes}</p>
+      )}
+      {result && result.ai_cost_usd > 0 && (
+        <p className="muted" style={{ fontSize: 12 }}>
+          AI usage: {((result.ai_prompt_tokens + result.ai_completion_tokens) / 1000).toFixed(1)}k
+          tokens · ${result.ai_cost_usd.toFixed(3)}
+          <BudgetNote budget={budget} />
+        </p>
       )}
 
       {result && result.items.length > 0 && (

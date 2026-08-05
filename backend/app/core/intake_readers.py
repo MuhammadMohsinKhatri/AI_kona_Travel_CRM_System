@@ -135,6 +135,13 @@ class CheckRead:
     confidence: str = "low"
     notes: str = ""
     error: str = ""
+    # Naming matches PipelineRun's ai_prompt_tokens/ai_completion_tokens/
+    # ai_cost_usd (app/models/run.py) — same three numbers, same meaning, just
+    # for one vision call instead of a whole run. Zero on a failed read: no
+    # tokens were billed for an exception before the API ever replied.
+    ai_prompt_tokens: int = 0
+    ai_completion_tokens: int = 0
+    ai_cost_usd: float = 0.0
 
     @property
     def usable(self) -> bool:
@@ -158,6 +165,11 @@ class SpeechRead:
     transcript: str = ""
     notes: str = ""
     error: str = ""
+    # The parse_cash_speech call only — transcribe() is a separate, per-minute
+    # Whisper charge with no token usage in its response, so it isn't in here.
+    ai_prompt_tokens: int = 0
+    ai_completion_tokens: int = 0
+    ai_cost_usd: float = 0.0
 
 
 def _client():
@@ -176,13 +188,33 @@ def _num(v: Any) -> float:
         return 0.0
 
 
-def _json_reply(model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _json_reply(
+    model: str, messages: list[dict[str, Any]]
+) -> tuple[dict[str, Any], int, int]:
+    """Returns (parsed JSON, prompt tokens, completion tokens).
+
+    The token counts come straight off the API response's own ``usage`` field
+    — the source OpenAI itself bills from — rather than being estimated after
+    the fact from message/response length.
+    """
     resp = _client().chat.completions.create(
         model=model,
         response_format={"type": "json_object"},
         messages=messages,
     )
-    return json.loads(resp.choices[0].message.content or "{}")
+    parsed = json.loads(resp.choices[0].message.content or "{}")
+    usage = resp.usage
+    if usage is None:
+        return parsed, 0, 0
+    return parsed, usage.prompt_tokens, usage.completion_tokens
+
+
+def _vision_cost_usd(prompt_tokens: int, completion_tokens: int) -> float:
+    return round(
+        prompt_tokens / 1_000_000 * settings.openai_vision_input_cost_per_mtok
+        + completion_tokens / 1_000_000 * settings.openai_vision_output_cost_per_mtok,
+        6,
+    )
 
 
 def read_check(image_bytes: bytes, content_type: str = "image/jpeg") -> CheckRead:
@@ -199,7 +231,7 @@ def read_check(image_bytes: bytes, content_type: str = "image/jpeg") -> CheckRea
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
     try:
-        data = _json_reply(VISION_MODEL, [
+        data, prompt_tokens, completion_tokens = _json_reply(VISION_MODEL, [
             {"role": "system", "content": _CHECK_PROMPT},
             {"role": "user", "content": [
                 {"type": "text", "text": "Read this check."},
@@ -220,6 +252,9 @@ def read_check(image_bytes: bytes, content_type: str = "image/jpeg") -> CheckRea
         memo=str(data.get("memo") or "").strip(),
         confidence=str(data.get("confidence") or "low").strip().lower(),
         notes=str(data.get("notes") or "").strip(),
+        ai_prompt_tokens=prompt_tokens,
+        ai_completion_tokens=completion_tokens,
+        ai_cost_usd=_vision_cost_usd(prompt_tokens, completion_tokens),
     )
 
 
@@ -274,7 +309,7 @@ def parse_cash_speech(transcript: str, today: str = "") -> SpeechRead:
                           error="Voice input needs OPENAI_PROVIDER=live.")
     prompt = _SPEECH_PROMPT.format(today=today or date.today().isoformat())
     try:
-        data = _json_reply(VISION_MODEL, [
+        data, prompt_tokens, completion_tokens = _json_reply(VISION_MODEL, [
             {"role": "system", "content": prompt},
             {"role": "user", "content": text},
         ])
@@ -291,5 +326,10 @@ def parse_cash_speech(transcript: str, today: str = "") -> SpeechRead:
         for row in (data.get("entries") or [])
         if isinstance(row, dict)
     ]
-    return SpeechRead(entries=entries, transcript=text,
-                      notes=str(data.get("notes") or "").strip())
+    return SpeechRead(
+        entries=entries, transcript=text,
+        notes=str(data.get("notes") or "").strip(),
+        ai_prompt_tokens=prompt_tokens,
+        ai_completion_tokens=completion_tokens,
+        ai_cost_usd=_vision_cost_usd(prompt_tokens, completion_tokens),
+    )
