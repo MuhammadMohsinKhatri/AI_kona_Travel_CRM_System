@@ -1,0 +1,31 @@
+# Optional overlay for boxes that are NOT this app's only tenant — where
+# another team's reverse proxy (not deploy/Caddyfile) owns ports 80/443 and
+# routes to us by container name over a shared Docker network instead.
+#
+# Attaches `frontend` to that pre-existing network so the other proxy can
+# reach `frontend:80` directly. frontend's own nginx already forwards
+# /api, /health, /openapi.json and /docs to the backend (see
+# frontend/nginx.conf), so only frontend needs to join — not backend.
+#
+# This is deliberately NOT part of docker-compose.prod.yml: that file must
+# stay deployable on a box where no such network exists (the original VPS,
+# or any future dedicated one). Requiring an external network unconditionally
+# there would break `up -d` everywhere else.
+#
+# Usage — on the shared box only, every time frontend is (re)created:
+#   docker compose -f docker-compose.prod.yml \
+#                   -f deploy/docker-compose.shared-ingress.yml up -d frontend
+#
+# The external network must already exist under this name (check with
+# `docker network ls`) — override SHARED_INGRESS_NETWORK if the other proxy
+# calls it something else.
+services:
+  frontend:
+    networks:
+      - default
+      - shared_ingress
+
+networks:
+  shared_ingress:
+    name: ${SHARED_INGRESS_NETWORK:-web}
+    external: true

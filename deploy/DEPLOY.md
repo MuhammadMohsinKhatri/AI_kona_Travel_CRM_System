@@ -340,6 +340,78 @@ And put `backend/.env` in a password manager the day you go live. It is
 deliberately not in the backups, and without it a restore comes back with all
 the data and no way to reach KonaOS.
 
+## Sharing a box with another ingress
+
+If ports 80/443 already belong to someone else's reverse proxy (another team's
+Traefik or Caddy on a shared VPS), `deploy/Caddyfile` never gets a hostname —
+konaice stays on `WEB_PORT`/`TLS_PORT` (see Step 4) and real HTTPS has to come
+from the *other* proxy routing to us by container name instead.
+
+That needs two things, in order:
+
+**1. Join frontend to the other proxy's Docker network.** A one-off `docker
+network connect` would be silently undone the next time Watchtower recreates
+the container for a new image, so this is a compose overlay instead —
+[deploy/docker-compose.shared-ingress.yml](docker-compose.shared-ingress.yml).
+Only `frontend` needs to join: its nginx already forwards `/api`, `/health`,
+`/openapi.json` and `/docs` to the backend internally (`frontend/nginx.conf`),
+same as `deploy/Caddyfile`'s own blanket `reverse_proxy frontend:80`.
+
+```bash
+# find the other proxy's network name first
+docker network ls
+SHARED_INGRESS_NETWORK=web docker compose -f docker-compose.prod.yml \
+    -f deploy/docker-compose.shared-ingress.yml up -d frontend
+docker inspect konaice-frontend-1 --format \
+    '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'   # both networks should list
+```
+
+Run that same `up -d` with both `-f` flags any time frontend needs recreating
+by hand — Watchtower-triggered updates preserve whatever networks the running
+container already has, so this is only for manual recreates.
+
+**2. Add a site block to the other proxy.** This means editing config that
+belongs to another application's ingress — confirm you actually have the
+authority to change it before touching anything, since a mistake here can
+take that team's app down too, not just konaice's.
+
+```bash
+# back up first — this file is someone else's live routing config
+cp /opt/proxy/Caddyfile /opt/proxy/Caddyfile.bak-$(date -u +%Y%m%d%H%M%SZ)
+
+cat >> /opt/proxy/Caddyfile <<'EOF'
+
+# ------------------------------------------------------------------ konaice
+finance.example.com {
+        import common
+        reverse_proxy konaice-frontend-1:80
+}
+EOF
+
+docker exec proxy-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker exec proxy-caddy caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+`caddy reload` is graceful — existing connections to the other app are not
+dropped. Validate before every reload regardless; a syntax error in `reload`
+fails closed and takes the whole proxy down, not just the new block.
+
+Confirm both sides still work:
+
+```bash
+curl -sI https://finance.example.com | head -3      # new site, real cert
+curl -sI https://<the-other-app's-existing-domain> | head -3   # unaffected
+```
+
+Then update `BACKEND_CORS_ORIGINS` in `backend/.env` — the browser-visible
+origin is now `https://finance.example.com` with no port, not the `:8081`
+address, and CORS is origin-exact:
+
+```bash
+sed -i 's|^BACKEND_CORS_ORIGINS=.*|BACKEND_CORS_ORIGINS=https://finance.example.com,http://<vps-ip>:8081|' backend/.env
+docker compose -f docker-compose.prod.yml up -d backend
+```
+
 ## Operations cheat-sheet
 
 | Task | Command |
