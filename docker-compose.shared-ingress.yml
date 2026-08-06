@@ -1,0 +1,46 @@
+# Overlay for the box where konaice shares a host with another team's stacks.
+#
+# On srv1877500 (2.25.95.160) ports 80 and 443 belong to `proxy-caddy`, an
+# ingress this project does not own. Its config terminates TLS for
+# finance.konacatonsville.com and forwards by CONTAINER NAME:
+#
+#     finance.konacatonsville.com {
+#             reverse_proxy konaice-frontend-1:80
+#     }
+#
+# Resolving that name requires the proxy and the frontend to share a network.
+# That network is `web`, and it is created and owned by the other stack — hence
+# `external: true`, and hence this being an overlay rather than part of
+# docker-compose.prod.yml: a standalone deployment has no `web`, and declaring
+# an external network that does not exist makes compose refuse to start
+# anything at all.
+#
+# WHY THIS FILE EXISTS AT ALL, given it worked for months without it:
+#
+# Watchtower recreates a container from the RUNNING container's config, so it
+# carried the `web` attachment forward on every auto-deploy and nothing ever
+# noticed it was missing from the compose file. `docker compose up` recreates
+# from the FILE, so the first manual rebuild on this host silently dropped the
+# attachment and the domain started answering 502 while the app itself stayed
+# perfectly healthy on :8081. Diagnosed 2026-08-07, during a GitHub Actions
+# outage that forced exactly that manual rebuild.
+#
+# USE IT FOR EVERY compose command on this host, not just `up`:
+#
+#     docker compose -f docker-compose.prod.yml -f docker-compose.shared-ingress.yml up -d --build
+#
+# Omitting it on a later rebuild reintroduces the same 502.
+
+services:
+  frontend:
+    networks:
+      # `default` must be listed explicitly. Naming any network for a service
+      # replaces the implicit default rather than adding to it, and dropping it
+      # would cut the frontend off from backend on the internal network — a
+      # different outage, with the same 502 as its symptom.
+      - default
+      - web
+
+networks:
+  web:
+    external: true

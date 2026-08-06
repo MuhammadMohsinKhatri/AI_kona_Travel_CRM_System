@@ -132,6 +132,11 @@ services:
         limits:
           memory: 256M
 
+  # On a host where another stack owns 80/443 and reverse-proxies this
+  # container BY NAME, the frontend also needs to sit on that ingress network —
+  # see docker-compose.shared-ingress.yml, which must be passed alongside this
+  # file for every compose command on such a host. Watchtower deploys carry the
+  # attachment forward on their own; a manual `compose up` does not.
   frontend:
     image: ghcr.io/muhammadmohsinkhatri/konaice-frontend:latest
     build: ./frontend
