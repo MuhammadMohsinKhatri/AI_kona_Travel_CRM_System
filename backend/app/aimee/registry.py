@@ -133,7 +133,8 @@ def all_tools() -> list[Tool]:
     # Import for side effects: each module registers on import. Done here rather
     # than at module scope so a broken tool file fails loudly at startup instead
     # of silently leaving a capability missing.
-    from app.aimee.tools import calendar, finance, reports  # noqa: F401
+    from app.aimee.tools import (calendar, finance, fleet,  # noqa: F401
+                                 labor, maps, reports)
 
     return list(_REGISTRY.values())
 

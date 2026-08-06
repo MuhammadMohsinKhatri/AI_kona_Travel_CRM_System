@@ -45,6 +45,21 @@ class Settings(BaseSettings):
     openai_provider: str = "mock"
     telegram_provider: str = "mock"
 
+    # Samsara — the trucks. Read-only here: where a vehicle is, and how much
+    # fuel it has. Blank disables the fleet tools and the gas alert cleanly;
+    # everything else carries on (see aimee/registry.py on failure shape).
+    samsara_api_base: str = "https://api.samsara.com"
+    samsara_api_token: str = ""
+
+    # Google Maps — geocoding, directions and Street View, for the route and
+    # ETA tools. The key stays SERVER-side: map imagery is proxied through
+    # /api/aimee/media rather than embedded in a browser URL, because a key in
+    # a page an office shares around is a key that gets scraped and billed.
+    google_maps_api_base: str = "https://maps.googleapis.com/maps/api"
+    google_maps_api_key: str = ""
+    # Where a truck starts from when no origin is given — the yard.
+    fleet_home_address: str = "28 Alco Place, Lansdowne, MD 21227"
+
     # Square
     square_api_base: str = "https://connect.squareup.com"
     square_kona_token: str = ""
