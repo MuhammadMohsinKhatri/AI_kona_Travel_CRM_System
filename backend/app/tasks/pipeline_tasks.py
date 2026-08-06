@@ -22,6 +22,13 @@ def _fail_orphaned_runs(**_kwargs) -> None:
     container). Left alone, the zombie row shows "running" forever and blocks
     new runs for its date via the duplicate-run guard. All pipeline writes are
     upsert-safe, so the recovery is simply to re-run the date.
+
+    This should now be rare. The worker has a 300s stop_grace_period (see
+    docker-compose.prod.yml), so SIGTERM begins Celery's warm shutdown and a run
+    in flight gets to finish before the container goes. Before that, Docker's
+    default ten seconds meant every deploy killed whatever was running. This
+    sweeper remains as the backstop for the cases a grace period cannot cover —
+    an OOM kill, a host reboot, a run genuinely longer than five minutes.
     """
     db = SessionLocal()
     try:

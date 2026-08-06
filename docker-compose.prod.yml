@@ -83,6 +83,17 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
     command: celery -A app.tasks.celery_app.celery worker --loglevel=info --concurrency=2
+    # A pipeline run takes minutes; Docker's default grace period is TEN SECONDS.
+    # So every Watchtower deploy SIGKILLed whatever was mid-run, and on a day
+    # with a dozen pushes that is a dozen chances to kill a run — which is
+    # exactly what happened on 2026-08-06, dying at "AI classification 9/18".
+    #
+    # SIGTERM starts Celery's warm shutdown: it stops taking new work and
+    # finishes what it is holding. Five minutes is comfortably longer than a
+    # run, so a deploy now waits for the run instead of killing it. It only
+    # waits when something is actually in flight; an idle worker still exits
+    # immediately.
+    stop_grace_period: 300s
     env_file: ./backend/.env
     environment:
       DATABASE_URL: postgresql+psycopg2://konaice:${POSTGRES_PASSWORD:-konaice}@db:5432/konaice
