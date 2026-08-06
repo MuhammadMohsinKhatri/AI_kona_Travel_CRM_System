@@ -1,23 +1,26 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ApplyItem,
   ApplyResponse,
   ApplyResult,
-  CashReview,
-  CashReviewResponse,
   CheckReview,
   api,
 } from "../api/client";
 import { BudgetNote, Empty, money, useAiBudget } from "../components/ui";
 
-/** Recording payments that arrive off-system: a check in the post, cash counted
- *  in a truck.
+/** Recording a payment that arrives off-system: a check in the post.
+ *
+ *  Cash counted in a truck used to live here too, behind a second tab. It moved
+ *  to Aimee, which does the same job conversationally — say what was taken, get
+ *  a proposal, confirm it — and routes through the same financials endpoint, so
+ *  there is one implementation of the override rather than two that drift.
  *
  *  The happy path has no interaction in it at all. A photo of a check is read,
- *  matched, stripped of its 4% card fee and recorded; one recording of a day's
- *  takings posts every event it names. The screen's job on that path is to say
- *  what happened, not to ask for a confirmation of it — hence <Done>, which
- *  replaces the plan-and-approve card outright rather than sitting beside it.
+ *  matched, stripped of its 4% card fee and recorded. The screen's job on that
+ *  path is to say what happened, not to ask for a confirmation of it — hence
+ *  <Done>, which replaces the plan-and-approve card outright rather than
+ *  sitting beside it.
  *
  *  What is left is the exceptions, and they are the reason this is a screen and
  *  not a background job. A check the matcher won't call, an amount that doesn't
@@ -29,8 +32,6 @@ import { BudgetNote, Empty, money, useAiBudget } from "../components/ui";
  *
  *  Nothing derived is computed here. The browser says which invoice and how
  *  much; the server recomputes the fee, the variance and the paid decision. */
-
-type Tab = "check" | "cash";
 
 /** One approved line waiting for Apply, with the words to describe it. */
 interface BatchLine {
@@ -95,7 +96,6 @@ function Done({ result }: { result: ApplyResult }) {
 }
 
 export default function Payments() {
-  const [tab, setTab] = useState<Tab>("check");
   const [batch, setBatch] = useState<BatchLine[]>([]);
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState<ApplyResponse | null>(null);
@@ -142,32 +142,14 @@ export default function Payments() {
     <>
       <h1 className="page-title">Record Payments</h1>
       <p className="page-sub">
-        A check that arrived in the post, or cash counted at the truck. Photograph
-        the check, or say the takings once — the system finds the invoice or the
-        event, takes the 4% card fee off a check, and records it. Anything it
-        can't settle on its own waits here for you rather than guessing.
+        A check that arrived in the post. Photograph it — the system finds the
+        invoice, takes the 4% card fee off, and records it. Anything it can't
+        settle on its own waits here for you rather than guessing. Cash counted
+        at the truck is recorded in <Link to="/aimee">Ask Aimee</Link>: tell it
+        what was taken and confirm the change it proposes.
       </p>
 
-      <div className="toolbar" style={{ gap: 8, marginBottom: 16 }}>
-        <button
-          className={"btn" + (tab === "check" ? " primary" : "")}
-          onClick={() => setTab("check")}
-        >
-          🧾 Check in the post
-        </button>
-        <button
-          className={"btn" + (tab === "cash" ? " primary" : "")}
-          onClick={() => setTab("cash")}
-        >
-          💵 Cash counted
-        </button>
-      </div>
-
-      {tab === "check" ? (
-        <CheckPanel key={round} onApprove={addToBatch} />
-      ) : (
-        <CashPanel key={round} onApprove={addToBatch} />
-      )}
+      <CheckPanel key={round} onApprove={addToBatch} />
 
       <BatchPanel
         batch={batch}
@@ -789,9 +771,9 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
   );
 }
 
-// ── cash ────────────────────────────────────────────────────────────────────
+// ── capture support ─────────────────────────────────────────────────────────
 
-/** Whether this browser will hand us a camera or a microphone at all.
+/** Whether this browser will hand us a camera at all.
  *
  *  getUserMedia only exists on a secure context — https, or localhost. Served
  *  over plain http on an IP, as production is, Chrome does not expose
@@ -802,487 +784,13 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
  *  to be on https before the button can ever work.
  *
  *  Note this is only about capturing INSIDE the page. A file input with
- *  `capture` opens the phone's own camera or recorder and works fine on http —
- *  which is why both panels keep one. */
+ *  `capture` opens the phone's own camera and works fine on http — which is why
+ *  the check panel keeps one. */
 function captureIsPossible(): boolean {
   return (
     typeof window !== "undefined" &&
     window.isSecureContext &&
     !!navigator.mediaDevices?.getUserMedia
-  );
-}
-
-/** Longest we will record in one go. A day's takings is a sentence or two; a
- *  button left running in a pocket is an upload the transcriber refuses. */
-const MAX_RECORD_SECONDS = 180;
-/** How many level samples the waveform shows, and how often one is taken. */
-const WAVE_BARS = 28;
-const SAMPLE_MS = 90;
-
-/** The extension has to match what MediaRecorder actually produced — Chrome
- *  gives webm/opus, Safari gives mp4 — because the extension is how the format
- *  is declared to the transcriber, and the server refuses what it can't read. */
-function recordingFilename(mimeType: string): string {
-  return mimeType.includes("mp4") || mimeType.includes("mpeg")
-    ? "takings.mp4"
-    : "takings.webm";
-}
-
-function clock(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/** A voice note, the way a chat app does it: press record, watch the meter move,
- *  stop to send, or bin it and start again.
- *
- *  The meter is not decoration. Dictating into a page that gives no feedback,
- *  you cannot tell a muted microphone from a silent room until the transcript
- *  comes back empty — and by then whoever counted the cash has walked off. */
-function VoiceRecorder({
-  onAudio,
-  disabled,
-}: {
-  onAudio: (file: File) => void;
-  disabled: boolean;
-}) {
-  const [recording, setRecording] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [levels, setLevels] = useState<number[]>([]);
-  const [error, setError] = useState("");
-  const rig = useRef<{
-    rec: MediaRecorder;
-    stream: MediaStream;
-    ctx: AudioContext;
-    timer: number;
-  } | null>(null);
-  // Set before stop() when a recording is being thrown away, so onstop knows not
-  // to send it. A ref, not state: onstop reads it outside React's render.
-  const binned = useRef(false);
-
-  function teardown() {
-    const r = rig.current;
-    if (!r) return;
-    window.clearInterval(r.timer);
-    r.stream.getTracks().forEach((t) => t.stop());
-    void r.ctx.close().catch(() => {});
-    rig.current = null;
-  }
-
-  // A recorder still holding the microphone after its panel has gone is a live
-  // mic with no UI attached to it. Release it on the way out, always.
-  useEffect(() => teardown, []);
-
-  async function start() {
-    setError("");
-    setLevels([]);
-    setElapsed(0);
-    binned.current = false;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new AudioContext();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      const buf = new Uint8Array(analyser.fftSize);
-
-      const chunks: BlobPart[] = [];
-      const rec = new MediaRecorder(stream);
-      rec.ondataavailable = (e) => {
-        if (e.data.size) chunks.push(e.data);
-      };
-      rec.onstop = () => {
-        const type = rec.mimeType || "audio/webm";
-        teardown();
-        setRecording(false);
-        if (binned.current) return;
-        const blob = new Blob(chunks, { type });
-        if (!blob.size) {
-          setError("That recording came out empty. Try again.");
-          return;
-        }
-        onAudio(new File([blob], recordingFilename(type), { type }));
-      };
-
-      const startedAt = Date.now();
-      const timer = window.setInterval(() => {
-        analyser.getByteTimeDomainData(buf);
-        // RMS around the 128 midpoint — loudness, not frequency.
-        let sum = 0;
-        for (const v of buf) sum += (v - 128) ** 2;
-        const level = Math.min(1, Math.sqrt(sum / buf.length) / 40);
-        setLevels((prev) => [...prev, level].slice(-WAVE_BARS));
-
-        const secs = (Date.now() - startedAt) / 1000;
-        setElapsed(secs);
-        if (secs >= MAX_RECORD_SECONDS) rec.stop();
-      }, SAMPLE_MS);
-
-      rig.current = { rec, stream, ctx, timer };
-      rec.start();
-      setRecording(true);
-    } catch (e) {
-      teardown();
-      setRecording(false);
-      // The mic exists, but this browser or this person said no.
-      setError(
-        (e as Error)?.name === "NotAllowedError"
-          ? "The microphone was blocked. Allow it for this site in the address bar, then press record again."
-          : "Couldn't start recording. Upload a voice memo or type the takings."
-      );
-    }
-  }
-
-  function stopAndSend() {
-    binned.current = false;
-    rig.current?.rec.stop();
-  }
-
-  function bin() {
-    binned.current = true;
-    rig.current?.rec.stop();
-    setRecording(false);
-  }
-
-  if (!recording) {
-    return (
-      <>
-        <button className="btn primary" onClick={start} disabled={disabled}>
-          🎙 Record the takings
-        </button>
-        {error && (
-          <span className="muted" style={{ color: "var(--crit)", fontSize: 12 }}>
-            {error}
-          </span>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <div className="voice-note">
-      <button className="voice-bin" onClick={bin} title="Discard this recording">
-        🗑
-      </button>
-      <span className="voice-dot" aria-hidden="true" />
-      <span className="voice-time">{clock(elapsed)}</span>
-      <div className="voice-wave" aria-hidden="true">
-        {Array.from({ length: WAVE_BARS }, (_, i) => {
-          // Right-aligned, so the newest sample sits nearest the send button —
-          // the way a chat app scrolls its waveform.
-          const level = levels[levels.length - WAVE_BARS + i] ?? 0;
-          return <span key={i} style={{ height: `${Math.max(8, level * 100)}%` }} />;
-        })}
-      </div>
-      <button className="btn primary voice-send" onClick={stopAndSend}>
-        ➤ Send
-      </button>
-    </div>
-  );
-}
-
-function CashPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [typed, setTyped] = useState("");
-  const [onDate, setOnDate] = useState("");
-  const [result, setResult] = useState<CashReviewResponse | null>(null);
-  const budget = useAiBudget();
-  const audioRef = useRef<HTMLInputElement>(null);
-  const canRecord = captureIsPossible();
-
-  async function sendAudio(file: File) {
-    setBusy("Listening back…");
-    setError("");
-    try {
-      const next = await api.reviewCashVoice(file, onDate);
-      setResult(next);
-      setTyped(next.transcript);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function readTyped() {
-    if (!typed.trim()) return;
-    setBusy("Reading it back…");
-    setError("");
-    try {
-      setResult(await api.reviewCashText(typed, onDate));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
-
-  return (
-    <div className="card" style={{ marginBottom: 18 }}>
-      <div className="flex" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        {/* Recording in the page needs https. Uploading a voice memo does not —
-            it is an ordinary file upload — so on an insecure origin that is the
-            path offered rather than a button that cannot work. Same endpoint,
-            same result: talk once, everything posts. */}
-        {canRecord && <VoiceRecorder onAudio={sendAudio} disabled={!!busy} />}
-
-        <input
-          ref={audioRef}
-          type="file"
-          accept="audio/*"
-          capture
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) sendAudio(file);
-            e.target.value = "";
-          }}
-        />
-        {/* `capture` on an audio input opens the phone's own voice recorder
-            rather than a file browser, so on a phone this button IS "record a
-            voice note" — two taps, no files, and it works on http where the
-            in-page recorder cannot exist. Worth naming honestly: "Upload a
-            voice memo" describes the desktop half and hides the good half. */}
-        <button
-          className={"btn" + (canRecord ? "" : " primary")}
-          onClick={() => audioRef.current?.click()}
-        >
-          🎤 {canRecord ? "Send a voice memo" : "Record on your phone"}
-        </button>
-
-        <label className="muted" style={{ fontSize: 12 }}>
-          Events on{" "}
-          <input
-            className="input"
-            type="date"
-            style={{ width: 150 }}
-            value={onDate}
-            onChange={(e) => setOnDate(e.target.value)}
-            title="Which day's events to search when the recording doesn't say"
-          />
-        </label>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {busy || "One go covers several events — “Pikesville took seven bucks, Camp Lollipop was twelve fifty” records both."}
-        </span>
-      </div>
-
-      {!canRecord && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
-          <strong>On a phone, that button opens your voice recorder — talk, tap
-          done, and it posts.</strong> On a computer it asks for an audio file
-          instead: recording inside the page needs the dashboard on{" "}
-          <code>https</code>, and browsers won't hand a microphone to an
-          unencrypted page, so there is no permission to grant here. Typing the
-          takings below does exactly the same thing once it is read.
-        </p>
-      )}
-
-      <div style={{ marginTop: 12 }}>
-        <textarea
-          className="input"
-          style={{ width: "100%", minHeight: 60 }}
-          placeholder="…or type what was taken, if the mic isn't an option."
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-        />
-        <button className="btn" style={{ marginTop: 8 }} onClick={readTyped} disabled={!!busy}>
-          Read this back
-        </button>
-        <span className="muted" style={{ fontSize: 12, marginLeft: 10 }}>
-          For a single event you already have open, Event Financials edits its
-          cash figure directly.
-        </span>
-      </div>
-
-      {error && <p className="muted" style={{ color: "var(--crit)" }}>{error}</p>}
-      {result?.error && <p className="muted" style={{ color: "var(--warn)" }}>{result.error}</p>}
-      {result?.notes && (
-        <p className="muted" style={{ fontSize: 12 }}>Heard, with a caveat: {result.notes}</p>
-      )}
-      {result && result.ai_cost_usd > 0 && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          AI usage: {((result.ai_prompt_tokens + result.ai_completion_tokens) / 1000).toFixed(1)}k
-          tokens · ${result.ai_cost_usd.toFixed(3)}
-          <BudgetNote budget={budget} />
-        </p>
-      )}
-
-      {result && result.items.length > 0 && (
-        <p style={{ marginTop: 14, marginBottom: 0, fontWeight: 600 }}>
-          {result.items.filter((i) => i.applied?.ok).length} of {result.items.length}{" "}
-          recorded automatically
-          {result.items.some((i) => !i.applied?.ok)
-            ? " — the rest are below, they need a person."
-            : "."}
-        </p>
-      )}
-
-      {result?.items.map((item, i) => (
-        <CashLineCard
-          key={`${item.heard.query}-${i}`}
-          line={item}
-          fallbackDate={onDate}
-          onApprove={onApprove}
-        />
-      ))}
-      {result && result.items.length === 0 && !result.error && (
-        <Empty text="Nothing in that recording named an event and an amount." />
-      )}
-    </div>
-  );
-}
-
-function CashLineCard({
-  line,
-  fallbackDate,
-  onApprove,
-}: {
-  line: CashReview;
-  fallbackDate: string;
-  onApprove: (line: BatchLine) => void;
-}) {
-  const [state, setState] = useState(line);
-  const [amount, setAmount] = useState(line.heard.amount ? String(line.heard.amount) : "");
-  const [busy, setBusy] = useState(false);
-  // Posted off the recording. Re-matching it would only offer to post it again.
-  const applied = state.applied;
-
-  async function rematch(crmEventId = "") {
-    setBusy(true);
-    try {
-      setState(
-        await api.rematchCash({
-          query: state.heard.query,
-          amount: Number(amount) || 0,
-          brand: state.heard.brand,
-          date: state.heard.date || fallbackDate,
-          crm_event_id: crmEventId,
-        })
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (applied) {
-    return (
-      <div className="card" style={{ background: "var(--surface-2)", marginTop: 12 }}>
-        <div style={{ fontWeight: 600 }}>
-          “{state.heard.query}” → {state.event?.event_name}
-        </div>
-        <Done result={applied} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="card" style={{ background: "var(--surface-2)", marginTop: 12 }}>
-      <div className="flex" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={{ fontSize: 12 }}>
-          <div className="muted">Heard</div>
-          <div style={{ fontWeight: 600, minWidth: 200 }}>
-            {state.heard.query || <span className="muted">— no event named —</span>}
-          </div>
-        </label>
-        <label style={{ fontSize: 12 }}>
-          <div className="muted">Cash taken</div>
-          <input
-            className="input"
-            style={{ width: 110 }}
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </label>
-        <button className="btn" onClick={() => rematch()} disabled={busy}>
-          Re-match
-        </button>
-      </div>
-
-      <p style={{ marginTop: 10, marginBottom: 6 }}>{state.reason}</p>
-      {state.held_because && !state.blocked && (
-        <p className="muted" style={{ color: "var(--warn)", fontSize: 12 }}>
-          Not recorded automatically — {state.held_because}
-        </p>
-      )}
-      {state.blocked && (
-        <p className="muted" style={{ color: "var(--warn)", fontSize: 12 }}>⚠ {state.blocked}</p>
-      )}
-
-      {state.event && (
-        <div style={{ fontSize: 13 }}>
-          <strong>{state.event.event_name}</strong>{" "}
-          <span className="muted">
-            {state.event.event_date} · {state.event.brand}
-          </span>
-          {state.previous_cash > 0 && (
-            <span className="muted">
-              {" "}· already recorded: {money(state.previous_cash)} (this replaces it)
-            </span>
-          )}
-        </div>
-      )}
-
-      {state.ready && state.event && (
-        <button
-          className="btn primary"
-          style={{ marginTop: 10 }}
-          onClick={() =>
-            onApprove({
-              key: `cash:${state.event!.crm_event_id}`,
-              item: {
-                kind: "cash",
-                amount: Number(amount) || 0,
-                crm_event_id: state.event!.crm_event_id,
-              },
-              title: `Cash · ${state.event!.event_name}`,
-              detail: `${money(Number(amount) || 0)} recorded against ${state.event!.event_date}`,
-              warnings: [],
-            })
-          }
-        >
-          Approve this line →
-        </button>
-      )}
-
-      {state.candidates.length > 0 && !state.ready && (
-        <div className="table-wrap" style={{ marginTop: 10 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th>Event date</th>
-                <th>Where</th>
-                <th>Why it's here</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {state.candidates.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.name}</td>
-                  {/* Its own column. Falling back to the town when the date was
-                      missing printed "Baltimore" under a heading that said
-                      DATE — which reads as data and is simply false. */}
-                  <td className="keep">
-                    {c.event_date || <span className="muted">—</span>}
-                  </td>
-                  <td>{c.city || <span className="muted">—</span>}</td>
-                  <td><Score flags={c.flags} /></td>
-                  <td>
-                    <button className="btn" onClick={() => rematch(c.id)} disabled={busy}>
-                      It's this one
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
   );
 }
 
