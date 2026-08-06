@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import Layout from "./components/Layout";
 import { Loading } from "./components/ui";
+import Aimee from "./pages/Aimee";
 import AlertDetail from "./pages/AlertDetail";
 import Alerts from "./pages/Alerts";
 import ApiExplorer from "./pages/ApiExplorer";
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/invoices" element={<Invoices />} />
         <Route path="/financials" element={<Financials />} />
         <Route path="/payments" element={<Payments />} />
+        <Route path="/aimee" element={<Aimee />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/settings" element={<Settings />} />

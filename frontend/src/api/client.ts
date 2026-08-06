@@ -229,6 +229,44 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ items }),
     }),
+  // ── Aimee ──────────────────────────────────────────────────────────────
+  aimeeCapabilities: () => request<AimeeCapabilities>("/api/aimee/capabilities"),
+  aimeeConversations: () => request<AimeeConversation[]>("/api/aimee/conversations"),
+  aimeeNewConversation: () =>
+    request<AimeeConversation>("/api/aimee/conversations", { method: "POST" }),
+  aimeeConversation: (id: number) =>
+    request<AimeeConversation>(`/api/aimee/conversations/${id}`),
+  aimeeDeleteConversation: (id: number) =>
+    request<void>(`/api/aimee/conversations/${id}`, { method: "DELETE" }),
+  aimeeAsk: (id: number, text: string) =>
+    request<AimeeTurn>(`/api/aimee/conversations/${id}/ask`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  aimeeAskVoice: (id: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<AimeeTurn>(`/api/aimee/conversations/${id}/ask-voice`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  aimeeAskImage: (id: number, file: File, text = "") => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("text", text);
+    return request<AimeeTurn>(`/api/aimee/conversations/${id}/ask-image`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  /** Apply or cancel a change Aimee proposed. The stored proposal is the
+   *  authority — this only says yes or no. */
+  aimeeDecide: (messageId: number, approve: boolean) =>
+    request<{ ok: boolean; status: string; summary: string }>(
+      `/api/aimee/messages/${messageId}/proposal`,
+      { method: "POST", body: JSON.stringify({ approve }) }
+    ),
   konaosFormOptions: () => request<FormOptions>("/api/konaos/form-options"),
   konaosQuickCreate: (body: Record<string, unknown>) =>
     request<QuickCreateResult>("/api/konaos/events/quick-create", {
@@ -639,6 +677,52 @@ export interface ApplyResponse {
   /** True when the system is in dry-run mode: nothing was written anywhere. */
   dry_run: boolean;
   results: ApplyResult[];
+}
+
+// ── Aimee ─────────────────────────────────────────────────────────────────
+
+export interface AimeeMessage {
+  id: number;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  tool_name: string | null;
+  tool_ok: boolean | null;
+  tool_result: Record<string, unknown> | null;
+  /** A change awaiting confirmation. Write tools propose; they never act. */
+  proposal: Record<string, any> | null;
+  proposal_status: "pending" | "applied" | "cancelled" | null;
+  cost_usd: number;
+  attachment_kind: string | null;
+  attachment_name: string | null;
+  created_at: string | null;
+}
+
+export interface AimeeConversation {
+  id: number;
+  title: string;
+  cost_usd: number;
+  updated_at: string | null;
+  messages?: AimeeMessage[];
+}
+
+export interface AimeeBudget {
+  monthly_budget_usd: number;
+  spent_usd?: number | null;
+  remaining_usd?: number | null;
+  error?: string | null;
+}
+
+export interface AimeeTurn {
+  conversation: AimeeConversation;
+  messages: AimeeMessage[];
+  error: string;
+  budget: AimeeBudget;
+}
+
+export interface AimeeCapabilities {
+  tools: { name: string; description: string; kind: "read" | "write" }[];
+  budget: AimeeBudget;
+  suggestions: { icon: string; label: string; text: string }[];
 }
 
 export interface KonaosSessionStatus {

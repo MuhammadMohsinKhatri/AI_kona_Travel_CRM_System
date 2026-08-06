@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
  *  labels, so every entry needs one. */
 const links = [
   { to: "/", label: "Dashboard", icon: "📊", end: true },
+  { to: "/aimee", label: "Ask Aimee", icon: "💬" },
   { to: "/events", label: "Events", icon: "📅" },
   { to: "/invoices", label: "Invoices", icon: "🧾" },
   { to: "/financials", label: "Event Financials", icon: "💰" },
@@ -24,7 +25,7 @@ const bottomLinks = [
 
 /** Pages whose content is a wide table benefit from the full window width —
  *  the default 1200px cap forces needless horizontal scrolling on them. */
-const WIDE_ROUTES = ["/financials", "/crm-activity", "/runs"];
+const WIDE_ROUTES = ["/financials", "/crm-activity", "/runs", "/aimee"];
 
 const STORAGE_KEY = "sidebar-collapsed";
 
