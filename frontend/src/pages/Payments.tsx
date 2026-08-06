@@ -709,7 +709,24 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
             </div>
           )}
 
-          {review.candidates.length > 0 && !plan && (
+          {/* Shown even when a plan exists.
+           *
+           *  This used to be `&& !plan`: the moment the matcher was confident,
+           *  every other invoice was hidden, so a reviewer who could SEE the
+           *  match was wrong had nowhere to say so — the only lever left was
+           *  editing the amount until the matcher changed its own mind, which
+           *  means lying to it about the cheque to get at the right invoice.
+           *
+           *  Confidence is a reason to preselect one, never a reason to
+           *  conceal the alternatives. Collapsed by default so the ordinary
+           *  path still reads as one decision rather than a table of them. */}
+          {review.candidates.length > 0 && (
+            <details open={!plan} style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                {plan
+                  ? `Not this invoice? ${review.candidates.length} other${review.candidates.length === 1 ? "" : "s"} considered`
+                  : "Invoices considered"}
+              </summary>
             <div className="table-wrap" style={{ marginTop: 10 }}>
               <table>
                 <thead>
@@ -765,6 +782,7 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
                 </tbody>
               </table>
             </div>
+            </details>
           )}
         </>
       )}

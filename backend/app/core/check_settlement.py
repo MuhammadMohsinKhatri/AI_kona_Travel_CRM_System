@@ -460,6 +460,40 @@ def match_invoice(
             combination=combo,
         )
 
+    # A cheque that EXACTLY covers several invoices, against a single invoice
+    # that matched without the amount agreeing at all.
+    #
+    # This is the "Kona Ice on 7/9 and 7/21" cheque: $530 for two $265 events.
+    # One invoice scored 75 on the payer's name plus mere calendar proximity —
+    # its event fell 10 days after the cheque was written — while contributing
+    # `amount+0`, because $530 is not $265. That cleared the confidence floor,
+    # and a confident single match used to end the search, so the split was
+    # computed and thrown away and the missing half was reported as an
+    # OVERPAYMENT of exactly the amount of the invoice nobody looked at.
+    #
+    # The rule: a unique set of this payer's invoices that sums to the cheque to
+    # the penny beats a single invoice the amount does not support. Arithmetic
+    # is evidence; being written in the same fortnight is a coincidence that
+    # happens to most invoices of a regular customer.
+    #
+    # Narrow on purpose. It needs `amount+0` — the amount agreeing even loosely
+    # (exact, fee-free, or within 5%) leaves the single match standing, so a
+    # correctly-matched cheque is never talked out of itself by a coincidental
+    # sum. And find_combination already refuses to return anything when two
+    # different sets reach the total.
+    if len(combo) > 1 and "amount+0" in best.flags:
+        parts = ", ".join(c.number or c.id for c in combo)
+        return InvoiceMatch(
+            None,
+            f"This cheque covers {len(combo)} invoices that together come to "
+            f"${amount:,.2f} exactly — {parts}. (Invoice "
+            f"{best.number or best.id} matched on the payer's name and the "
+            f"date, but is ${best.total:,.2f}, which this cheque is not for.)",
+            candidates[:5],
+            settled=paid_hit,
+            combination=combo,
+        )
+
     runner_up = open_ones[1] if len(open_ones) > 1 else None
     if runner_up and best.score - runner_up.score < AMBIGUITY_MARGIN:
         return InvoiceMatch(

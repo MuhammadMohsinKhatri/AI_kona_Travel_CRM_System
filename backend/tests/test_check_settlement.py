@@ -255,3 +255,74 @@ def test_an_invoice_the_memo_names_outscores_one_merely_near_the_cheque_date():
     )
     assert r.invoice_id == "inv-named"
     assert any("memo names 2026-07-09" in f for f in r.candidates[0].flags)
+
+
+# ── one cheque, several invoices, and a decoy that outscores both halves ─────
+
+# The Leaps Ahead cheque, 2026-08-06: $530.00, memo "Kona Ice on 7/9 and 7/21",
+# written 7/24. Three open invoices for the customer. The two the memo names
+# sum to the cheque exactly; a third, for an event ten days AFTER the cheque was
+# written, outscored both on the payer's name plus calendar proximity while the
+# amount agreed with nothing. It won, and the missing $265 was reported as an
+# overpayment.
+LEAPS_0709 = {
+    "id": "inv-0709", "invoiceNumber": "00860", "eventId": "ev-0709",
+    "businessName": "LEAPS AHEAD LEARNING LLC", "grandTotal": 300.00,
+    "invoiceStatus": "draft",
+}
+LEAPS_0721 = {
+    "id": "inv-0721", "invoiceNumber": "00871", "eventId": "ev-0721",
+    "businessName": "LEAPS AHEAD LEARNING LLC", "grandTotal": 230.00,
+    "invoiceStatus": "draft",
+}
+LEAPS_DECOY = {
+    "id": "inv-0803", "invoiceNumber": "00882", "eventId": "ev-0803",
+    "businessName": "LEAPS AHEAD LEARNING LLC", "grandTotal": 265.00,
+    "invoiceStatus": "draft",
+}
+
+
+def test_exact_sum_beats_a_single_invoice_the_amount_does_not_support():
+    r = match_invoice(
+        [LEAPS_DECOY, LEAPS_0709, LEAPS_0721],
+        "LEAPS AHEAD LEARNING LLC", 530.00,
+        check_date="2026-07-24", memo="Kona Ice on 7/9 and 7/21",
+        event_meta={"inv-0803": {"event_name": "Summer Kickoff",
+                                 "event_date": "2026-08-03"}},
+    )
+    # The decoy scores highest on its own (name+50, date+25, amount+0) — that is
+    # exactly the trap, so assert it really is the one that would have won.
+    assert r.candidates[0].id == "inv-0803"
+    assert "amount+0" in r.candidates[0].flags
+
+    # ...and is nonetheless not the answer. Both named halves are.
+    assert r.invoice is None
+    assert {c.id for c in r.combination} == {"inv-0709", "inv-0721"}
+    assert "00860" in r.reason and "00871" in r.reason
+
+
+def test_a_supported_single_match_is_not_talked_out_of_itself_by_a_sum():
+    """The guard on the rule above. When the amount DOES agree with one invoice,
+    a coincidental combination reaching the same total must not hijack it —
+    otherwise every cheque for a regular customer becomes negotiable."""
+    exact = {**LEAPS_DECOY, "grandTotal": 530.00}
+    r = match_invoice(
+        [exact, LEAPS_0709, LEAPS_0721],
+        "LEAPS AHEAD LEARNING LLC", 530.00,
+        check_date="2026-07-24", memo="Kona Ice on 7/9 and 7/21",
+        event_meta={"inv-0803": {"event_name": "Summer Kickoff",
+                                 "event_date": "2026-08-03"}},
+    )
+    assert r.invoice_id == "inv-0803"
+
+
+def test_an_ambiguous_sum_leaves_the_single_match_alone():
+    """find_combination returns nothing when two different sets reach the total.
+    With three $265 invoices any pair sums to $530, so there is no discovery
+    here — just arithmetic that happens twice."""
+    a = {**LEAPS_DECOY, "id": "a", "invoiceNumber": "00A", "grandTotal": 265.00}
+    b = {**LEAPS_DECOY, "id": "b", "invoiceNumber": "00B", "grandTotal": 265.00}
+    c = {**LEAPS_DECOY, "id": "c", "invoiceNumber": "00C", "grandTotal": 265.00}
+    r = match_invoice([a, b, c], "LEAPS AHEAD LEARNING LLC", 530.00,
+                      check_date="2026-07-24")
+    assert r.combination == []
