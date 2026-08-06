@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import EventDetail from "./pages/EventDetail";
 import Events from "./pages/Events";
 import Financials from "./pages/Financials";
+import Fleet from "./pages/Fleet";
 import Guide from "./pages/Guide";
 import Invoices from "./pages/Invoices";
 import Login from "./pages/Login";
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/financials" element={<Financials />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/aimee" element={<Aimee />} />
+        <Route path="/fleet" element={<Fleet />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/settings" element={<Settings />} />

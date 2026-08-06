@@ -79,6 +79,29 @@ SOURCE_GUIDE: dict[str, dict[str, str]] = {
             "restarting. Then re-run any dates that failed while it was down."
         ),
     },
+    "fuel": {
+        "label": "Truck needs fuel",
+        "what": (
+            "The daily fuel check (from Samsara) found this truck below the level "
+            "it can rely on for a full day's route without stopping."
+        ),
+        "fix_in": "Samsara — or just send it to a pump",
+        "after": (
+            "Nothing to do here once it's filled — this resolves itself the next "
+            "time the check runs and finds the tank back up. Mark it sorted only if "
+            "the reading itself was wrong."
+        ),
+    },
+    "clock": {
+        "label": "Staff clock in/out",
+        "what": (
+            "A record of someone clocking in or out, from Square. Informational — "
+            "filed here so it has one history with everything else, not because "
+            "anything needs fixing."
+        ),
+        "fix_in": "Square, if a time is actually wrong",
+        "after": "Nothing — these start out marked sorted; there is no action to take.",
+    },
 }
 
 

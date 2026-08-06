@@ -34,6 +34,12 @@ REQUEST_TIMEOUT_SECONDS = 12
 # always the lot. Asked for explicitly so a silent default change can't truncate.
 PAGE_LIMIT = 512
 
+# Shared with app/tasks/fleet_tasks.py (the daily alert) so the chat tool and
+# the push notification can never disagree about what counts as "low" —
+# Brett's threshold, not Samsara's.
+LOW_FUEL_PERCENT = 25
+CRITICAL_FUEL_PERCENT = 10
+
 
 class SamsaraError(RuntimeError):
     pass

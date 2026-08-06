@@ -13,10 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.aimee.registry import ToolResult, tool
 from app.integrations import samsara
-
-# Below this a truck cannot be relied on for a full day's route without
-# stopping. Brett's threshold, not a Samsara one.
-LOW_FUEL_PERCENT = 25
+from app.integrations.samsara import LOW_FUEL_PERCENT
 
 
 def _unavailable(e: Exception) -> ToolResult:

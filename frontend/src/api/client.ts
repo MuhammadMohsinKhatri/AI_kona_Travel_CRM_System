@@ -288,6 +288,7 @@ export const api = {
       "/api/konaos/session",
       { method: "POST", body: JSON.stringify({ session_key: sessionKey }) }
     ),
+  fleetStatus: () => request<FleetStatus>("/api/fleet/status"),
 };
 
 export interface FormOptions {
@@ -741,6 +742,30 @@ export interface KonaosSessionStatus {
   hint: string | null;
 }
 
+export interface FleetTruck {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  position_at: string;
+  fuel_percent: number | null;
+  low_fuel: boolean;
+}
+export interface FleetShift {
+  brand: string;
+  name: string;
+  clock_in: string;
+  clock_out: string;
+  open: boolean;
+  hours: number | null;
+}
+export interface FleetStatus {
+  trucks: { ok: boolean; error: string; trucks: FleetTruck[] };
+  staff: { ok: boolean; error: string; on_the_clock: FleetShift[] };
+  maps_configured: boolean;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────
 export interface User {
   id: number;
@@ -863,7 +888,8 @@ export interface EventSummary {
   updated_at: string;
 }
 /** Which system raised the alert — decides the guidance shown for fixing it. */
-export type AlertSource = "financial" | "cash" | "session";
+export type AlertSource =
+  | "financial" | "cash" | "session" | "verify" | "fuel" | "clock";
 
 export interface Alert {
   id: number;

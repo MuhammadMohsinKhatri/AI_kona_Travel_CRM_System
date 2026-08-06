@@ -19,6 +19,7 @@ celery = Celery(
         "app.tasks.konaos_tasks",
         "app.tasks.cash_tasks",
         "app.tasks.watch_tasks",
+        "app.tasks.fleet_tasks",
     ],
 )
 
@@ -89,5 +90,19 @@ celery.conf.beat_schedule = {
     "flag-events-awaiting-cash": {
         "task": "app.tasks.cash_tasks.flag_events_awaiting_cash",
         "schedule": crontab(hour=9, minute=0),  # morning, so it's actionable
+    },
+    # Before the first truck rolls out, not after — a low tank found at 6am is
+    # still fixable before the day's route; found by the driver at 2pm is not.
+    # Skips itself cleanly with no Samsara token configured (see fleet_tasks.py).
+    "check-fuel-levels": {
+        "task": "app.tasks.fleet_tasks.check_fuel_levels",
+        "schedule": crontab(hour=6, minute=0),
+    },
+    # Every 20 minutes, offset from the other hourly jobs above so nothing
+    # clusters on one tick. Square has no push feed for timecards, so this is
+    # a poll — frequent enough that "just clocked in" still reads as current.
+    "poll-clock-events": {
+        "task": "app.tasks.fleet_tasks.poll_clock_events",
+        "schedule": crontab(minute="*/20"),
     },
 }

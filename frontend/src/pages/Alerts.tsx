@@ -12,6 +12,8 @@ const SOURCE_LABELS: Record<string, string> = {
   financial: "Event data problems",
   cash: "Waiting on cash",
   session: "KonaOS connection",
+  fuel: "Low fuel",
+  clock: "Staff clock in/out",
 };
 
 /** Open problems, each one clickable through to a page that explains how to
