@@ -14,9 +14,35 @@ export default function Runs() {
   const [data, setData] = useState<Page<PipelineRun> | null>(null);
   const [selected, setSelected] = useState<PipelineRun | null>(null);
   const [page, setPage] = useState(1);
+  const [rerunBusyId, setRerunBusyId] = useState<number | null>(null);
+  const [rerunMsg, setRerunMsg] = useState("");
 
   const reload = () =>
     api.runs({ page: String(page), page_size: String(PAGE_SIZE) }).then(setData);
+
+  // Re-run with the exact same scope the original run used — a single event
+  // (or handful) for source_change/cash-settlement runs, or a date (+ optional
+  // event-type filter) for manual/scheduled batch runs. The backend upserts
+  // everything, so replaying either shape is always safe.
+  async function rerun(r: PipelineRun) {
+    setRerunBusyId(r.id);
+    setRerunMsg("");
+    try {
+      const res = await api.runPipeline({
+        targetDate: r.target_date ?? undefined,
+        eventTypes: r.filter_event_types ?? undefined,
+        eventIds: r.filter_event_ids ?? undefined,
+      });
+      setRerunMsg(`Started run #${res.run_id} — replaying run #${r.id}'s scope.`);
+      await reload();
+      // Jump straight to the new run's live view, same as clicking its row.
+      api.run(res.run_id).then(setSelected).catch(() => {});
+    } catch (e: any) {
+      setRerunMsg(`Couldn't re-run #${r.id}: ${e?.message || "unknown error"}`);
+    } finally {
+      setRerunBusyId(null);
+    }
+  }
 
   useEffect(() => {
     reload();
@@ -55,6 +81,8 @@ export default function Runs() {
         closing the pop-up or refreshing the page never stops one. Click a run in progress to
         watch it live.
       </p>
+
+      {rerunMsg && <p className="page-sub" style={{ color: "var(--brand)" }}>{rerunMsg}</p>}
 
       {!data ? (
         <Loading />
@@ -112,6 +140,19 @@ export default function Runs() {
                   </td>
                   <td>{new Date(r.started_at).toLocaleString()}</td>
                   <td className="actions">
+                    <button
+                      className="btn icon-btn"
+                      style={{ marginRight: 6 }}
+                      disabled={rerunBusyId === r.id}
+                      title={
+                        r.filter_event_ids?.length
+                          ? `Re-run this run's ${r.filter_event_ids.length} event(s) now`
+                          : `Re-run this run's scope now (${r.target_date || "all events"})`
+                      }
+                      onClick={(e) => { e.stopPropagation(); rerun(r); }}
+                    >
+                      {rerunBusyId === r.id ? "…" : "↻"}
+                    </button>
                     <DeleteButton
                       title="Delete this run from history (events and ledger are unaffected)"
                       onDelete={async () => { await api.deleteRun(r.id); await reload(); }}
