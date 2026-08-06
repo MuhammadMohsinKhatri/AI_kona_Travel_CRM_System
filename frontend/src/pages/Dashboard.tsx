@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AiBudgetStatus, api, DashboardStats, PipelineRun } from "../api/client";
-import { BudgetNote, Loading, RunEventBreakdown, StepList, money, useAiBudget } from "../components/ui";
+import {
+  AiUsage,
+  BudgetNote,
+  Loading,
+  RunEventBreakdown,
+  StepList,
+  money,
+  prettyDate,
+  useAiBudget,
+} from "../components/ui";
 
 type RunPhase = "idle" | "running" | "done";
 
@@ -340,17 +349,31 @@ export default function Dashboard() {
             borderColor: stats.last_run.status === "failed" ? "var(--crit)" : undefined,
           }}
         >
-          <div className="flex between">
+          {/* Two dates used to sit here side by side, both muted, unlabelled
+              and in different formats: "2026-08-04 · 06/08/2026, 19:46:19".
+              One is the day the run COVERED, the other the moment it ran, and
+              nothing said which was which — or whether 06/08 meant June or
+              August. The covered date is the whole reason this block exists
+              (it is the one that ignores the picker), so it gets a badge and
+              a word in front of it; the timestamp stays quiet. */}
+          <div className="flex between" style={{ flexWrap: "wrap", gap: 8 }}>
             <strong style={stats.last_run.status === "failed" ? { color: "var(--crit)" } : undefined}>
               Latest run · #{stats.last_run.id} · {stats.last_run.status}
             </strong>
             <span className="muted" style={{ fontSize: 13 }}>
-              {stats.last_run.trigger} · {stats.last_run.target_date || "all dates"}
+              {stats.last_run.trigger}
               {stats.last_run.finished_at &&
-                ` · ${new Date(stats.last_run.finished_at).toLocaleString()}`}
+                ` · ran ${new Date(stats.last_run.finished_at).toLocaleString()}`}
             </span>
           </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+          <div style={{ marginTop: 6 }}>
+            <span className="badge blue">
+              {stats.last_run.target_date
+                ? `Events dated ${prettyDate(stats.last_run.target_date)}`
+                : "All dates"}
+            </span>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
             The most recent run, whichever date it covered — not affected by the date picked above.
           </div>
           <RunEventBreakdown
@@ -389,6 +412,8 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      <AiSpendPanel stats={stats} budget={budget} />
 
       <div className="grid cols-4">
         <Stat label="Events" value={stats.total_events} />
@@ -500,6 +525,94 @@ function FinancialsCTA({ stats }: { stats: DashboardStats }) {
   );
 }
 
+/** What AI is costing, over three windows, against what is left to spend.
+ *
+ *  The two halves come from different places on purpose, and the panel says
+ *  so rather than blending them into one authoritative-looking number:
+ *
+ *    * Money is OpenAI's own Costs API — the real bill, covering everything
+ *      the key paid for, including check reads and Aimee.
+ *    * Tokens are this app's run records, because the Costs API reports money
+ *      and not tokens. Pipeline runs only, so they are a floor.
+ *
+ *  Dollars therefore sit ABOVE what the tokens beside them would imply, and
+ *  that gap is real rather than a bug to reconcile away. */
+function AiSpendPanel({
+  stats,
+  budget,
+}: {
+  stats: DashboardStats;
+  budget: AiBudgetStatus | null;
+}) {
+  const w = stats.ai_windows;
+  const credits = budget?.credits_remaining_usd ?? null;
+  const over = credits != null && credits < 0;
+
+  const rows: { label: string; cost: number | null; tokens: number }[] = [
+    { label: "This week", cost: budget?.week_spent_usd ?? null, tokens: w.week.total_tokens },
+    { label: "This month", cost: budget?.spent_usd ?? null, tokens: w.month.total_tokens },
+    {
+      label: budget?.credits_added_on ? "Since top-up" : "All time",
+      cost: budget?.credits_spent_usd ?? null,
+      tokens: w.all_time.total_tokens,
+    },
+  ];
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="flex between" style={{ flexWrap: "wrap", gap: 8 }}>
+        <strong>AI spend</strong>
+        {credits != null ? (
+          <span className={"ai-usage-left" + (over ? " over" : "")}>
+            {over
+              ? `${money(Math.abs(credits))} over the credits added`
+              : `${money(credits)} left in credits`}
+          </span>
+        ) : (
+          <Link className="ai-usage-setup" to="/settings">
+            {budget?.admin_key_configured
+              ? "Record your credits →"
+              : "Set up spend tracking →"}
+          </Link>
+        )}
+      </div>
+
+      {budget?.credits_added_on && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+          {money(budget.credits_added_usd)} added {prettyDate(budget.credits_added_on)}
+          {budget.credits_spent_usd != null &&
+            ` · ${money(budget.credits_spent_usd)} used since`}
+        </div>
+      )}
+
+      <div className="table-wrap" style={{ marginTop: 10 }}>
+        <table>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label}>
+                <td style={{ fontWeight: 600, width: "34%" }}>{r.label}</td>
+                <td style={{ fontWeight: 700 }}>
+                  {r.cost == null ? <span className="muted">—</span> : money(r.cost)}
+                </td>
+                <td className="muted">
+                  {r.tokens > 0 ? `${(r.tokens / 1000).toFixed(1)}k tokens` : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+        Dollars are OpenAI's own billing, covering everything the key paid for.
+        Token counts come from this app's pipeline runs only, so they read lower
+        than the money beside them.
+        {budget?.error ? ` · ${budget.error}` : ""}
+      </div>
+    </div>
+  );
+}
+
 function Stat({
   label,
   value,
@@ -580,11 +693,12 @@ function RunModal({
                   <Cell n={result?.events_errored ?? 0} l="Errored" />
                 </div>
                 {(result?.ai_cost_usd ?? 0) > 0 && (
-                  <p className="muted" style={{ marginTop: 0 }}>
-                    AI usage: {((result!.ai_prompt_tokens + result!.ai_completion_tokens) / 1000).toFixed(1)}k
-                    tokens · ${result!.ai_cost_usd.toFixed(3)}
-                    <BudgetNote budget={budget} />
-                  </p>
+                  <AiUsage
+                    promptTokens={result!.ai_prompt_tokens}
+                    completionTokens={result!.ai_completion_tokens}
+                    costUsd={result!.ai_cost_usd}
+                    budget={budget}
+                  />
                 )}
               </>
             )}

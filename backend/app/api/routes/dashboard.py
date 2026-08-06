@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -89,6 +90,38 @@ def stats(
         ai_q = ai_q.filter(PipelineRun.target_date <= to_date)
     ai_totals = ai_q.one()
 
+    # Tokens over time, for the "what are we burning" panel. Windowed on
+    # started_at — WHEN the tokens were spent — not target_date, which is the
+    # day a run covered and can be months from the day it ran.
+    #
+    # Tokens come from here rather than from OpenAI because the Costs API
+    # reports money, not tokens. The trade is that this counts pipeline runs
+    # only: check reads and Aimee spend real money that never lands on a
+    # PipelineRun row, so these token figures are a floor, and the dollar
+    # figures shown beside them (which do come from OpenAI) will be higher.
+    def _tokens_since(days: Optional[int]) -> dict:
+        q = db.query(
+            func.coalesce(func.sum(PipelineRun.ai_prompt_tokens), 0),
+            func.coalesce(func.sum(PipelineRun.ai_completion_tokens), 0),
+            func.coalesce(func.sum(PipelineRun.ai_cost_usd), 0.0),
+        )
+        if days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            q = q.filter(PipelineRun.started_at >= cutoff)
+        prompt, completion, cost = q.one()
+        return {
+            "prompt_tokens": int(prompt or 0),
+            "completion_tokens": int(completion or 0),
+            "total_tokens": int(prompt or 0) + int(completion or 0),
+            "cost_usd": round(float(cost or 0.0), 4),
+        }
+
+    ai_windows = {
+        "week": _tokens_since(7),
+        "month": _tokens_since(30),
+        "all_time": _tokens_since(None),
+    }
+
     last_run = db.query(PipelineRun).order_by(PipelineRun.id.desc()).first()
 
     # Single-day view: has THIS date been processed, and is a run going on
@@ -150,6 +183,7 @@ def stats(
             "total_tokens": int(ai_totals[0]) + int(ai_totals[1]),
             "cost_usd": round(float(ai_totals[2]), 4),
         },
+        "ai_windows": ai_windows,
         "last_run": {
             "id": last_run.id,
             "status": last_run.status,

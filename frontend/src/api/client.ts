@@ -181,6 +181,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ monthly_usd }),
     }),
+  /** Record an OpenAI credit top-up. Typed in rather than fetched: OpenAI
+   *  publishes no prepaid-balance endpoint, so what's left can only be this
+   *  figure minus real spend since `added_on`. */
+  saveAiCredits: (added_usd: number, added_on: string) =>
+    request<AiBudgetStatus>("/api/settings/ai-credits", {
+      method: "PUT",
+      body: JSON.stringify({ added_usd, added_on }),
+    }),
   // ── Recording payments that arrive off-system ──────────────────────────
   // The intake calls settle what they can on their own and hand back what they
   // won't. `applied` on a result means it is already done in KonaOS; absent,
@@ -760,6 +768,13 @@ export interface DateRunInfo {
   alerts_raised: number;
   error: string | null;
 }
+export interface AiWindow {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
 export interface DashboardStats {
   scope: { from_date: string | null; to_date: string | null; all_time: boolean };
   /** Single-day view only: the run currently processing this date (if any)
@@ -774,11 +789,16 @@ export interface DashboardStats {
   alerts_by_severity: Record<string, number>;
   events_by_event_type: Record<string, number>;
   events_by_billing_model: Record<string, number>;
-  ai_usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    cost_usd: number;
+  ai_usage: AiWindow;
+  /** Tokens burned per window, from this app's own run records — the only
+   *  place tokens exist, since OpenAI's Costs API reports money and not
+   *  tokens. Pipeline runs only: check reads and Aimee spend real money that
+   *  never lands on a run row, so treat these as a floor and expect the
+   *  dollar figures from `AiBudgetStatus` to sit above them. */
+  ai_windows: {
+    week: AiWindow;
+    month: AiWindow;
+    all_time: AiWindow;
   };
   last_run: {
     id: number;
@@ -890,15 +910,27 @@ export interface TelegramSettings {
   configured: boolean;
 }
 
-/** This month's AI budget against real spend from OpenAI's own Costs API —
- *  not this app's internal running total, which only covers what this app
- *  itself called. spent_usd/remaining_usd are null (with `error` explaining
- *  why) until an Admin API key is configured server-side. */
+/** AI spend measured against OpenAI's own Costs API — not this app's internal
+ *  running total, which only covers what this app itself called.
+ *
+ *  Two windows. `spent_usd`/`remaining_usd` are the calendar month against a
+ *  monthly ceiling. `credits_*` are the prepaid pot: what was topped up, when,
+ *  and what survives of it — that one does not reset each month.
+ *
+ *  Every spend figure is null (with `error` saying why) until an Admin API key
+ *  is configured server-side. `credits_remaining_usd` is additionally null
+ *  until somebody records a top-up, because OpenAI publishes no prepaid
+ *  balance to read — the added figure is typed in, not fetched. */
 export interface AiBudgetStatus {
   month: string;
   monthly_budget_usd: number;
   spent_usd: number | null;
   remaining_usd: number | null;
+  week_spent_usd: number | null;
+  credits_added_usd: number;
+  credits_added_on: string | null;
+  credits_spent_usd: number | null;
+  credits_remaining_usd: number | null;
   admin_key_configured: boolean;
   error: string;
 }

@@ -26,6 +26,10 @@ export default function Settings() {
   const [monthlyBudget, setMonthlyBudget] = useState("");
   const [savingBudget, setSavingBudget] = useState(false);
   const [budgetMsg, setBudgetMsg] = useState("");
+  const [creditsAdded, setCreditsAdded] = useState("");
+  const [creditsOn, setCreditsOn] = useState("");
+  const [savingCredits, setSavingCredits] = useState(false);
+  const [creditsMsg, setCreditsMsg] = useState("");
 
   useEffect(() => { load(); loadBudget(); }, []);
 
@@ -48,7 +52,33 @@ export default function Settings() {
     api.aiBudget().then((b) => {
       setBudget(b);
       setMonthlyBudget(b.monthly_budget_usd ? String(b.monthly_budget_usd) : "");
+      setCreditsAdded(b.credits_added_usd ? String(b.credits_added_usd) : "");
+      setCreditsOn(b.credits_added_on || "");
     }).catch(() => {});
+  }
+
+  async function saveCredits() {
+    const value = parseFloat(creditsAdded);
+    if (Number.isNaN(value) || value < 0) {
+      setCreditsMsg("Enter a number, 0 or more.");
+      return;
+    }
+    // The date is not optional garnish: spend is counted from it, so a blank
+    // one would silently charge the whole month's usage to a pot added today.
+    if (!creditsOn) {
+      setCreditsMsg("Pick the date the credits were added.");
+      return;
+    }
+    setSavingCredits(true);
+    setCreditsMsg("");
+    try {
+      setBudget(await api.saveAiCredits(value, creditsOn));
+      setCreditsMsg("Saved.");
+    } catch (e: any) {
+      setCreditsMsg(`Couldn't save: ${e?.message || "unknown error"}`);
+    } finally {
+      setSavingCredits(false);
+    }
   }
 
   async function saveBudget() {
@@ -286,6 +316,83 @@ export default function Settings() {
             {savingBudget ? "Saving…" : "Save budget"}
           </button>
           {budgetMsg && <span className="muted" style={{ fontSize: 13 }}>{budgetMsg}</span>}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, maxWidth: 760 }}>
+        <div className="flex between" style={{ marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>OpenAI credits</h2>
+          {budget?.credits_remaining_usd != null && (
+            <span
+              className={
+                "badge " + (budget.credits_remaining_usd < 0 ? "red" : "green")
+              }
+            >
+              ${budget.credits_remaining_usd.toFixed(2)} left
+            </span>
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 13, margin: "0 0 16px", lineHeight: 1.55 }}>
+          What was topped up on the OpenAI account, and when. Everything spent
+          from that day onward comes off it, and the remainder is what shows as
+          "left in credits" beside every AI cost in the app.
+          <br /><br />
+          <strong>This has to be typed in.</strong> OpenAI publishes no way to
+          read a prepaid balance back — the old billing endpoint was retired and
+          never worked for API keys — so this figure cannot be fetched, only
+          recorded. Spend against it <em>is</em> real, straight from OpenAI's
+          billing. Enter the amount added and the date it went on; after the
+          next top-up, update both and the count restarts from there.
+        </p>
+
+        <div className="flex" style={{ gap: 14, flexWrap: "wrap" }}>
+          <div className="field">
+            <label htmlFor="ai-credits">Credits added ($)</label>
+            <input
+              id="ai-credits"
+              className="input"
+              type="number"
+              min={0}
+              step="1"
+              style={{ maxWidth: 160 }}
+              value={creditsAdded}
+              placeholder="e.g. 100"
+              onChange={(e) => setCreditsAdded(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="ai-credits-on">Date added</label>
+            <input
+              id="ai-credits-on"
+              className="input"
+              type="date"
+              style={{ maxWidth: 190 }}
+              value={creditsOn}
+              onChange={(e) => setCreditsOn(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {budget?.admin_key_configured && budget.credits_spent_usd != null && (
+          <p className="muted" style={{ fontSize: 13 }}>
+            Used since {budget.credits_added_on}:{" "}
+            <strong>${budget.credits_spent_usd.toFixed(2)}</strong>
+            {" "}of <strong>${budget.credits_added_usd.toFixed(2)}</strong>
+          </p>
+        )}
+        {!budget?.admin_key_configured && (
+          <p className="muted" style={{ fontSize: 13, color: "var(--warn)" }}>
+            ⚠ Without <code className="inline">OPENAI_ADMIN_API_KEY</code> on the
+            server, spend can't be read — so what's left can't be worked out
+            either. The amount saves, but stays unusable until that key is set.
+          </p>
+        )}
+
+        <div className="flex" style={{ gap: 10, marginTop: 10 }}>
+          <button className="btn primary" onClick={saveCredits} disabled={savingCredits}>
+            {savingCredits ? "Saving…" : "Save credits"}
+          </button>
+          {creditsMsg && <span className="muted" style={{ fontSize: 13 }}>{creditsMsg}</span>}
         </div>
       </div>
 

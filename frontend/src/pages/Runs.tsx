@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, Page, PipelineRun } from "../api/client";
-import { Badge, DeleteButton, Empty, Loading, Pager, RunEventBreakdown, StepList } from "../components/ui";
+import {
+  AiUsage,
+  Badge,
+  DeleteButton,
+  Empty,
+  Loading,
+  Pager,
+  RunEventBreakdown,
+  StepList,
+  useAiBudget,
+} from "../components/ui";
 
 /** Run history — and the live view for runs executing in the worker.
  *
@@ -16,6 +26,7 @@ export default function Runs() {
   const [page, setPage] = useState(1);
   const [rerunBusyId, setRerunBusyId] = useState<number | null>(null);
   const [rerunMsg, setRerunMsg] = useState("");
+  const budget = useAiBudget();
 
   const reload = () =>
     api.runs({ page: String(page), page_size: String(PAGE_SIZE) }).then(setData);
@@ -188,6 +199,14 @@ export default function Runs() {
           <StepList steps={selected.progress ?? []} />
           {selected.error && (
             <p style={{ color: "var(--crit)" }}>{selected.error}</p>
+          )}
+          {selected.ai_cost_usd > 0 && (
+            <AiUsage
+              promptTokens={selected.ai_prompt_tokens}
+              completionTokens={selected.ai_completion_tokens}
+              costUsd={selected.ai_cost_usd}
+              budget={budget}
+            />
           )}
 
           <RunEventBreakdown runId={selected.id} />

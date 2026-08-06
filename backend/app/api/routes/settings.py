@@ -1,11 +1,12 @@
-"""User-editable runtime settings — Telegram alert delivery and the monthly AI
-budget shown alongside AI cost figures."""
+"""User-editable runtime settings — Telegram alert delivery, and the AI credit
+pot and monthly budget shown alongside AI cost figures."""
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -121,6 +122,34 @@ def update_ai_budget(
     _: User = Depends(get_current_user),
 ) -> dict:
     ai_budget.set_budget(db, body.monthly_usd)
+    return ai_budget.status(db)
+
+
+class AiCreditsInput(BaseModel):
+    added_usd: float = Field(..., ge=0)
+    # YYYY-MM-DD. Spend is counted against the credits from this day on, so a
+    # top-up dated wrongly reports the pot emptier or fuller than it is.
+    added_on: str = Field(..., min_length=10, max_length=10)
+
+
+@router.put("/ai-credits")
+def update_ai_credits(
+    body: AiCreditsInput,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Record an OpenAI credit top-up: the amount, and the day it was added.
+
+    Typed in rather than fetched because OpenAI publishes no prepaid-balance
+    endpoint — the remaining figure is this number minus real spend since that
+    date, so it is only ever as right as what's entered here."""
+    try:
+        date.fromisoformat(body.added_on)
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="added_on must be a date, as YYYY-MM-DD."
+        )
+    ai_budget.set_credits(db, body.added_usd, body.added_on)
     return ai_budget.status(db)
 
 

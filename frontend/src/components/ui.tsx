@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AiBudgetStatus, api, EventSummary, PipelineStep } from "../api/client";
 
 export function Badge({ kind, children }: { kind: string; children: ReactNode }) {
@@ -80,6 +80,81 @@ export function BudgetNote({ budget }: { budget: AiBudgetStatus | null }) {
         : `$${budget.remaining_usd.toFixed(2)} left`} this month
     </span>
   );
+}
+
+/** What one AI action cost, and what is left — as a thing you can actually
+ *  find on the page.
+ *
+ *  This was muted 12px grey sitting in a run of other muted 12px grey, so the
+ *  number people came looking for read as a footnote to the thing above it.
+ *  Same facts, given a tint and a rule down the side so the eye lands on it.
+ *
+ *  The no-key case says so instead of rendering nothing. Silence there is
+ *  indistinguishable from a broken figure: you cannot tell "spend tracking is
+ *  off" from "the balance failed to load", and nobody goes to Settings to fix
+ *  a thing they have no idea exists. One quiet link, only where a balance
+ *  would otherwise have been. */
+export function AiUsage({
+  promptTokens,
+  completionTokens,
+  costUsd,
+  budget,
+}: {
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number;
+  budget: AiBudgetStatus | null;
+}) {
+  const tokens = promptTokens + completionTokens;
+  // The credit pot answers "can we keep doing this", so it wins the slot when
+  // both are configured; the monthly ceiling is a pacing number and is only
+  // worth the space when nobody has recorded a top-up.
+  const credits = budget?.credits_remaining_usd ?? null;
+  const monthly = budget?.remaining_usd ?? null;
+  const remaining = credits ?? monthly;
+  const label = credits != null ? "left in credits" : "left this month";
+  const over = remaining != null && remaining < 0;
+  return (
+    <div className="ai-usage">
+      <span className="ai-usage-tag">AI</span>
+      <span className="ai-usage-cost">${costUsd.toFixed(3)}</span>
+      {tokens > 0 && (
+        <span className="ai-usage-dim">{(tokens / 1000).toFixed(1)}k tokens</span>
+      )}
+      {remaining != null ? (
+        <span className={"ai-usage-left" + (over ? " over" : "")}>
+          {over
+            ? `$${Math.abs(remaining).toFixed(2)} overspent`
+            : `$${remaining.toFixed(2)} ${label}`}
+        </span>
+      ) : (
+        <Link className="ai-usage-setup" to="/settings">
+          {budget?.admin_key_configured
+            ? "Record your credits →"
+            : "Set up spend tracking →"}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** A plain YYYY-MM-DD rendered so nobody has to work out whether 06/08 is June
+ *  or August — the ambiguity that matters when it sits beside a locale-format
+ *  timestamp of a different date entirely.
+ *
+ *  Split and rebuilt by parts rather than `new Date(iso)`, because that parses
+ *  a bare date as UTC midnight and renders as the day BEFORE anywhere west of
+ *  Greenwich — which is every user of this system. */
+export function prettyDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 export function Loading() {

@@ -7,7 +7,7 @@ import {
   CheckReview,
   api,
 } from "../api/client";
-import { BudgetNote, Empty, money, useAiBudget } from "../components/ui";
+import { AiUsage, Empty, money, useAiBudget } from "../components/ui";
 
 /** Recording a payment that arrives off-system: a check in the post.
  *
@@ -409,11 +409,12 @@ function CheckPanel({ onApprove }: { onApprove: (line: BatchLine) => void }) {
         </p>
       )}
       {review && review.check.ai_cost_usd > 0 && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          AI usage: {((review.check.ai_prompt_tokens + review.check.ai_completion_tokens) / 1000).toFixed(1)}k
-          tokens · ${review.check.ai_cost_usd.toFixed(3)}
-          <BudgetNote budget={budget} />
-        </p>
+        <AiUsage
+          promptTokens={review.check.ai_prompt_tokens}
+          completionTokens={review.check.ai_completion_tokens}
+          costUsd={review.check.ai_cost_usd}
+          budget={budget}
+        />
       )}
 
       {/* Everything the photo gave up, stated plainly and together. The date and
