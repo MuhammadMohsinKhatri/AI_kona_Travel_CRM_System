@@ -228,18 +228,7 @@ def poll_clock_events() -> dict[str, Any]:
         suppressed = 0
 
         for r in rows:
-            tid = str(r.get("id") or f"{r['name']}|{r['clock_in']}")
-            events: list[str] = []
-            if r["clock_in"] and tid not in starts:
-                starts.add(tid)
-                events.append(f"{r['name']} clocked in at {_local_time(r['clock_in'])}")
-            if r["clock_out"] and tid not in ends:
-                ends.add(tid)
-                hours = f" ({r['hours']}h)" if r.get("hours") else ""
-                events.append(
-                    f"{r['name']} clocked out at {_local_time(r['clock_out'])}{hours}"
-                )
-            for issue in events:
+            for issue in _clock_events_for(r, starts, ends):
                 # Past the breaker the ids are still recorded, so the flood is
                 # swallowed once rather than re-sent on the next pass; only the
                 # notification is dropped.
@@ -262,6 +251,53 @@ def poll_clock_events() -> dict[str, Any]:
         return {"checked": len(rows), "notified": notified, "suppressed": suppressed}
     finally:
         db.close()
+
+
+def _clock_events_for(
+    row: dict[str, Any], starts: set[str], ends: set[str]
+) -> list[str]:
+    """New clock lines for ONE timecard, marking them seen as it goes.
+
+    The two cursor sets are mutated in place, which is what lets the 20-minute
+    poll and the Square webhook share a single definition of "already told
+    someone about this". Whichever route sees a shift first claims it; the
+    other finds the id present and returns nothing. That is also what makes a
+    webhook Square retries harmless.
+    """
+    tid = str(row.get("id") or f"{row.get('name')}|{row.get('clock_in')}")
+    events: list[str] = []
+    if row.get("clock_in") and tid not in starts:
+        starts.add(tid)
+        events.append(f"{row['name']} clocked in at {_local_time(row['clock_in'])}")
+    if row.get("clock_out") and tid not in ends:
+        ends.add(tid)
+        hours = f" ({row['hours']}h)" if row.get("hours") else ""
+        events.append(
+            f"{row['name']} clocked out at {_local_time(row['clock_out'])}{hours}"
+        )
+    return events
+
+
+def notify_clock_timecard(db, row: dict[str, Any]) -> list[str]:
+    """Push one timecard immediately — the Square webhook's entry point.
+
+    Deliberately shares poll_clock_events' cursor rather than keeping its own:
+    two independent cursors would mean every shift announced twice, once by
+    whichever route was fastest and again by the other. Returns the lines
+    actually sent, which is empty when this shift has already been reported.
+
+    No MAX_NOTIFY_PER_PASS here — that breaker guards against a broken Square
+    *query* returning years of history in one poll. A webhook carries exactly
+    one timecard, and the gate on this path is the signature check.
+    """
+    cursor = _cursor(db)
+    starts, ends = set(cursor["starts"]), set(cursor["ends"])
+    issues = _clock_events_for(row, starts, ends)
+    for issue in issues:
+        _push_clock_alert(db, row, issue)
+    if issues:
+        _save_cursor(db, {"starts": list(starts), "ends": list(ends)})
+    return issues
 
 
 def _local_time(iso: str) -> str:

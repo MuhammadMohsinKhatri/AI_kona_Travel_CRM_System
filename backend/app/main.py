@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (aimee, alerts, auth, crm_audit, dashboard, events,
                             financials, fleet, health, intake, invoices, media,
-                            pipeline, settings as settings_routes)
+                            pipeline, settings as settings_routes, webhooks)
 from app.bootstrap import init_db
 from app.config import settings
 from app.konaos import router as konaos
@@ -51,6 +51,9 @@ app.include_router(media.router)
 app.include_router(fleet.router)
 app.include_router(crm_audit.router)
 app.include_router(settings_routes.router)
+# Unauthenticated by design — Square calls it, not a browser. It authenticates
+# each request by HMAC signature instead of a JWT; see the module docstring.
+app.include_router(webhooks.router)
 # KonaOS CRM endpoints (direct client for api.konaos.com)
 app.include_router(konaos.router, prefix="/api/konaos", tags=["konaos"])
 

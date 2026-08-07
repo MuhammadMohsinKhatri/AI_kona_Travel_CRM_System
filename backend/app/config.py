@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     square_tom_token: str = ""
     square_kona_location: str = "LGYP8DB54HMPV"
     square_tom_location: str = "LGWPJYFHY9AJD"
+    # Timecard webhook (app/api/routes/webhooks.py). One signature key per
+    # brand, because Kona and Tom are separate Square accounts with separate
+    # subscriptions; which key verifies identifies the sender.
+    #
+    # square_webhook_url must match the notification URL registered in the
+    # Square dashboard CHARACTER FOR CHARACTER — it is part of the signed
+    # payload, so a trailing slash or an http/https mismatch fails every
+    # request with no other symptom. Blank keys disable the endpoint entirely
+    # (401 on everything), which is the safe default for a public route whose
+    # only job is pushing messages to phones.
+    square_webhook_url: str = ""
+    square_kona_webhook_signature_key: str = ""
+    square_tom_webhook_signature_key: str = ""
 
     # OpenAI
     openai_api_key: str = ""
