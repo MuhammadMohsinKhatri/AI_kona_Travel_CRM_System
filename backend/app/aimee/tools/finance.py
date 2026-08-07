@@ -23,32 +23,122 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.aimee.registry import ToolResult, tool
+from app.core.event_matcher import _significant, _tokens
 from app.models import Event, FinancialEntry
 
 
 _DATE_IN_TEXT = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
+# Shortest token allowed to match as a prefix of another. Below this, "s" from
+# "Farmer's" would match half the vocabulary.
+_STEM_MIN = 4
+
+
+def _covers(word: str, tokens: list[str]) -> bool:
+    """Whether a query word is present, allowing for one being a stem of the other.
+
+    Exact equality is too strict for names people actually type: "farmers"
+    against an event called "Arbutus Farmer's Market", whose apostrophe splits
+    it into "farmer" and "s", matches nothing at all. Containment either way
+    covers singular/plural and the possessive, gated on length so short tokens
+    cannot match loosely.
+
+    Only reached when a plain substring search already found nothing, and the
+    caller still requires exactly one surviving candidate — so the looseness
+    cannot on its own decide which event gets the cash.
+    """
+    word = _bare(word)
+    for raw in tokens:
+        t = _bare(raw)
+        if (word == t
+                or (len(word) >= _STEM_MIN and word in t)
+                or (len(t) >= _STEM_MIN and t in word)):
+            return True
+    return False
+
+
+def _bare(token: str) -> str:
+    """Drop apostrophes so "farmer's" and "farmers" are the same word.
+
+    The shared tokenizer keeps the apostrophe inside the token rather than
+    splitting on it, so without this the possessive in "Arbutus Farmer's
+    Market" defeats both equality and containment.
+    """
+    return token.replace("'", "").replace("’", "")
+
+
+def _split_date(event_query: str, event_date: str) -> tuple[str, str]:
+    """(name, date) — pulling a date out of the NAME when it was smuggled there.
+
+    A model shown "Name (2026-07-28)" in an error message will sometimes hand
+    it straight back that way however the schema is worded, and "(IC)
+    Pikesville Farmers Market (2026-07-28)" matches no event at all. Cheaper to
+    be liberal here than to bounce the user round the same loop.
+    """
+    name = (event_query or "").strip()
+    on = (event_date or "").strip()
+    if not on:
+        found = _DATE_IN_TEXT.search(name)
+        if found:
+            on = found.group(1)
+    name = _DATE_IN_TEXT.sub("", name).replace("()", "").strip(" ()-–—,")
+    return name, on
+
+
+def find_candidates(
+    db: Session, event_query: str, event_date: str = "", brand: str = ""
+) -> list[Event]:
+    """Every event a phrase could mean, narrowed by date and brand when given.
+
+    Matching is deliberately loose on the NAME and strict on everything else.
+    Nobody types "(IC) Pikesville Farmers Market"; they type "Pikesville
+    Farmers", and the leading "(IC)" is a KonaOS prefix no one says out loud.
+    So a substring hit is tried first, and failing that every significant word
+    of the query must appear somewhere in the name — which also survives word
+    order, punctuation and the apostrophe in "Farmer's".
+
+    Strict on date and brand because those are how two real events are told
+    apart, and getting one wrong posts cash to the wrong ledger row.
+    """
+    name, on = _split_date(event_query, event_date)
+    if not name:
+        return []
+
+    scoped = db.query(Event)
+    if on:
+        scoped = scoped.filter(Event.event_date == on)
+    if brand.strip():
+        scoped = scoped.filter(Event.brand.ilike(f"%{brand.strip()}%"))
+
+    hits = (
+        scoped.filter(Event.event_name.ilike(f"%{name}%"))
+        .order_by(Event.event_date.desc())
+        .limit(10)
+        .all()
+    )
+    if hits:
+        return hits
+
+    # Word-by-word fallback. Bounded: with a date this is one day's events, and
+    # without one it is capped, because loading the whole table to fuzzy-match
+    # a typo is not worth it.
+    wanted = _significant(_tokens(name))
+    if not wanted:
+        return []
+    pool = scoped.order_by(Event.event_date.desc()).limit(400).all()
+    return [
+        e for e in pool
+        if all(_covers(w, _tokens(e.event_name or "")) for w in wanted)
+    ]
+
 
 def _find_event(
-    db: Session, event_query: str, event_date: str = ""
+    db: Session, event_query: str, event_date: str = "", brand: str = ""
 ) -> Optional[Event]:
-    """The event a phrase means, if exactly one does.
+    """The one event a phrase means, or None if it is genuinely ambiguous.
 
-    Deliberately strict: an exact crm id, or a single name match. Anything
-    ambiguous returns None so the tool can say which ones it found rather than
-    proposing a write against a guess.
-
-    ``event_date`` is how that question gets answered. Five events share the
-    name "(IC) Pikesville Farmers Market" and differ only by date, so refusing
-    to guess is right — but the refusal was a dead end until there was a way to
-    reply. Without the parameter the model did the only thing left to it and
-    folded the date into the name, producing "(IC) Pikesville Farmers Market
-    (2026-07-28)", which matches nothing and reads to the user as the system
-    losing an event it had just listed.
-
-    A date is also pulled out of the NAME as a fallback, because a model that
-    has been shown "Name (2026-07-28)" in an error message will sometimes send
-    it back that way however the schema is worded.
+    None is not failure — it is the tool declining to guess so it can show what
+    it found. Proposing a write against a coin-flip is the failure.
     """
     query = (event_query or "").strip()
     if not query:
@@ -58,20 +148,8 @@ def _find_event(
     if exact is not None:
         return exact
 
-    on = (event_date or "").strip()
-    if not on:
-        found = _DATE_IN_TEXT.search(query)
-        if found:
-            on = found.group(1)
-            # Strip the date and any brackets it was wrapped in, so the name
-            # still matches: "Pikesville (2026-07-28)" -> "Pikesville".
-            query = _DATE_IN_TEXT.sub("", query).replace("()", "").strip(" ()-–—,")
-
-    matches = db.query(Event).filter(Event.event_name.ilike(f"%{query}%"))
-    if on:
-        matches = matches.filter(Event.event_date == on)
-    found_events = matches.order_by(Event.event_date.desc()).limit(5).all()
-    return found_events[0] if len(found_events) == 1 else None
+    found = find_candidates(db, event_query, event_date, brand)
+    return found[0] if len(found) == 1 else None
 
 
 @tool(
@@ -80,18 +158,26 @@ def _find_event(
     running_label="Preparing the cash update",
     description=(
         "Record the cash counted at an event. Use when told an amount was taken "
-        "— 'Pikesville took $7', 'Arbutus had sixty dollars cash'. Put ONLY the "
-        "name in `event`; if a date is mentioned or needed to tell two events "
-        "apart, put it in `event_date` — never fold it into the name. This does "
-        "NOT write immediately: it prepares the change for the user to confirm, "
-        "so say what you are about to record rather than reporting it as done."
+        "— 'Pikesville took $7', 'Arbutus had sixty dollars cash'. "
+        "Put ONLY the name in `event` — a partial name is fine, 'Pikesville "
+        "Farmers' finds '(IC) Pikesville Farmers Market'. Never fold a date or "
+        "a brand into it. "
+        "`event_date` (YYYY-MM-DD) picks between events sharing a name. Name + "
+        "date is normally enough. Only add `brand` if the tool asks for it, "
+        "which happens solely when both brands ran the same event that day. "
+        "This does NOT write immediately: it prepares the change for the user "
+        "to confirm, so say what you are about to record rather than reporting "
+        "it as done."
     ),
     parameters={
         "type": "object",
         "properties": {
             "event": {
                 "type": "string",
-                "description": "Event NAME only, or a KonaOS event id. No date.",
+                "description": (
+                    "Event NAME only (partial is fine), or a KonaOS event id. "
+                    "No date, no brand."
+                ),
             },
             "amount": {
                 "type": "number",
@@ -99,8 +185,13 @@ def _find_event(
             },
             "event_date": {
                 "type": "string",
+                "description": "YYYY-MM-DD. Picks between events sharing a name.",
+            },
+            "brand": {
+                "type": "string",
                 "description": (
-                    "YYYY-MM-DD. Use this to pick between events sharing a name."
+                    "'Kona Ice' or \"Travelin' Tom's\". Only needed when both "
+                    "brands ran the same event on the same day."
                 ),
             },
         },
@@ -108,44 +199,56 @@ def _find_event(
     },
 )
 def record_cash(
-    db: Session, event: str, amount: float, event_date: str = ""
+    db: Session, event: str, amount: float, event_date: str = "", brand: str = ""
 ) -> ToolResult:
     if amount is None or float(amount) < 0:
         return ToolResult(ok=False, error="Cash amount must be zero or more.")
 
-    found = _find_event(db, event, event_date)
+    found = _find_event(db, event, event_date, brand)
     if found is None:
-        # Search on the name alone — the date is what NARROWED it to nothing,
-        # so repeating it here would report "no such event" for a name that
-        # plainly exists and hide the very list the user needs.
-        bare = _DATE_IN_TEXT.sub("", event or "").replace("()", "").strip(" ()-–—,")
-        near = (
-            db.query(Event)
-            .filter(Event.event_name.ilike(f"%{bare}%"))
-            .order_by(Event.event_date.desc())
-            .limit(5)
-            .all()
+        name, on = _split_date(event, event_date)
+        # Widened deliberately: whatever narrowed this to nothing (the date, the
+        # brand) is exactly what must be dropped to show the user their options.
+        # Repeating the filter would report "no such event" for a name that
+        # plainly exists, which is how the system looks like it lost an event it
+        # had just listed.
+        near = find_candidates(db, name)
+        if not near:
+            return ToolResult(ok=False, error=f'No event matches "{name}".')
+
+        on_that_day = [e for e in near if not on or e.event_date == on]
+        if on and not on_that_day:
+            runs = "; ".join(sorted({e.event_date or "?" for e in near})[:6])
+            return ToolResult(
+                ok=False,
+                error=(
+                    f'No "{name}" on {on}. It runs on: {runs}. '
+                    "Pass one of those as event_date."
+                ),
+            )
+
+        # Same name, same day, two brands — the ONE case brand resolves. Asking
+        # for it any other time is a question the user cannot answer usefully.
+        brands = sorted({(e.brand or "").strip() for e in on_that_day if e.brand})
+        if on and len(on_that_day) > 1 and len(brands) > 1:
+            return ToolResult(
+                ok=False,
+                error=(
+                    f'Both brands ran "{name}" on {on} — {" and ".join(brands)}. '
+                    "Pass brand to say which."
+                ),
+            )
+
+        listed = "; ".join(
+            f"{e.event_name} ({e.event_date})" for e in near[:6]
         )
-        if near and (event_date or _DATE_IN_TEXT.search(event or "")):
-            asked = event_date or _DATE_IN_TEXT.search(event).group(1)
-            return ToolResult(
-                ok=False,
-                error=(
-                    f"No \"{bare}\" on {asked}. It runs on: "
-                    + "; ".join(f"{e.event_date}" for e in near)
-                    + ". Use event_date to pick one."
-                ),
-            )
-        if near:
-            return ToolResult(
-                ok=False,
-                error=(
-                    f"\"{event}\" matches {len(near)} events — say which by "
-                    "passing event_date: "
-                    + "; ".join(f"{e.event_name} ({e.event_date})" for e in near)
-                ),
-            )
-        return ToolResult(ok=False, error=f"No event matches \"{event}\".")
+        return ToolResult(
+            ok=False,
+            error=(
+                f'"{name}" matches {len(near)} events — say which by passing '
+                f"event_date: {listed}"
+            ),
+        )
 
     entry = (
         db.query(FinancialEntry)

@@ -97,3 +97,74 @@ def test_an_unambiguous_name_needs_no_date(_events):
 def test_find_event_strips_the_date_before_matching_the_name(_events):
     found = _find_event(_events, f"{NAME} (2026-07-21)")
     assert found is not None and found.event_date == "2026-07-21"
+
+
+# ── partial names, and brand only when brand is the actual question ─────────
+
+def _add(db, crm_id, name, date, brand="Kona Ice"):
+    ev = Event(crm_event_id=crm_id, event_name=name, event_date=date,
+               brand=brand, status="processed")
+    db.add(ev)
+    db.flush()
+    db.add(FinancialEntry(event_id=ev.id, crm_event_id=crm_id, event_name=name,
+                          event_date=date, cash_collected=0.0))
+    db.commit()
+    return ev
+
+
+def test_a_partial_name_resolves_to_the_full_one(_events):
+    """Nobody types "(IC) Pikesville Farmers Market". The "(IC)" is a KonaOS
+    prefix no one says out loud."""
+    r = record_cash(db=_events, event="Pikesville Farmers", amount=7,
+                    event_date="2026-07-28")
+    assert r.ok is True, r.error
+    assert r.proposal["event_name"] == NAME
+
+
+def test_one_word_is_enough_when_it_is_unambiguous(_events):
+    r = record_cash(db=_events, event="Pikesville", amount=7,
+                    event_date="2026-07-14")
+    assert r.ok is True, r.error
+    assert r.proposal["event_date"] == "2026-07-14"
+
+
+def test_word_order_and_punctuation_do_not_matter(_events):
+    """The token fallback: every significant word present, in any order. A
+    substring match alone would miss both of these."""
+    _add(_events, "K800", "Arbutus Farmer's Market", "2026-06-10")
+    r = record_cash(db=_events, event="market farmers arbutus", amount=12,
+                    event_date="2026-06-10")
+    assert r.ok is True, r.error
+    assert r.proposal["event_name"] == "Arbutus Farmer's Market"
+
+
+def test_brand_is_asked_for_only_when_both_brands_ran_it_that_day(_events):
+    _add(_events, "K700", "Manheim Auto Auction", "2026-06-01", "Kona Ice")
+    _add(_events, "T700", "Manheim Auto Auction", "2026-06-01", "Travelin' Tom's")
+
+    r = record_cash(db=_events, event="Manheim", amount=20, event_date="2026-06-01")
+    assert r.ok is False and r.proposal is None
+    assert "Both brands" in r.error
+    assert "brand" in r.error.lower()
+
+
+def test_naming_the_brand_resolves_that_case(_events):
+    _add(_events, "K701", "Manheim Auto Auction", "2026-06-02", "Kona Ice")
+    _add(_events, "T701", "Manheim Auto Auction", "2026-06-02", "Travelin' Tom's")
+
+    r = record_cash(db=_events, event="Manheim", amount=20,
+                    event_date="2026-06-02", brand="Travelin")
+    assert r.ok is True, r.error
+    assert r.proposal["crm_event_id"] == "T701"
+
+
+def test_brand_is_not_demanded_when_the_date_already_settles_it(_events):
+    """The rule that keeps this from becoming an interrogation — one event that
+    day means no further questions, whatever other brands exist elsewhere."""
+    _add(_events, "K702", "Solo Brand Event", "2026-06-03", "Kona Ice")
+    _add(_events, "T702", "Solo Brand Event", "2026-06-04", "Travelin' Tom's")
+
+    r = record_cash(db=_events, event="Solo Brand", amount=5,
+                    event_date="2026-06-03")
+    assert r.ok is True, r.error
+    assert r.proposal["crm_event_id"] == "K702"
