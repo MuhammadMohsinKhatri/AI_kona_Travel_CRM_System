@@ -91,12 +91,19 @@ celery.conf.beat_schedule = {
         "task": "app.tasks.cash_tasks.flag_events_awaiting_cash",
         "schedule": crontab(hour=9, minute=0),  # morning, so it's actionable
     },
-    # Before the first truck rolls out, not after — a low tank found at 6am is
-    # still fixable before the day's route; found by the driver at 2pm is not.
+    # 11pm New York, at the client's request: the day's driving is done, so the
+    # levels are what the trucks will START tomorrow on, and there is an evening
+    # to act on a low one rather than a scramble at dawn.
+    #
+    # Deliberately :00 alongside konaos-session-maintenance rather than offset.
+    # They are separate tasks on a worker that runs them concurrently, and a
+    # report whose time is easy to state ("eleven") is worth more than avoiding
+    # a tick that costs one Samsara call.
+    #
     # Skips itself cleanly with no Samsara token configured (see fleet_tasks.py).
     "check-fuel-levels": {
         "task": "app.tasks.fleet_tasks.check_fuel_levels",
-        "schedule": crontab(hour=6, minute=0),
+        "schedule": crontab(hour=23, minute=0),
     },
     # Every 20 minutes, offset from the other hourly jobs above so nothing
     # clusters on one tick. Square has no push feed for timecards, so this is
