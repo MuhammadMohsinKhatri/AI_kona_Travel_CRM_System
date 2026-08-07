@@ -17,8 +17,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.db.base import get_db
 from app.integrations import gmaps, samsara, square_labor
 from app.models import User
 
@@ -69,3 +72,29 @@ def fleet_status(_: User = Depends(get_current_user)) -> dict[str, Any]:
         "staff": _staff(),
         "maps_configured": gmaps.configured(),
     }
+
+
+class EtaRequest(BaseModel):
+    truck: str
+    destination: str
+
+
+@router.post("/eta")
+def fleet_eta(
+    body: EtaRequest, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """The Fleet page's ETA widget — a REST wrapper over the same
+    get_truck_eta Aimee already calls, so typing a destination on this page
+    and asking Aimee the same question can never disagree.
+
+    Chat is a better fit for the OTHER travel tools (a route with several
+    stops, an arbitrary point-to-point time, a Street View photo) — each needs
+    fresh input every time regardless of surface, so a page for them would be
+    the same form chat already is, with none of the conversation.
+    """
+    from app.aimee.tools.maps import get_truck_eta
+
+    result = get_truck_eta(db=db, truck=body.truck, destination=body.destination)
+    if not result.ok:
+        return {"ok": False, "error": result.error}
+    return {"ok": True, **result.data}

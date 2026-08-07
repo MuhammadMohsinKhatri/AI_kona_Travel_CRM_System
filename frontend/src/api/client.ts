@@ -289,6 +289,11 @@ export const api = {
       { method: "POST", body: JSON.stringify({ session_key: sessionKey }) }
     ),
   fleetStatus: () => request<FleetStatus>("/api/fleet/status"),
+  fleetEta: (truck: string, destination: string) =>
+    request<FleetEtaResult>("/api/fleet/eta", {
+      method: "POST",
+      body: JSON.stringify({ truck, destination }),
+    }),
 };
 
 export interface FormOptions {
@@ -764,6 +769,17 @@ export interface FleetStatus {
   trucks: { ok: boolean; error: string; trucks: FleetTruck[] };
   staff: { ok: boolean; error: string; on_the_clock: FleetShift[] };
   maps_configured: boolean;
+}
+export interface FleetEtaResult {
+  ok: boolean;
+  error?: string;
+  truck?: string;
+  from?: string;
+  destination?: string;
+  distance?: string;
+  duration?: string;
+  eta?: string;
+  traffic_aware?: boolean;
 }
 
 // ── Types ────────────────────────────────────────────────────────────────

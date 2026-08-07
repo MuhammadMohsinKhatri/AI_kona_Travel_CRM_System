@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FleetStatus, api } from "../api/client";
+import { FleetEtaResult, FleetStatus, api } from "../api/client";
 import { Empty, Loading } from "../components/ui";
 
 /** Where the trucks are, how much fuel they have, and who is on the clock —
@@ -42,6 +42,9 @@ export default function Fleet() {
         <Loading />
       ) : (
         <>
+          {data.trucks.ok && data.trucks.trucks.length > 0 && (
+            <EtaWidget trucks={data.trucks.trucks.map((t) => t.name)} />
+          )}
           <div className="section-title" style={{ marginTop: 4 }}>Trucks</div>
           {!data.trucks.ok ? (
             <p className="muted">{data.trucks.error}</p>
@@ -110,5 +113,73 @@ export default function Fleet() {
         </>
       )}
     </>
+  );
+}
+
+/** How long a truck needs to reach somewhere, from where it is right now.
+ *
+ *  The one travel tool that earns a permanent spot on this page rather than
+ *  staying chat-only: it's anchored to a truck that's already listed above,
+ *  so picking one from a dropdown is less friction than typing its name.
+ *  Multi-stop routes, a plain point-to-point time and Street View stay in
+ *  Aimee — each needs fresh input every time regardless of surface, so a page
+ *  for them would just be this same form with none of the conversation. */
+function EtaWidget({ trucks }: { trucks: string[] }) {
+  const [truck, setTruck] = useState(trucks[0] || "");
+  const [destination, setDestination] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<FleetEtaResult | null>(null);
+
+  async function go() {
+    if (!truck || !destination.trim()) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult(await api.fleetEta(truck, destination.trim()));
+    } catch (e) {
+      setResult({ ok: false, error: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>ETA for a truck</div>
+      <div className="flex" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select
+          className="select"
+          value={truck}
+          onChange={(e) => setTruck(e.target.value)}
+        >
+          {trucks.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input
+          className="input"
+          style={{ flex: "1 1 220px" }}
+          placeholder="Destination address"
+          value={destination}
+          onKeyDown={(e) => e.key === "Enter" && go()}
+          onChange={(e) => setDestination(e.target.value)}
+        />
+        <button className="btn primary" disabled={busy || !destination.trim()} onClick={go}>
+          {busy ? "Working it out…" : "Get ETA"}
+        </button>
+      </div>
+
+      {result && (
+        result.ok ? (
+          <p style={{ marginTop: 10, marginBottom: 0 }}>
+            <strong>{result.truck}</strong> is {result.distance} from{" "}
+            {result.destination} — about <strong>{result.duration}</strong>
+            {result.traffic_aware ? " in current traffic" : ""}.
+          </p>
+        ) : (
+          <p style={{ marginTop: 10, marginBottom: 0, color: "var(--crit)" }}>
+            {result.error}
+          </p>
+        )
+      )}
+    </div>
   );
 }

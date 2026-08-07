@@ -6,7 +6,7 @@ import {
   AimeeMessage,
   api,
 } from "../api/client";
-import { money } from "../components/ui";
+import { DeleteButton, money } from "../components/ui";
 
 /** Aimee — the chat assistant.
  *
@@ -38,6 +38,10 @@ export default function Aimee() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState<Busy>("");
   const [error, setError] = useState("");
+  // The thread rail is a permanent column on desktop and a drawer on mobile
+  // (see the 900px breakpoint in styles.css) — this only matters on the
+  // latter, where it starts closed so a chat doesn't open behind it.
+  const [threadsOpen, setThreadsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,6 +70,7 @@ export default function Aimee() {
     const c = await api.aimeeConversation(id);
     setCurrent(c);
     setMessages(c.messages ?? []);
+    setThreadsOpen(false); // no-op on desktop; closes the drawer on mobile
   }
 
   function newChat() {
@@ -73,6 +78,16 @@ export default function Aimee() {
     setMessages([]);
     setText("");
     setError("");
+    setThreadsOpen(false);
+  }
+
+  async function deleteThread(id: number) {
+    await api.aimeeDeleteConversation(id);
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    // Deleting the open conversation has to leave the chat in a state that
+    // still makes sense — showing messages that belong to a thread which no
+    // longer exists would let someone reply into nothing.
+    if (current?.id === id) newChat();
   }
 
   /** Runs a turn and folds the result in. One place, so text, voice and image
@@ -146,25 +161,39 @@ export default function Aimee() {
 
   const empty = messages.length === 0;
 
+  const over = budget?.remaining_usd != null && budget.remaining_usd < 0;
+
   return (
     <div className="aimee">
-      <aside className="aimee-side">
+      <aside className={"aimee-side" + (threadsOpen ? " open" : "")}>
         <button className="btn primary aimee-new" onClick={newChat}>
           ✚ New chat
         </button>
         <div className="aimee-threads">
           {conversations.map((c) => (
-            <button
+            <div
               key={c.id}
               className={"aimee-thread" + (current?.id === c.id ? " active" : "")}
-              onClick={() => openConversation(c.id)}
-              title={c.title}
             >
-              <span className="aimee-thread-title">{c.title || "New chat"}</span>
-              <span className="muted aimee-thread-cost">
-                {c.cost_usd > 0 ? `$${c.cost_usd.toFixed(3)}` : ""}
-              </span>
-            </button>
+              <button
+                className="aimee-thread-open"
+                onClick={() => openConversation(c.id)}
+                title={c.title}
+              >
+                <span className="aimee-thread-title">{c.title || "New chat"}</span>
+              </button>
+              <div className="aimee-thread-row">
+                <span className="muted aimee-thread-cost">
+                  {c.cost_usd > 0 ? `$${c.cost_usd.toFixed(3)}` : ""}
+                </span>
+                <span className="aimee-thread-delete">
+                  <DeleteButton
+                    title="Delete this chat"
+                    onDelete={() => deleteThread(c.id)}
+                  />
+                </span>
+              </div>
+            </div>
           ))}
           {conversations.length === 0 && (
             <p className="muted" style={{ fontSize: 12, padding: "0 4px" }}>
@@ -173,9 +202,20 @@ export default function Aimee() {
           )}
         </div>
       </aside>
+      {/* Adjacent-sibling in CSS: showing this on top of everything else only
+          when .aimee-side carries .open is what makes tapping outside the
+          drawer close it, without a separate piece of state to keep in sync. */}
+      <div className="aimee-threads-backdrop" onClick={() => setThreadsOpen(false)} />
 
       <section className="aimee-main">
         <header className="aimee-head">
+          <button
+            className="btn aimee-threads-toggle"
+            onClick={() => setThreadsOpen(true)}
+            aria-label="Show past chats"
+          >
+            ☰ Chats
+          </button>
           <div>
             <div className="aimee-name">
               <span className="aimee-dot" /> Aimee
@@ -191,9 +231,10 @@ export default function Aimee() {
               </span>
             )}
             {budget?.remaining_usd != null && (
-              <span className="muted">
-                {money(budget.remaining_usd)} left of{" "}
-                {money(budget.monthly_budget_usd)} this month
+              <span className={"aimee-budget-pill" + (over ? " over" : "")}>
+                {over
+                  ? `${money(Math.abs(budget.remaining_usd))} over budget`
+                  : `${money(budget.remaining_usd)} left`} this month
               </span>
             )}
           </div>
@@ -293,9 +334,10 @@ function Bubble({
   }
 
   const isUser = message.role === "user";
+  const sentAt = message.created_at ? new Date(message.created_at).toLocaleString() : "";
   return (
     <div className={"aimee-msg " + (isUser ? "user" : "assistant")}>
-      <div className="aimee-bubble">
+      <div className="aimee-bubble" title={sentAt || undefined}>
         {message.attachment_kind && (
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             {message.attachment_kind === "voice" ? "🎙 voice" : "📷 image"}

@@ -905,20 +905,44 @@ code.inline {
    the viewport rather than the content so the composer stays pinned at the
    bottom and only the log scrolls — a chat whose input drifts down the page as
    it grows is the single most irritating thing an assistant can do. */
-.aimee { display: flex; gap: 16px; height: calc(100vh - 92px); min-height: 460px; }
+.aimee { display: flex; gap: 16px; height: calc(100vh - 92px); min-height: 460px; position: relative; }
 
-.aimee-side { width: 220px; flex: none; display: flex; flex-direction: column; gap: 10px; }
+.aimee-side {
+  width: 232px; flex: none; display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow);
+}
 .aimee-new { width: 100%; }
-.aimee-threads { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.aimee-threads { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
 .aimee-thread {
-  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
-  text-align: left; border: 0; background: transparent; cursor: pointer;
-  padding: 8px 10px; border-radius: 8px; color: var(--text); font-size: 13px;
+  position: relative; display: flex; justify-content: space-between; gap: 4px;
+  align-items: baseline; padding: 2px 8px 2px 13px; border-radius: 8px;
+  font-size: 13px; border-left: 3px solid transparent;
+  transition: background-color .12s, border-color .12s;
 }
 .aimee-thread:hover { background: var(--surface-2); }
-.aimee-thread.active { background: var(--surface-2); font-weight: 600; }
+.aimee-thread.active {
+  background: var(--surface-2); font-weight: 600; border-left-color: var(--brand);
+}
+/* The click target — a button in its own right so the delete control beside
+   it can be a real, separately-focusable button rather than one nested
+   inside another, which is invalid markup and unreliable to click precisely. */
+.aimee-thread-open {
+  flex: 1; min-width: 0; text-align: left; border: 0; background: transparent;
+  cursor: pointer; color: inherit; font: inherit; padding: 8px 0; display: block;
+}
 .aimee-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aimee-thread-cost { font-size: 11px; flex: none; }
+.aimee-thread-cost { font-size: 11px; flex: none; transition: opacity .1s; }
+/* The delete button lives where the cost normally sits and swaps in on hover,
+   rather than adding a second control that permanently competes for space in
+   a list row that is already tight on a 232px rail. */
+.aimee-thread-row { display: flex; align-items: center; gap: 4px; flex: none; }
+.aimee-thread-delete {
+  opacity: 0; flex: none; transition: opacity .1s;
+}
+.aimee-thread:hover .aimee-thread-delete,
+.aimee-thread:focus-within .aimee-thread-delete { opacity: 1; }
+.aimee-thread:hover .aimee-thread-cost { opacity: 0; width: 0; overflow: hidden; }
 
 .aimee-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column;
@@ -928,14 +952,32 @@ code.inline {
 .aimee-head {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
   padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  background: var(--surface-2);
 }
-.aimee-name { font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.aimee-name { font-weight: 700; display: flex; align-items: center; gap: 8px; font-size: 15px; }
 .aimee-dot {
   width: 9px; height: 9px; border-radius: 50%; background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
 }
-.aimee-cost { text-align: right; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
-.aimee-cost-chat { font-weight: 600; }
+.aimee-cost {
+  text-align: right; font-size: 12px; display: flex; flex-direction: column;
+  gap: 4px; align-items: flex-end;
+}
+/* Same pill language as the AI-spend strip elsewhere (Dashboard, Runs,
+   Record Payments) — Aimee is where that spend actually happens, so it should
+   look like part of the same system rather than a note in the corner. */
+.aimee-cost-chat {
+  font-weight: 700; font-size: 12px; padding: 2px 10px; border-radius: 999px;
+  background: rgba(14,165,233,.14); color: var(--brand-ink);
+}
+.aimee-budget-pill {
+  font-weight: 600; padding: 2px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.aimee-budget-pill.over { color: var(--crit); border-color: var(--crit); }
+/* Reachable only under 900px, where the thread rail is a drawer instead of a
+   permanent column — see the media query at the bottom of this section. */
+.aimee-threads-toggle { display: none; }
 
 .aimee-log { flex: 1; overflow-y: auto; padding: 18px 16px; }
 
@@ -963,12 +1005,19 @@ code.inline {
   background: rgba(217,119,6,.15); color: var(--warn);
 }
 
-.aimee-msg { display: flex; flex-direction: column; margin-bottom: 14px; }
+.aimee-msg {
+  display: flex; flex-direction: column; margin-bottom: 14px;
+  animation: aimee-msg-in .18s ease-out;
+}
+@keyframes aimee-msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
 .aimee-msg.user { align-items: flex-end; }
 .aimee-msg.assistant { align-items: flex-start; }
 .aimee-bubble {
   max-width: min(78%, 680px); padding: 10px 14px; border-radius: 14px;
-  line-height: 1.5; overflow-wrap: anywhere;
+  line-height: 1.5; overflow-wrap: anywhere; box-shadow: var(--shadow);
 }
 .aimee-msg.user .aimee-bubble {
   background: var(--brand); color: #fff; border-bottom-right-radius: 4px;
@@ -978,12 +1027,15 @@ code.inline {
   border-bottom-left-radius: 4px;
 }
 .aimee-msg.user .aimee-bubble code { background: rgba(255,255,255,.2); }
-.aimee-msg-cost { font-size: 11px; margin-top: 3px; }
+.aimee-msg-cost { font-size: 11px; margin-top: 3px; cursor: default; }
 
-/* Tool calls are evidence of work, not conversation — quieter than a bubble. */
+/* Tool calls are evidence of work, not conversation — a quiet chip rather
+   than a bubble, in the same rounded-pill language as everything else. */
 .aimee-step {
   font-size: 12px; color: var(--text-dim); margin: 0 0 10px 6px;
-  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 4px 10px; border-radius: 999px; background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 .aimee-step-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .aimee-step-dot.ok { background: var(--ok); }
@@ -1020,7 +1072,8 @@ code.inline {
 
 .aimee-composer {
   display: flex; align-items: flex-end; gap: 8px;
-  padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface);
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  background: var(--surface-2);
 }
 .aimee-input {
   flex: 1; resize: none; max-height: 160px; min-height: 42px;
@@ -1042,8 +1095,25 @@ code.inline {
 .aimee-send { flex: none; border-radius: 22px; height: 42px; }
 
 @media (max-width: 900px) {
-  /* The thread list is a luxury on a phone; the conversation is the point. */
   .aimee { height: calc(100vh - 130px); }
-  .aimee-side { display: none; }
   .aimee-bubble { max-width: 88%; }
+
+  /* The permanent two-column layout doesn't fit a phone, but the thread list
+     itself is not a luxury — without it there was no way on mobile to see an
+     older chat, switch to one, or delete it; "New chat" was the only reachable
+     button. It becomes a drawer instead of vanishing outright. */
+  .aimee-side {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
+    width: min(84vw, 320px); border-radius: 0; box-shadow: var(--shadow-lg, var(--shadow));
+    transform: translateX(-100%); transition: transform .18s ease-out;
+  }
+  .aimee-side.open { transform: none; }
+  .aimee-threads-backdrop {
+    display: none; position: fixed; inset: 0; z-index: 39;
+    background: rgba(0,0,0,.4);
+  }
+  .aimee-side.open + .aimee-threads-backdrop { display: block; }
+  .aimee-threads-toggle {
+    display: inline-flex; align-items: center; gap: 6px; flex: none;
+  }
 }
