@@ -913,7 +913,12 @@ code.inline {
   border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow);
 }
 .aimee-new { width: 100%; }
-.aimee-threads { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+/* overflow-x hidden, not just auto-y: a title too long to truncate would
+   otherwise push a horizontal scrollbar across the whole rail. */
+.aimee-threads {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 3px;
+}
 .aimee-thread {
   position: relative; display: flex; justify-content: space-between; gap: 4px;
   align-items: baseline; padding: 2px 8px 2px 13px; border-radius: 8px;
@@ -931,18 +936,34 @@ code.inline {
   flex: 1; min-width: 0; text-align: left; border: 0; background: transparent;
   cursor: pointer; color: inherit; font: inherit; padding: 8px 0; display: block;
 }
-.aimee-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aimee-thread-cost { font-size: 11px; flex: none; transition: opacity .1s; }
-/* The delete button lives where the cost normally sits and swaps in on hover,
-   rather than adding a second control that permanently competes for space in
-   a list row that is already tight on a 232px rail. */
-.aimee-thread-row { display: flex; align-items: center; gap: 4px; flex: none; }
-.aimee-thread-delete {
-  opacity: 0; flex: none; transition: opacity .1s;
+/* display:block matters. As an inline <span> this has no box to constrain, so
+   text-overflow does nothing and a long title runs straight under the cost
+   beside it — which is exactly what shipped in 5b53b95. */
+.aimee-thread-title {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Cost and delete SWAP rather than sit side by side — a 232px rail has no room
+   for both beside a title. They are STACKED in one grid cell, so the row is
+   only ever as wide as the wider of the two and neither can shove the title
+   into the other (the overlap that shipped in 5b53b95).
+ *
+ * Toggled with opacity, not display. `display: none` cannot take focus, so
+ * :focus-within could never fire and the delete button was unreachable by
+ * keyboard — visible to a mouse and invisible to everything else.
+ * pointer-events keeps the hidden one from swallowing clicks meant for the
+ * cost underneath it. */
+.aimee-thread-row {
+  display: grid; grid-template-areas: "slot"; align-items: center; flex: none;
+}
+.aimee-thread-cost, .aimee-thread-delete {
+  grid-area: slot; transition: opacity .1s;
+}
+.aimee-thread-cost { font-size: 11px; justify-self: end; }
+.aimee-thread-delete { opacity: 0; pointer-events: none; justify-self: end; }
 .aimee-thread:hover .aimee-thread-delete,
-.aimee-thread:focus-within .aimee-thread-delete { opacity: 1; }
-.aimee-thread:hover .aimee-thread-cost { opacity: 0; width: 0; overflow: hidden; }
+.aimee-thread:focus-within .aimee-thread-delete { opacity: 1; pointer-events: auto; }
+.aimee-thread:hover .aimee-thread-cost,
+.aimee-thread:focus-within .aimee-thread-cost { opacity: 0; }
 
 .aimee-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column;
