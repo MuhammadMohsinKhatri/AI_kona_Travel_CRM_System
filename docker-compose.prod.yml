@@ -66,6 +66,21 @@ services:
     volumes:
       # session + brand caches shared with the worker, survive deploys
       - konaos_cache:/app/cache
+    # `backend` is too common a service name to be safe on a shared host. The
+    # frontend is multi-homed (default + the external `web` ingress network —
+    # see docker-compose.shared-ingress.yml), and Docker's embedded DNS answers
+    # a lookup from ALL of a container's networks. Another stack on `web` with
+    # its own service called `backend` therefore wins the name half the time,
+    # and nginx proxies the dashboard's API to a stranger's app — which is not
+    # a 502 but a 200 full of someone else's data, including a login form that
+    # posts credentials there. Diagnosed 2026-08-07.
+    #
+    # `default` must be named explicitly here: naming any network for a service
+    # replaces the implicit default rather than adding to it.
+    networks:
+      default:
+        aliases:
+          - konaice-backend
     depends_on:
       db:
         condition: service_healthy
