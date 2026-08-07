@@ -88,21 +88,65 @@ def capabilities(
             for t in all_tools()
         ],
         "budget": ai_budget.status(db),
-        "suggestions": [
-            {"icon": "📅", "label": "What's on this week?",
-             "text": "What events are on this week?"},
-            {"icon": "💰", "label": "Sales this month",
-             "text": "Show me the sales report for this month"},
-            {"icon": "🏆", "label": "Top clients",
-             "text": "Who are our top 10 clients this year by revenue?"},
-            {"icon": "📊", "label": "Yesterday's events",
-             "text": "What events did we have yesterday and what did they invoice?"},
-            {"icon": "💵", "label": "Record cash",
-             "text": "Record $60 cash for "},
-            {"icon": "🗓️", "label": "Tomorrow",
-             "text": "What's booked for tomorrow?"},
-        ],
+        "suggestions": _suggestions(),
     }
+
+
+def _suggestions() -> list[dict[str, str]]:
+    """The empty state's clickable questions, grouped.
+
+    Gated on what is actually configured. A chip for "where are the trucks"
+    on an install with no Samsara token is worse than no chip at all: it
+    advertises a capability, and the first thing a new user clicks answers
+    "I can't reach the trucks". The empty state exists to make the FIRST
+    interaction succeed.
+    """
+    from app.integrations import gmaps, samsara, square_labor
+
+    items: list[dict[str, str]] = [
+        {"group": "Events & money", "icon": "📅", "label": "What's on this week?",
+         "text": "What events are on this week?"},
+        {"group": "Events & money", "icon": "🗓️", "label": "Tomorrow",
+         "text": "What's booked for tomorrow?"},
+        {"group": "Events & money", "icon": "📊", "label": "Yesterday's events",
+         "text": "What events did we have yesterday and what did they invoice?"},
+        {"group": "Events & money", "icon": "💰", "label": "Sales this month",
+         "text": "Show me the sales report for this month"},
+        {"group": "Events & money", "icon": "🏆", "label": "Top clients",
+         "text": "Who are our top 10 clients this year by revenue?"},
+        # Trailing space, and no amount or event: this one is a prompt to keep
+        # typing rather than a question to fire off. The others are complete.
+        {"group": "Events & money", "icon": "💵", "label": "Record cash",
+         "text": "Record $60 cash for "},
+    ]
+
+    if samsara.configured():
+        items += [
+            {"group": "Trucks & staff", "icon": "🚚", "label": "Where are the trucks?",
+             "text": "Where are all the trucks right now?"},
+            {"group": "Trucks & staff", "icon": "⛽", "label": "Anything need fuel?",
+             "text": "Does any truck need fuel?"},
+        ]
+    if samsara.configured() and gmaps.configured():
+        items.append(
+            {"group": "Trucks & staff", "icon": "📍", "label": "Truck ETA",
+             "text": "How far is KEV1 from "},
+        )
+    if gmaps.configured():
+        items += [
+            {"group": "Trucks & staff", "icon": "🗺️", "label": "Plan a route",
+             "text": "Best order to visit these stops: "},
+            {"group": "Trucks & staff", "icon": "🏠", "label": "Street view",
+             "text": "Show me a street view of "},
+        ]
+    if square_labor.configured():
+        items += [
+            {"group": "Trucks & staff", "icon": "⏰", "label": "Who's clocked in?",
+             "text": "Who is clocked in right now?"},
+            {"group": "Trucks & staff", "icon": "🧑‍🍳", "label": "Who worked today?",
+             "text": "Who worked today and for how long?"},
+        ]
+    return items
 
 
 @router.get("/conversations")

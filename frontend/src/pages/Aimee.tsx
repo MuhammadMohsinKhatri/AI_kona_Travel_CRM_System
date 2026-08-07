@@ -29,6 +29,25 @@ import { DeleteButton, money } from "../components/ui";
 
 type Busy = "" | "thinking" | "listening" | "reading";
 
+type Suggestion = AimeeCapabilities["suggestions"][number];
+
+/** Suggestions in their server-given order, bucketed by group.
+ *
+ *  Insertion order, not alphabetical: the backend decides what a new user
+ *  should see first, and which groups appear at all depends on what is
+ *  configured. Sorting here would quietly override that.
+ */
+function groupSuggestions(items: Suggestion[]): [string, Suggestion[]][] {
+  const out: [string, Suggestion[]][] = [];
+  for (const item of items) {
+    const key = item.group || "";
+    const bucket = out.find(([g]) => g === key);
+    if (bucket) bucket[1].push(item);
+    else out.push([key, [item]]);
+  }
+  return out;
+}
+
 export default function Aimee() {
   const [caps, setCaps] = useState<AimeeCapabilities | null>(null);
   const [conversations, setConversations] = useState<AimeeConversation[]>([]);
@@ -43,6 +62,9 @@ export default function Aimee() {
   // latter, where it starts closed so a chat doesn't open behind it.
   const [threadsOpen, setThreadsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  // Held here rather than inside Composer so a half-finished suggestion can
+  // put the caret where the user has to keep typing.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     api.aimeeCapabilities().then((c) => { setCaps(c); setBudget(c.budget); })
@@ -79,6 +101,28 @@ export default function Aimee() {
     setText("");
     setError("");
     setThreadsOpen(false);
+  }
+
+  /** A suggestion chip. Sends it, or hands it to the box to be finished.
+   *
+   *  A chip whose text ends in a space is deliberately incomplete — "Record
+   *  $60 cash for ", "Show me a street view of ". Sending those verbatim is
+   *  what produced "It seems like your message was cut off": the chip asked
+   *  half a question on the user's behalf and Aimee had to ask for the rest.
+   *  The trailing space IS the signal; it is the difference between a question
+   *  and an opening. */
+  function startFrom(text: string) {
+    if (text.endsWith(" ")) {
+      setText(text);
+      inputRef.current?.focus();
+      // Caret to the end, or typing lands in front of the prefix.
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (el) el.setSelectionRange(el.value.length, el.value.length);
+      });
+      return;
+    }
+    ask(text);
   }
 
   async function deleteThread(id: number) {
@@ -248,14 +292,25 @@ export default function Aimee() {
                 Ask anything about your events, sales or clients. Click one to
                 start, or type your own — you can also speak or send a photo.
               </p>
-              <div className="aimee-suggestions">
-                {(caps?.suggestions ?? []).map((s) => (
-                  <button key={s.label} className="aimee-chip" onClick={() => ask(s.text)}>
-                    <span className="aimee-chip-icon">{s.icon}</span>
-                    <span>{s.label}</span>
-                  </button>
-                ))}
-              </div>
+              {groupSuggestions(caps?.suggestions ?? []).map(([group, items]) => (
+                <div key={group}>
+                  {group && <div className="aimee-suggest-group">{group}</div>}
+                  <div className="aimee-suggestions">
+                    {items.map((s) => (
+                      <button
+                        key={s.label}
+                        className="aimee-chip"
+                        onClick={() => startFrom(s.text)}
+                        title={s.text.endsWith(" ") ? "Fills the box — finish the sentence" : s.text}
+                      >
+                        <span className="aimee-chip-icon">{s.icon}</span>
+                        <span>{s.label}</span>
+                        {s.text.endsWith(" ") && <span className="aimee-chip-more">…</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
               {caps && (
                 <details className="aimee-what">
                   <summary>What Aimee can reach ({caps.tools.length})</summary>
@@ -299,6 +354,7 @@ export default function Aimee() {
         <Composer
           text={text}
           setText={setText}
+          inputRef={inputRef}
           disabled={!!busy}
           onSend={() => ask(text)}
           onVoice={(file) =>
@@ -528,10 +584,11 @@ function Inline({ text }: { text: string }) {
 
 /** The input row: type, speak, or send a picture. */
 function Composer({
-  text, setText, disabled, onSend, onVoice, onImage,
+  text, setText, inputRef, disabled, onSend, onVoice, onImage,
 }: {
   text: string;
   setText: (v: string) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement>;
   disabled: boolean;
   onSend: () => void;
   onVoice: (file: File) => void;
@@ -611,6 +668,7 @@ function Composer({
       </button>
 
       <textarea
+        ref={inputRef}
         className="aimee-input"
         placeholder="Ask Aimee anything…"
         value={text}

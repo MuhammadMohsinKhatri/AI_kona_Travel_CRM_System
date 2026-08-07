@@ -1017,6 +1017,16 @@ code.inline {
 }
 .aimee-chip:hover { border-color: var(--brand); transform: translateY(-1px); }
 .aimee-chip-icon { font-size: 18px; flex: none; }
+/* Marks a chip that fills the box rather than sending — "Record cash …" needs
+   an event before it is a question. */
+.aimee-chip-more { margin-left: auto; color: var(--text-dim); flex: none; }
+/* Group headings appear once there are enough chips to be a wall. Left-aligned
+   against the centred empty state on purpose: they label a list, and a centred
+   label floating over a grid reads as a heading for the whole page. */
+.aimee-suggest-group {
+  text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-dim); margin: 14px 0 -4px;
+}
 .aimee-what { text-align: left; margin-top: 18px; font-size: 13px; }
 .aimee-what summary { cursor: pointer; color: var(--text-dim); }
 .aimee-what ul { list-style: none; padding: 10px 0 0; margin: 0; }

@@ -736,7 +736,10 @@ export interface AimeeTurn {
 export interface AimeeCapabilities {
   tools: { name: string; description: string; kind: "read" | "write" }[];
   budget: AimeeBudget;
-  suggestions: { icon: string; label: string; text: string }[];
+  /** `group` buckets them in the empty state. A `text` ending in a space is a
+   *  prompt to keep typing (an amount, an address) rather than a complete
+   *  question — the chat puts it in the box instead of sending it. */
+  suggestions: { icon: string; label: string; text: string; group?: string }[];
 }
 
 export interface KonaosSessionStatus {
