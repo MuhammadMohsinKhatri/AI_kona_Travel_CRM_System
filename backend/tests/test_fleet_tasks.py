@@ -220,3 +220,84 @@ def test_suppressed_events_are_not_re_sent_on_the_next_pass(monkeypatch):
     second = fleet_tasks.poll_clock_events()
     assert second["notified"] == 0
     assert second["suppressed"] == 0
+
+
+# ── the DAILY REPORT, not just the alert ────────────────────────────────────
+
+def test_the_report_goes_out_even_when_every_truck_is_fine(monkeypatch):
+    """The difference between an alert and a report. A quiet phone is
+    ambiguous — either every truck is full or the job died three weeks ago —
+    and not having to wonder which is the whole point of a daily check."""
+    sent = []
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Truck 1", "percent": 90, "at": ""},
+    ])
+    monkeypatch.setattr(fleet_tasks.notify, "send_message",
+                        lambda db, text: sent.append(text) or {"sent": 2})
+    result = fleet_tasks.check_fuel_levels()
+
+    assert result["alerts_created"] == 0      # nothing wrong
+    assert result["report_sent"] == 2         # ...and it still reported
+    assert "All trucks above" in sent[0]
+
+
+def test_the_report_lists_every_truck_worst_first(monkeypatch):
+    sent = []
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Full One", "percent": 86, "at": ""},
+        {"id": "v2", "name": "Empty One", "percent": 6, "at": ""},
+        {"id": "v3", "name": "Low One", "percent": 15, "at": ""},
+    ])
+    monkeypatch.setattr(fleet_tasks.notify, "send_message",
+                        lambda db, text: sent.append(text) or {"sent": 1})
+    fleet_tasks.check_fuel_levels()
+
+    body = sent[0]
+    assert body.index("Empty One") < body.index("Low One") < body.index("Full One")
+    assert "2 trucks below" in body
+
+
+def test_a_low_truck_is_not_messaged_twice(monkeypatch):
+    """One digest carries every truck, so a per-alert push as well would say
+    the same thing about the same truck in two different messages."""
+    sent = []
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Truck 1", "percent": 12, "at": ""},
+    ])
+    monkeypatch.setattr(fleet_tasks.notify, "send_message",
+                        lambda db, text: sent.append(text) or {"sent": 1})
+    def fail(*a, **k):
+        raise AssertionError("notify_alert must not push — the digest covers it")
+    monkeypatch.setattr(fleet_tasks.notify, "notify_alert", fail)
+
+    result = fleet_tasks.check_fuel_levels()
+    assert result["alerts_created"] == 1     # still on Needs Attention
+    assert len(sent) == 1                    # ...but exactly one message
+
+
+def test_a_truck_with_no_reading_is_shown_as_unknown_not_empty(monkeypatch):
+    sent = []
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "No Sender", "percent": None, "at": ""},
+        {"id": "v2", "name": "Fine", "percent": 70, "at": ""},
+    ])
+    monkeypatch.setattr(fleet_tasks.notify, "send_message",
+                        lambda db, text: sent.append(text) or {"sent": 1})
+    fleet_tasks.check_fuel_levels()
+
+    assert "No Sender — no reading" in sent[0]
+    assert "All trucks above" in sent[0]   # unknown is not counted as low
+
+
+def test_a_truck_name_cannot_break_telegrams_html(monkeypatch):
+    """An unescaped & or < makes Telegram reject the whole message, so one
+    oddly-named truck would silence the entire morning report."""
+    sent = []
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Kona & Tom's <Spare>", "percent": 50, "at": ""},
+    ])
+    monkeypatch.setattr(fleet_tasks.notify, "send_message",
+                        lambda db, text: sent.append(text) or {"sent": 1})
+    fleet_tasks.check_fuel_levels()
+
+    assert "&amp;" in sent[0] and "&lt;Spare&gt;" in sent[0]

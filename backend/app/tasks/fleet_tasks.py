@@ -117,14 +117,73 @@ def check_fuel_levels() -> dict[str, Any]:
             )
             db.add(alert)
             db.flush()
-            notify.notify_alert(db, alert, event_name=name)
+            # No per-alert push: the digest below carries every truck, and one
+            # message that says "KEV 5 is low" beats three that each say it
+            # about a different truck. The row still exists for Needs Attention
+            # and still deep-links from the digest.
+            alert.notified = True
             created += 1
+
+        # THE REPORT. Sent every morning whether or not anything is wrong,
+        # because "nothing arrived" is ambiguous — a quiet phone means either
+        # every truck is full or the job stopped running three weeks ago, and
+        # the whole point of a daily check is not having to wonder which.
+        report = notify.send_message(db, _fuel_report(readings))
 
         db.commit()
         return {"checked": len(readings), "alerts_created": created,
-                "alerts_resolved": resolved}
+                "alerts_resolved": resolved,
+                "report_sent": report.get("sent", 0),
+                "report_skipped": bool(report.get("skipped"))}
+
     finally:
         db.close()
+
+
+
+def _fuel_report(readings: list[dict[str, Any]]) -> str:
+    """The morning message: every truck, worst first.
+
+    Worst first because the one that matters should not be third in a list
+    somebody reads on a phone while walking to the yard. Telegram HTML, which
+    is what notify.send_message sends with.
+    """
+    def sort_key(r: dict[str, Any]) -> tuple[int, float]:
+        pct = r.get("percent")
+        # Unknown sorts after everything known, not as if it were empty.
+        return (1, 0.0) if not isinstance(pct, (int, float)) else (0, float(pct))
+
+    lines = [f"⛽ <b>Fuel check</b> — {datetime.now(_TZ).strftime('%a %d %b')}"]
+    for r in sorted(readings, key=sort_key):
+        pct = r.get("percent")
+        name = _esc(r.get("name") or "unnamed")
+        if not isinstance(pct, (int, float)):
+            lines.append(f"• {name} — no reading")
+            continue
+        if pct <= samsara.CRITICAL_FUEL_PERCENT:
+            mark = "🔴"
+        elif pct <= samsara.LOW_FUEL_PERCENT:
+            mark = "🟠"
+        else:
+            mark = "🟢"
+        lines.append(f"{mark} {name} — <b>{pct:.0f}%</b>")
+
+    low = [r for r in readings
+           if isinstance(r.get("percent"), (int, float))
+           and r["percent"] <= samsara.LOW_FUEL_PERCENT]
+    lines.append("")
+    lines.append(
+        f"{len(low)} truck{'' if len(low) == 1 else 's'} below "
+        f"{samsara.LOW_FUEL_PERCENT}% — needs fuel." if low
+        else f"All trucks above {samsara.LOW_FUEL_PERCENT}%."
+    )
+    return "\n".join(lines)
+
+
+def _esc(text: str) -> str:
+    """Telegram's HTML parser rejects a stray & or < in a truck name."""
+    return (str(text).replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def _cursor(db) -> dict[str, list[str]]:
