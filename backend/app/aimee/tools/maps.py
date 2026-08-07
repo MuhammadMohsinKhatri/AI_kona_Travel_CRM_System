@@ -216,7 +216,9 @@ def plan_truck_route(db: Session, stops: list, depart_at: str = "") -> ToolResul
     running_label="Finding the street view",
     description=(
         "A Street View photo of an address, so a driver can see what they are "
-        "looking for before they get there. Returns an image the chat displays."
+        "looking for before they get there. The chat displays the photo itself "
+        "— just say which address it shows. Never write an image link or a "
+        "maps.googleapis.com URL; there is no URL for you to use."
     ),
     parameters={
         "type": "object",
@@ -243,8 +245,19 @@ def get_street_view(db: Session, location: str) -> ToolResult:
     except gmaps.MapsError as e:
         return ToolResult(ok=False, error=str(e))
 
-    return ToolResult(ok=True, data={
-        "address": place["address"],
-        "image_url": sign_media("street_view", place["address"]),
-        "note": "Image is displayed to the user; describe it only if asked.",
-    })
+    return ToolResult(
+        ok=True,
+        # No URL in here. Handed one, the model rewrote it into an invented
+        # maps.googleapis.com link carrying `key=YOUR_API_KEY` and printed it
+        # as raw markdown. It only needs to know the picture is on screen.
+        data={
+            "address": place["address"],
+            "photo_shown_to_user": True,
+            "note": "The photo is already displayed. Do not write a link.",
+        },
+        display={
+            "kind": "image",
+            "url": sign_media("street_view", place["address"]),
+            "alt": f"Street View of {place['address']}",
+        },
+    )

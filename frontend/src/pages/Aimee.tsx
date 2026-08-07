@@ -321,15 +321,34 @@ function Bubble({
   onDecide: (m: AimeeMessage, approve: boolean) => void;
 }) {
   if (message.role === "tool") {
+    // Anything visual comes from the TOOL's own result, never from the
+    // assistant's prose. Handed a Street View URL, the model rewrote it into
+    // an invented maps.googleapis.com link with `key=YOUR_API_KEY` and printed
+    // it as raw markdown. The picture is data, so the data renders it.
+    const display = message.tool_result?._display as
+      | { kind?: string; url?: string; alt?: string }
+      | undefined;
     return (
-      <div className="aimee-step">
-        <span className={"aimee-step-dot" + (message.tool_ok ? " ok" : " bad")} />
-        {message.tool_ok ? "Checked" : "Couldn't check"}{" "}
-        <strong>{(message.tool_name || "").replace(/_/g, " ")}</strong>
-        {!message.tool_ok && message.tool_result?.error != null && (
-          <span className="muted"> — {String(message.tool_result.error)}</span>
+      <>
+        <div className="aimee-step">
+          <span className={"aimee-step-dot" + (message.tool_ok ? " ok" : " bad")} />
+          {message.tool_ok ? "Checked" : "Couldn't check"}{" "}
+          <strong>{(message.tool_name || "").replace(/_/g, " ")}</strong>
+          {!message.tool_ok && message.tool_result?.error != null && (
+            <span className="muted"> — {String(message.tool_result.error)}</span>
+          )}
+        </div>
+        {display?.kind === "image" && display.url && (
+          <div className="aimee-msg assistant">
+            <img
+              className="aimee-photo"
+              src={display.url}
+              alt={display.alt || "Image"}
+              loading="lazy"
+            />
+          </div>
         )}
-      </div>
+      </>
     );
   }
 

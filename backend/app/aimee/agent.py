@@ -229,9 +229,11 @@ def run_turn(
             else:
                 result = spec.run(db=db, **args)
                 result_for_model = result.for_model()
+                # The stored record may carry a _display block the model never
+                # sees (images, chiefly) — see ToolResult.display.
                 record = ChatMessage(
                     conversation_id=conversation.id, role="tool", tool_name=name,
-                    tool_args=args, tool_result=result_for_model, tool_ok=result.ok,
+                    tool_args=args, tool_result=result.for_record(), tool_ok=result.ok,
                 )
                 # A write stops here. The model is told it is awaiting
                 # confirmation so it describes the change rather than claiming

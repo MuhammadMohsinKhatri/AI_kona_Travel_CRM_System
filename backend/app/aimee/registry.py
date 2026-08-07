@@ -46,6 +46,16 @@ class ToolResult:
     retryable: bool = False
     # Write tools only: the change awaiting confirmation.
     proposal: Optional[dict[str, Any]] = None
+    # Rendered by the CHAT, never shown to the model.
+    #
+    # Anything a language model is handed, it will paraphrase. Given a Street
+    # View URL it produced a plausible-looking maps.googleapis.com link with
+    # `key=YOUR_API_KEY` in it — an invented URL that renders nothing and
+    # would have leaked the key's location had it guessed better. A URL is not
+    # prose and there is no reason for it to pass through a model at all, so
+    # this half goes straight to the UI and the model is simply told the image
+    # is already on screen.
+    display: Optional[dict[str, Any]] = None
 
     def for_model(self) -> dict[str, Any]:
         """The shape the model sees. Deliberately small and literal."""
@@ -55,6 +65,17 @@ class ToolResult:
             return {"ok": True, "awaiting_confirmation": True,
                     "proposed": self.proposal.get("summary", "")}
         return {"ok": True, "data": self.data}
+
+    def for_record(self) -> dict[str, Any]:
+        """What is stored on the message — the model's view plus the UI's.
+
+        Kept under a underscored key so it cannot collide with a tool's own
+        data, and stripped before anything is sent upstream.
+        """
+        record = self.for_model()
+        if self.display is not None:
+            record = {**record, "_display": self.display}
+        return record
 
 
 @dataclass

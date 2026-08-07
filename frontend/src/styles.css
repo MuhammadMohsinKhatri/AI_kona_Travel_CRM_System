@@ -1050,6 +1050,14 @@ code.inline {
 .aimee-msg.user .aimee-bubble code { background: rgba(255,255,255,.2); }
 .aimee-msg-cost { font-size: 11px; margin-top: 3px; cursor: default; }
 
+/* A photo a tool produced (Street View). Served from our own /api/aimee/media
+   behind a signature, never a maps.googleapis.com URL — see api/routes/media.py
+   on why the key never reaches the browser. */
+.aimee-photo {
+  max-width: min(78%, 520px); width: 100%; height: auto; display: block;
+  border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+
 /* Tool calls are evidence of work, not conversation — a quiet chip rather
    than a bubble, in the same rounded-pill language as everything else. */
 .aimee-step {

@@ -14,6 +14,7 @@ os.environ["SQUARE_PROVIDER"] = "mock"
 os.environ["OPENAI_PROVIDER"] = "mock"
 os.environ["TELEGRAM_PROVIDER"] = "mock"
 
+import json  # noqa: E402
 import time  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 
@@ -156,3 +157,43 @@ def test_the_signature_covers_the_expiry_too():
     expiry, and a leaked link would never stop working."""
     sig = media._sign("street_view", "28 Alco Place", 1000)
     assert media._sign("street_view", "28 Alco Place", 999999999) != sig
+
+
+# ── the model never gets a URL ──────────────────────────────────────────────
+
+def test_street_view_hides_the_url_from_the_model(monkeypatch):
+    """Handed a Street View link, the model rewrote it into an invented
+    maps.googleapis.com URL carrying `key=YOUR_API_KEY` and printed it as raw
+    markdown. Anything a model is given, it will paraphrase — so the URL goes
+    to the UI only, and the model is told the picture is already on screen."""
+    monkeypatch.setattr(settings, "google_maps_api_key", "test-key")
+    monkeypatch.setattr(
+        gmaps, "geocode",
+        lambda a: {"address": "28 Alco Pl, Halethorpe, MD 21227",
+                   "latitude": 39.2, "longitude": -76.6},
+    )
+    r = maps.get_street_view(db=None, location="28 Alco Place")
+    assert r.ok is True
+
+    seen_by_model = json.dumps(r.for_model())
+    assert "http" not in seen_by_model, "the model must not be handed a URL"
+    assert "googleapis" not in seen_by_model
+    assert "/api/aimee/media" not in seen_by_model
+
+    # ...while the UI still gets exactly one, pointing at our own proxy.
+    assert r.display and r.display["kind"] == "image"
+    assert r.display["url"].startswith("/api/aimee/media/street_view")
+    assert "test-key" not in r.display["url"]
+
+
+def test_the_display_block_reaches_the_stored_record(monkeypatch):
+    """for_record() is what the chat reads back; losing _display here would
+    show the step line with no photo under it."""
+    monkeypatch.setattr(settings, "google_maps_api_key", "test-key")
+    monkeypatch.setattr(
+        gmaps, "geocode",
+        lambda a: {"address": "28 Alco Pl", "latitude": 39.2, "longitude": -76.6},
+    )
+    rec = maps.get_street_view(db=None, location="28 Alco Place").for_record()
+    assert rec["_display"]["kind"] == "image"
+    assert rec["ok"] is True
