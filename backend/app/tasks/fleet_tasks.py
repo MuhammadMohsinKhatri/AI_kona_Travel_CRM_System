@@ -21,6 +21,7 @@ Fuel and clock events behave differently once written, on purpose:
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,6 +31,8 @@ from app.db.base import SessionLocal
 from app.integrations import samsara, square_labor
 from app.models import Alert, AppSetting
 from app.tasks.celery_app import celery
+
+log = logging.getLogger(__name__)
 
 _TZ = ZoneInfo("America/New_York")
 
@@ -44,6 +47,12 @@ CLOCK_CURSOR_KEY = "fleet_clock_cursor"
 # brands is comfortably more ids than could ever need to be remembered to avoid
 # a duplicate, since nothing outside this window is checked anyway.
 CURSOR_KEEP = 500
+# A circuit breaker, not a business rule. Two brands over two days is a handful
+# of shifts; dozens means the upstream query stopped being a day query — which
+# is exactly what a wrong Square filter key looks like, since it returns 200 OK
+# with the whole account's history. Without this, one silent filter regression
+# is hundreds of Telegram messages about shifts from three years ago.
+MAX_NOTIFY_PER_PASS = 12
 
 
 @celery.task(name="app.tasks.fleet_tasks.check_fuel_levels")
@@ -162,27 +171,41 @@ def poll_clock_events() -> dict[str, Any]:
         cursor = _cursor(db)
         starts, ends = set(cursor["starts"]), set(cursor["ends"])
         notified = 0
+        suppressed = 0
 
         for r in rows:
             tid = str(r.get("id") or f"{r['name']}|{r['clock_in']}")
+            events: list[str] = []
             if r["clock_in"] and tid not in starts:
                 starts.add(tid)
-                _push_clock_alert(
-                    db, r, f"{r['name']} clocked in at {_local_time(r['clock_in'])}"
-                )
-                notified += 1
+                events.append(f"{r['name']} clocked in at {_local_time(r['clock_in'])}")
             if r["clock_out"] and tid not in ends:
                 ends.add(tid)
                 hours = f" ({r['hours']}h)" if r.get("hours") else ""
-                _push_clock_alert(
-                    db, r,
-                    f"{r['name']} clocked out at {_local_time(r['clock_out'])}{hours}",
+                events.append(
+                    f"{r['name']} clocked out at {_local_time(r['clock_out'])}{hours}"
                 )
+            for issue in events:
+                # Past the breaker the ids are still recorded, so the flood is
+                # swallowed once rather than re-sent on the next pass; only the
+                # notification is dropped.
+                if notified >= MAX_NOTIFY_PER_PASS:
+                    suppressed += 1
+                    continue
+                _push_clock_alert(db, r, issue)
                 notified += 1
+
+        if suppressed:
+            log.error(
+                "poll_clock_events: %d clock events suppressed after hitting the "
+                "%d-per-pass cap across %d timecards — the Square day filter is "
+                "probably not being applied",
+                suppressed, MAX_NOTIFY_PER_PASS, len(rows),
+            )
 
         _save_cursor(db, {"starts": list(starts), "ends": list(ends)})
         db.commit()
-        return {"checked": len(rows), "notified": notified}
+        return {"checked": len(rows), "notified": notified, "suppressed": suppressed}
     finally:
         db.close()
 

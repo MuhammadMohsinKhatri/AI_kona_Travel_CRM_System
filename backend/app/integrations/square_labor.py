@@ -129,12 +129,19 @@ def timecards(on: Optional[date] = None, brand: str = "") -> list[dict[str, Any]
     for b in brands:
         try:
             names = team_members(b)
+            # `filter.start`, NOT `filter.start_at`.
+            #
+            # Square accepts an unknown filter key with a 200 and silently
+            # applies NO filter — asking for one day returned 200 timecards
+            # going back years, and the caller cannot tell that from a genuinely
+            # busy day. The failure is invisible at the HTTP layer, which is why
+            # test_square_labor.py asserts the shape of this body rather than
+            # trusting the status code.
             data = _post(b, "/v2/labor/timecards/search", {
                 "query": {
                     "filter": {
-                        "start_at": {"start_at": start, "end_at": end},
+                        "start": {"start_at": start, "end_at": end},
                     },
-                    "sort": {"field": "START_AT", "order": "ASC"},
                 },
                 "limit": 200,
             })

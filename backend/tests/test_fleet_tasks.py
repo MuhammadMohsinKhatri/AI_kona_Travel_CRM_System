@@ -186,3 +186,37 @@ def test_unconfigured_square_skips_cleanly(monkeypatch):
     monkeypatch.setattr(settings, "square_tom_token", "")
     result = fleet_tasks.poll_clock_events()
     assert "skipped" in result
+
+
+def test_a_flood_of_clock_events_is_capped_not_broadcast(monkeypatch):
+    """The circuit breaker. A wrong Square filter key returns 200 OK with the
+    whole account's history, and every row looks like a new clock-in — so the
+    failure mode is hundreds of Telegram messages about shifts from years ago,
+    not an error anyone would see. Cap the pass and log loudly instead."""
+    flood = [
+        {**SHIFT_CLOSED, "id": f"tc-{i}", "name": f"Person {i}"}
+        for i in range(40)
+    ]
+    monkeypatch.setattr(square_labor, "timecards", lambda day=None: flood)
+    result = fleet_tasks.poll_clock_events()
+
+    assert result["notified"] == fleet_tasks.MAX_NOTIFY_PER_PASS
+    assert result["suppressed"] > 0
+    db = SessionLocal()
+    assert db.query(Alert).filter(Alert.source == "clock").count() == \
+        fleet_tasks.MAX_NOTIFY_PER_PASS
+    db.close()
+
+
+def test_suppressed_events_are_not_re_sent_on_the_next_pass(monkeypatch):
+    """Ids are recorded even when the notification is dropped, so a flood is
+    swallowed once rather than re-delivered every 20 minutes forever."""
+    flood = [
+        {**SHIFT_CLOSED, "id": f"tc-{i}", "name": f"Person {i}"}
+        for i in range(40)
+    ]
+    monkeypatch.setattr(square_labor, "timecards", lambda day=None: flood)
+    fleet_tasks.poll_clock_events()
+    second = fleet_tasks.poll_clock_events()
+    assert second["notified"] == 0
+    assert second["suppressed"] == 0
