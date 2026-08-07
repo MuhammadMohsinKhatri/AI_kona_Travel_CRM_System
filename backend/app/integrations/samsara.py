@@ -41,6 +41,27 @@ LOW_FUEL_PERCENT = 25
 CRITICAL_FUEL_PERCENT = 10
 
 
+def fuel_status(percent: Any) -> tuple[str, str]:
+    """``(status, marker)`` for one reading — "low", "🟠".
+
+    One definition, used by the nightly Telegram report AND by the chat tool.
+    Asked "today's fuel report" in chat, Aimee printed a bare table of numbers:
+    it had no way to know 15% was the one that mattered, because the tool only
+    handed it percentages. The judgement has to travel WITH the data, or every
+    surface re-derives it and they drift.
+
+    Unknown gets its own marker rather than borrowing empty's. "No sender
+    fitted" and "nearly out" prompt opposite actions.
+    """
+    if not isinstance(percent, (int, float)):
+        return "unknown", "⚪"
+    if percent <= CRITICAL_FUEL_PERCENT:
+        return "critical", "🔴"
+    if percent <= LOW_FUEL_PERCENT:
+        return "low", "🟠"
+    return "ok", "🟢"
+
+
 class SamsaraError(RuntimeError):
     pass
 

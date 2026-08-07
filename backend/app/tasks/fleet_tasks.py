@@ -157,15 +157,10 @@ def _fuel_report(readings: list[dict[str, Any]]) -> str:
     for r in sorted(readings, key=sort_key):
         pct = r.get("percent")
         name = _esc(r.get("name") or "unnamed")
-        if not isinstance(pct, (int, float)):
-            lines.append(f"• {name} — no reading")
+        status, mark = samsara.fuel_status(pct)
+        if status == "unknown":
+            lines.append(f"{mark} {name} — no reading")
             continue
-        if pct <= samsara.CRITICAL_FUEL_PERCENT:
-            mark = "🔴"
-        elif pct <= samsara.LOW_FUEL_PERCENT:
-            mark = "🟠"
-        else:
-            mark = "🟢"
         lines.append(f"{mark} {name} — <b>{pct:.0f}%</b>")
 
     low = [r for r in readings

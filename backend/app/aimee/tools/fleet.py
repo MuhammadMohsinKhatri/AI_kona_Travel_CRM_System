@@ -72,7 +72,9 @@ def get_truck_location(db: Session, truck: str = "") -> ToolResult:
     description=(
         "Fuel level per truck, as a percentage. Omit `truck` for the whole "
         "fleet. Use for 'does anything need fuel', 'how much gas is in the "
-        "Catonsville truck'."
+        "Catonsville truck', 'fuel report'. Each truck comes back with a "
+        "`marker` — show it beside the truck in your answer, in a Status "
+        "column if you use a table. Trucks arrive worst-first; keep that order."
     ),
     parameters={
         "type": "object",
@@ -99,15 +101,29 @@ def get_truck_fuel(db: Session, truck: str = "") -> ToolResult:
     if not rows:
         return ToolResult(ok=False, error="No fuel readings available.")
 
+    # The status travels WITH each reading. Handed bare percentages, the model
+    # printed a plain table and 15% sat there looking like any other number —
+    # it had no way to know which one mattered. Same helper the nightly
+    # Telegram report uses, so chat and phone cannot disagree about "low".
+    for r in rows:
+        r["status"], r["marker"] = samsara.fuel_status(r.get("percent"))
+
+    # Worst first, unknowns last: the truck that needs doing something about
+    # should not be fourth in a list.
+    rows.sort(key=lambda r: (
+        (1, 0.0) if not isinstance(r.get("percent"), (int, float))
+        else (0, float(r["percent"]))
+    ))
+
     # "Unknown" and "empty" prompt opposite actions, so a truck with no fuel
     # sender is never counted as low — it is listed separately as unreported.
-    low = [r for r in rows
-           if isinstance(r.get("percent"), (int, float))
-           and r["percent"] <= LOW_FUEL_PERCENT]
-    unreported = [r["name"] for r in rows if not isinstance(r.get("percent"), (int, float))]
+    low = [r for r in rows if r["status"] in ("low", "critical")]
+    unreported = [r["name"] for r in rows if r["status"] == "unknown"]
     return ToolResult(ok=True, data={
         "trucks": rows,
         "low_fuel": [r["name"] for r in low],
         "low_fuel_threshold_percent": LOW_FUEL_PERCENT,
+        "critical_threshold_percent": samsara.CRITICAL_FUEL_PERCENT,
         "no_reading": unreported,
+        "legend": "🔴 critical · 🟠 low · 🟢 ok · ⚪ no reading",
     })

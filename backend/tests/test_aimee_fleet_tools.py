@@ -238,3 +238,48 @@ def test_a_successful_write_still_says_awaiting_confirmation():
     payload = ok.for_model("write")
     assert payload["awaiting_confirmation"] is True
     assert "no_change_staged" not in payload
+
+
+# ── the chat answer carries the same judgement as the phone ─────────────────
+
+def test_fuel_rows_carry_a_status_and_marker(monkeypatch):
+    """Handed bare percentages, the model printed a plain table and 15% sat
+    there looking like any other number. The judgement has to travel WITH the
+    data or the chat cannot show what the report shows."""
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Full", "percent": 83, "at": ""},
+        {"id": "v2", "name": "Low", "percent": 15, "at": ""},
+        {"id": "v3", "name": "Empty", "percent": 6, "at": ""},
+        {"id": "v4", "name": "Silent", "percent": None, "at": ""},
+    ])
+    rows = {t["name"]: t for t in fleet.get_truck_fuel(db=None).data["trucks"]}
+    assert (rows["Empty"]["status"], rows["Empty"]["marker"]) == ("critical", "🔴")
+    assert (rows["Low"]["status"], rows["Low"]["marker"]) == ("low", "🟠")
+    assert (rows["Full"]["status"], rows["Full"]["marker"]) == ("ok", "🟢")
+    assert (rows["Silent"]["status"], rows["Silent"]["marker"]) == ("unknown", "⚪")
+
+
+def test_fuel_rows_come_back_worst_first(monkeypatch):
+    """The truck to do something about should not be fourth in the list, and
+    unknowns sort last rather than as if they were empty."""
+    monkeypatch.setattr(samsara, "fuel_levels", lambda: [
+        {"id": "v1", "name": "Full", "percent": 83, "at": ""},
+        {"id": "v2", "name": "Silent", "percent": None, "at": ""},
+        {"id": "v3", "name": "Empty", "percent": 6, "at": ""},
+        {"id": "v4", "name": "Low", "percent": 15, "at": ""},
+    ])
+    order = [t["name"] for t in fleet.get_truck_fuel(db=None).data["trucks"]]
+    assert order == ["Empty", "Low", "Full", "Silent"]
+
+
+def test_chat_and_the_telegram_report_share_one_definition_of_low():
+    """Two surfaces, one threshold. If these ever diverge, the phone says a
+    truck is fine and the chat says it needs fuel, about the same number."""
+    from app.tasks.fleet_tasks import _fuel_report
+
+    readings = [{"id": "v1", "name": "Borderline",
+                 "percent": samsara.LOW_FUEL_PERCENT, "at": ""}]
+    _, marker = samsara.fuel_status(samsara.LOW_FUEL_PERCENT)
+    assert marker in _fuel_report(readings)          # the report uses it
+    # ...and exactly at the threshold counts as low on both, not just under it.
+    assert samsara.fuel_status(samsara.LOW_FUEL_PERCENT)[0] == "low"
