@@ -197,3 +197,44 @@ def test_the_display_block_reaches_the_stored_record(monkeypatch):
     rec = maps.get_street_view(db=None, location="28 Alco Place").for_record()
     assert rec["_display"]["kind"] == "image"
     assert rec["ok"] is True
+
+
+# ── a failed write must not look like a staged one ──────────────────────────
+
+def test_a_failed_write_says_nothing_was_staged():
+    """The bug this exists for: record_cash correctly refused an ambiguous
+    event name, and the model replied "I'll record $7 for the 2026-07-28 one.
+    Confirm below." Nothing was below — no proposal meant no card. A bare
+    error string leaves room to invent a confirmation step, so the payload
+    now closes it."""
+    from app.aimee.registry import ToolResult
+
+    failed = ToolResult(ok=False, error='"Pikesville" matches 5 events — say which')
+    payload = failed.for_model("write")
+
+    assert payload["ok"] is False
+    assert payload["no_change_staged"] is True
+    assert "confirm below" in payload["next_step"].lower()
+    # and it must not carry the success marker that licenses that phrase
+    assert "awaiting_confirmation" not in payload
+
+
+def test_a_failed_read_is_not_cluttered_with_write_wording():
+    """Reads stage nothing by definition — telling the model so on every
+    failed lookup is noise that dilutes the instruction where it matters."""
+    from app.aimee.registry import ToolResult
+
+    payload = ToolResult(ok=False, error="Samsara is down").for_model("read")
+    assert "no_change_staged" not in payload
+    assert "next_step" not in payload
+
+
+def test_a_successful_write_still_says_awaiting_confirmation():
+    """The other half of the contract — a real proposal must keep licensing
+    the 'confirm below' phrasing, or the useful case breaks with the bug."""
+    from app.aimee.registry import ToolResult
+
+    ok = ToolResult(ok=True, proposal={"summary": "Record $7.00 cash for Pikesville"})
+    payload = ok.for_model("write")
+    assert payload["awaiting_confirmation"] is True
+    assert "no_change_staged" not in payload

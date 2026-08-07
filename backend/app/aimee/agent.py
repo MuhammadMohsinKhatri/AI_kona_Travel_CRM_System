@@ -71,9 +71,15 @@ USING TOOLS
 RECORDING THINGS
 - Tools that change data do not change it when you call them. They prepare the
   change and the person confirms it on screen.
-- So say "I'll record $63 cash for Arbutus — confirm below", never "I've
-  recorded it". Telling somebody a thing is done when it is waiting on them is
-  the one mistake here that costs trust.
+- When the tool returns `awaiting_confirmation`, a card IS on screen. Say
+  "I'll record $63 cash for Arbutus — confirm below", never "I've recorded
+  it". Telling somebody a thing is done when it is waiting on them is the one
+  mistake here that costs trust.
+- When it returns `no_change_staged`, there is NO card. Nothing was prepared
+  and nothing is waiting. Never say "confirm below", never say you will record
+  it, and never pick for them — if the error lists several matching events,
+  show the list and ask which. Pointing at a button that is not there is the
+  same lie as claiming the work is done.
 
 WHAT YOU DO NOT KNOW
 - You cannot see the dashboard, send email or text anyone.
@@ -228,12 +234,16 @@ def run_turn(
                 )
             else:
                 result = spec.run(db=db, **args)
-                result_for_model = result.for_model()
+                # kind matters here: a FAILED WRITE has to tell the model that
+                # nothing was staged, or it describes a confirmation card that
+                # was never rendered. See ToolResult.for_model.
+                result_for_model = result.for_model(spec.kind)
                 # The stored record may carry a _display block the model never
                 # sees (images, chiefly) — see ToolResult.display.
                 record = ChatMessage(
                     conversation_id=conversation.id, role="tool", tool_name=name,
-                    tool_args=args, tool_result=result.for_record(), tool_ok=result.ok,
+                    tool_args=args, tool_result=result.for_record(spec.kind),
+                    tool_ok=result.ok,
                 )
                 # A write stops here. The model is told it is awaiting
                 # confirmation so it describes the change rather than claiming
