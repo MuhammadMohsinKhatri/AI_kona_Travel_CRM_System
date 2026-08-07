@@ -5,8 +5,11 @@ import { useAuth } from "../auth/AuthContext";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@konaice.com");
-  const [password, setPassword] = useState("changeme");
+  // Prefilled for local development only. Vite replaces import.meta.env.DEV
+  // with a literal at build time, so the seed credentials are not merely
+  // hidden in production — they are absent from the bundle entirely.
+  const [email, setEmail] = useState(import.meta.env.DEV ? "admin@konaice.com" : "");
+  const [password, setPassword] = useState(import.meta.env.DEV ? "changeme" : "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -55,7 +58,9 @@ export default function Login() {
         <button className="btn primary" style={{ width: "100%" }} disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
-        <p className="hint">Default seed: admin@konaice.com / changeme</p>
+        {import.meta.env.DEV && (
+          <p className="hint">Default seed: admin@konaice.com / changeme</p>
+        )}
       </form>
     </div>
   );
