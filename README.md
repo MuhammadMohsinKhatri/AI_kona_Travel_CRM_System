@@ -53,7 +53,10 @@ docker compose up --build
 
 - API:      http://localhost:8000  (docs at `/docs`)
 - Frontend: http://localhost:5173
-- Seeded admin login: `admin@konaice.com` / `changeme`
+- Seeded admin login: `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` from your
+  `backend/.env`. Set a real password there **before** exposing the app on a
+  public hostname — the seed defaults are in `.env.example`, and a deployment
+  that never changed them has a published admin account.
 
 Trigger a pipeline run from the dashboard ("Run pipeline") or:
 
