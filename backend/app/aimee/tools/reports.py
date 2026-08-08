@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -41,7 +41,14 @@ def _konaos_call(coro_factory):
         loop.close()
 
 
-def _rows(payload: Any) -> list[dict[str, Any]]:
+def _rows(payload: Any) -> Optional[list[dict[str, Any]]]:
+    """The grid's rows, or None when the payload holds nothing row-shaped.
+
+    None and [] mean very different things and used to be collapsed into the
+    same empty list: "KonaOS said there were none" and "I could not find a list
+    anywhere in this response" both came back as zero rows, and the caller
+    reported the second as confidently as the first.
+    """
     if isinstance(payload, list):
         return payload
     if isinstance(payload, dict):
@@ -49,7 +56,50 @@ def _rows(payload: Any) -> list[dict[str, Any]]:
             value = payload.get(key)
             if isinstance(value, list):
                 return value
-    return []
+    return None
+
+
+def _filter_dropped(payload: Any, sent_from: int, sent_to: int) -> bool:
+    """True when KonaOS's own echo proves our date range never reached the query.
+
+    These grid endpoints answer 200 with a complete, well-formed envelope
+    whether or not they understood the request — the same shape of lie Square
+    tells when handed an unknown filter key (see integrations/square_labor.py).
+    The tell is the echoed window: ask for January-to-August, be told the range
+    was 0, and the zero rows that come back are not an answer about that range.
+
+    Consulted ONLY when there are no rows. If KonaOS returned data it understood
+    enough to be useful, and a surprising echo is not worth failing a usable
+    answer over — this must never turn a working report into an error.
+    """
+    if not isinstance(payload, dict) or not (sent_from or sent_to):
+        return False
+    for key, sent in (("fromDate", sent_from), ("toDate", sent_to)):
+        if not sent:
+            continue
+        try:
+            echoed = int(payload.get(key))
+        except (TypeError, ValueError):
+            continue  # absent or non-numeric proves nothing either way
+        if echoed == 0:
+            return True
+    return False
+
+
+UNREADABLE = (
+    "KonaOS replied, but the response contained nothing row-shaped, so I can't "
+    "tell whether there were no results or the call failed. Treat this as "
+    "unknown rather than as zero."
+)
+
+
+def _dropped_range_error(from_date: str, to_date: str) -> str:
+    return (
+        f"KonaOS ignored the date range {from_date} to {to_date} — it echoed a "
+        "window of 0 and returned no rows, so this is a failed query, not a "
+        "quiet period. Do not read it as zero. The report request needs fixing "
+        "(app/aimee/tools/reports.py)."
+    )
 
 
 @tool(
@@ -75,13 +125,17 @@ def get_sales_report(db: Session, from_date: str, to_date: str) -> ToolResult:
 
     today = date.today()
     client = KonaosClient()
+    from_ms = _ms(from_date, today - timedelta(days=30))
+    to_ms = _ms(to_date, today)
     payload = _konaos_call(lambda: client.get_sales_data_report(
-        fromDate=_ms(from_date, today - timedelta(days=30)),
-        toDate=_ms(to_date, today),
-        offset=0, limit=200,
+        fromDate=from_ms, toDate=to_ms, offset=0, limit=200,
     ))
 
     rows = _rows(payload)
+    if rows is None:
+        return ToolResult(ok=False, error=UNREADABLE)
+    if not rows and _filter_dropped(payload, from_ms, to_ms):
+        return ToolResult(ok=False, error=_dropped_range_error(from_date, to_date))
     return ToolResult(ok=True, data={
         "from": from_date, "to": to_date,
         "row_count": len(rows),
@@ -116,14 +170,19 @@ def get_client_ranking(
 
     today = date.today()
     client = KonaosClient()
+    capped = max(1, min(int(limit or 10), MAX_ROWS))
+    from_ms = _ms(from_date, today - timedelta(days=365))
+    to_ms = _ms(to_date, today)
     payload = _konaos_call(lambda: client.get_client_ranking_report(
-        fromDate=_ms(from_date, today - timedelta(days=365)),
-        toDate=_ms(to_date, today),
-        offset=0, limit=max(1, min(int(limit or 10), MAX_ROWS)),
+        fromDate=from_ms, toDate=to_ms, offset=0, limit=capped,
     ))
 
     rows = _rows(payload)
+    if rows is None:
+        return ToolResult(ok=False, error=UNREADABLE)
+    if not rows and _filter_dropped(payload, from_ms, to_ms):
+        return ToolResult(ok=False, error=_dropped_range_error(from_date, to_date))
     return ToolResult(ok=True, data={
         "from": from_date, "to": to_date,
-        "clients": rows[:max(1, min(int(limit or 10), MAX_ROWS))],
+        "clients": rows[:capped],
     })
